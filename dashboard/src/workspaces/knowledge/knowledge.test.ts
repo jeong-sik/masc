@@ -1,6 +1,6 @@
 import { html } from 'htm/preact'
 import { render } from 'preact'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('uplot', () => {
   class MockUPlot {
@@ -36,6 +36,7 @@ import {
   foldSuccessionChains,
   isSignalBoardPost,
   partitionReactions,
+  preloadKnowledgeSubroute,
   type BoardPostItem,
 } from './index'
 
@@ -69,6 +70,14 @@ function setMultiAccountSessionForTest(): void {
 describe('workspaces/knowledge', () => {
   let container: HTMLDivElement
   const origFetch = globalThis.fetch
+
+  beforeAll(async () => {
+    await Promise.all([
+      preloadKnowledgeSubroute('wiki'),
+      preloadKnowledgeSubroute('artifacts'),
+      preloadKnowledgeSubroute('memory'),
+    ])
+  })
 
   beforeEach(() => {
     resetAuthStateForTests()

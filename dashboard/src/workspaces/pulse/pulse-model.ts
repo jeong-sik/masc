@@ -33,6 +33,7 @@ import type {
 } from './types'
 
 const TURN_SLOT_SECONDS = 1800
+const HANDOFF_MENTION_RE = /@([a-zA-Z0-9_-]{2,48})/g
 
 export interface CompactNumber {
   readonly short: string
@@ -236,9 +237,19 @@ export function buildPulseKpis(params: {
   let activeKpi: PulseKpiCard
   if (keepers.kind === 'value') {
     const total = keepers.data.length
-    const active = keepers.data.filter(isKeeperActive).length
-    const failing = keepers.data.filter(isKeeperFailing).length
-    const resting = keepers.data.filter((k) => !isKeeperFailing(k) && isKeeperPathResting(k)).length
+    let active = 0
+    let failing = 0
+    let resting = 0
+    for (let i = 0; i < total; i++) {
+      const k = keepers.data[i]!
+      if (isKeeperFailing(k)) {
+        failing += 1
+      } else if (isKeeperPathResting(k)) {
+        resting += 1
+      } else if (isKeeperActive(k)) {
+        active += 1
+      }
+    }
     const configured = shell.kind === 'value' ? shell.data.counts.configured_keepers : null
     const denom = configured !== null && configured > total ? configured : total
     const subParts: string[] = []
@@ -645,29 +656,29 @@ export function buildGroupSparklineData(
     }
   }
 
-  const xs: number[] = []
-  const ys: (number | null)[] = []
-  const indexByBucket = new Map<number, number>()
+  const xs = new Array<number>(bucketCount)
+  const ys = new Array<number | null>(bucketCount)
 
   for (let i = 0; i < bucketCount; i += 1) {
     const ts = startBucket + i * bucketSeconds
-    xs.push(ts)
+    xs[i] = ts
     // Emit `null` (gap) before `known_since` or when no keeper reported a turn pulse
     const observed = earliestKnownSince !== null && ts + bucketSeconds > earliestKnownSince
-    ys.push(observed ? 0 : null)
-    indexByBucket.set(ts, i)
+    ys[i] = observed ? 0 : null
   }
 
   let totalTurns = 0
   let okTurns = 0
   let restedTurns = 0
   let failedTurns = 0
-  for (const k of keepers) {
-    if (!k.recent_turns) continue
-    for (const slot of k.recent_turns.slots) {
-      const bucketTs = Math.floor(slot.starts_at / bucketSeconds) * bucketSeconds
-      const idx = indexByBucket.get(bucketTs)
-      if (idx === undefined) continue
+  for (let ki = 0; ki < keepers.length; ki += 1) {
+    const recent = keepers[ki]!.recent_turns
+    if (!recent) continue
+    const slots = recent.slots
+    for (let si = 0; si < slots.length; si += 1) {
+      const slot = slots[si]!
+      const idx = Math.floor((slot.starts_at - startBucket) / bucketSeconds)
+      if (!(idx >= 0 && idx < bucketCount)) continue
       const count = slot.ok + slot.rested + slot.failed
       ys[idx] = (ys[idx] ?? 0) + count
       totalTurns += count
@@ -706,12 +717,25 @@ export function buildCompanyFleetGroups(params: {
   for (const [company, list] of buckets.entries()) {
     const sorted = [...list].sort((a, b) => a.name.localeCompare(b.name))
     const { aligned, totalTurns, okTurns, restedTurns, failedTurns } = buildGroupSparklineData(sorted, win, nowSec)
+    let activeCount = 0
+    let failingCount = 0
+    let restingCount = 0
+    for (let i = 0; i < sorted.length; i += 1) {
+      const k = sorted[i]!
+      if (isKeeperFailing(k)) {
+        failingCount += 1
+      } else if (isKeeperPathResting(k)) {
+        restingCount += 1
+      } else if (isKeeperActive(k)) {
+        activeCount += 1
+      }
+    }
     groups.push({
       company,
       keepers: sorted,
-      activeCount: sorted.filter(isKeeperActive).length,
-      failingCount: sorted.filter(isKeeperFailing).length,
-      restingCount: sorted.filter((k) => !isKeeperFailing(k) && isKeeperPathResting(k)).length,
+      activeCount,
+      failingCount,
+      restingCount,
       turnsInWindow: totalTurns,
       okTurnsInWindow: okTurns,
       restedTurnsInWindow: restedTurns,
@@ -741,19 +765,26 @@ export function buildTeamHandoffPulse(
   const knownSet = new Set(knownKeepers.map(k => k.name))
   const results: PulseHandoffItem[] = []
 
+  const scanMentions = (text: string, author: string, out: Set<string>): void => {
+    if (text.indexOf('@') === -1) return
+    HANDOFF_MENTION_RE.lastIndex = 0
+    let match: RegExpExecArray | null
+    while ((match = HANDOFF_MENTION_RE.exec(text)) !== null) {
+      const candidate = match[1]
+      if (candidate && candidate !== author && (knownSet.size === 0 || knownSet.has(candidate))) {
+        out.add(candidate)
+      }
+    }
+  }
+
   for (const post of posts) {
     if (results.length >= limit) break
     const extractedMentions = new Set<string>()
     for (const m of post.mentions) {
       if (m && m !== post.author) extractedMentions.add(m)
     }
-    const text = `${post.title} ${post.body}`
-    for (const match of text.matchAll(/@([a-zA-Z0-9_-]{2,48})/g)) {
-      const candidate = match[1]
-      if (candidate && candidate !== post.author && (knownSet.size === 0 || knownSet.has(candidate))) {
-        extractedMentions.add(candidate)
-      }
-    }
+    scanMentions(post.title, post.author, extractedMentions)
+    scanMentions(post.body, post.author, extractedMentions)
     const targets = [...extractedMentions]
     const isSuccession = post.succession_parent_id !== null
     const kind: PulseHandoffItem['kind'] = isSuccession

@@ -11,22 +11,57 @@
  */
 
 import { html } from 'htm/preact'
+import { Suspense } from 'preact/compat'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { authSession, currentSessionEpoch, isSingleUserMember, sessionEpoch } from '../../core/auth'
 import { extractObserverTopics, markViewSynced, observerConnected, subscribeObserverFrames, subscribeObserverReconnect, subscribeObserverResync } from '../../core/observer'
+import { createPreloadableLazy } from '../../lib/lazy-component'
 import { parseKeeperEntityTab, type KeeperEntityTab } from '../../routes/router'
+import { registerSubroutePreloader } from '../registry'
 import type { WorkspaceViewProps } from '../types'
 import { KEEPER_ROSTER_OBSERVER_TOPICS, loadKeeperRoster, readKeeperRosterSources } from './keepers-api'
 import { KeeperRoster } from './keeper-roster'
 import { KeeperHeader } from './keeper-header'
 import { KeeperChatTab } from './keeper-chat-tab'
-import { KeeperMemoryTab } from './keeper-memory-tab'
-import { KeeperPortraitCandleTab } from './keeper-portrait-candle-tab'
-import { KeeperWorkSandboxTab } from './keeper-work-sandbox-tab'
-import { KeeperConfigTab } from './keeper-config-tab'
 import { PersonalKeepersWorkspace } from './personal-keepers-workspace'
 import type { KeeperRosterItem } from './types'
 import './keepers.css'
+
+const keeperMemoryTab = createPreloadableLazy<{ readonly keeperName: string }>(
+  async () => (await import('./keeper-memory-tab')).KeeperMemoryTab,
+)
+const keeperPortraitCandleTab = createPreloadableLazy<{
+  readonly keeper: KeeperRosterItem
+  readonly onMutated: () => void
+}>(async () => (await import('./keeper-portrait-candle-tab')).KeeperPortraitCandleTab)
+const keeperWorkSandboxTab = createPreloadableLazy<{
+  readonly keeperName: string
+  readonly onNavigate: WorkspaceViewProps['onNavigate']
+  readonly onInspect: WorkspaceViewProps['onInspect']
+}>(async () => (await import('./keeper-work-sandbox-tab')).KeeperWorkSandboxTab)
+const keeperConfigTab = createPreloadableLazy<{
+  readonly keeperName: string
+  readonly onMutated: () => void
+}>(async () => (await import('./keeper-config-tab')).KeeperConfigTab)
+
+export function preloadKeeperEntityTab(tab: KeeperEntityTab | string): Promise<void> {
+  switch (parseKeeperEntityTab(tab)) {
+    case 'memory':
+      return keeperMemoryTab.preload()
+    case 'portrait-candle':
+      return keeperPortraitCandleTab.preload()
+    case 'work-sandbox':
+      return keeperWorkSandboxTab.preload()
+    case 'config':
+      return keeperConfigTab.preload()
+    default:
+      return Promise.resolve()
+  }
+}
+
+registerSubroutePreloader('keepers', (tab) => {
+  void preloadKeeperEntityTab(tab).catch(() => {})
+})
 
 export function KeepersWorkspace(props: WorkspaceViewProps) {
   const session = authSession.value
@@ -246,33 +281,37 @@ export function KeepersWorkspace(props: WorkspaceViewProps) {
                     onMutated=${() => void refreshRoster('manual')}
                   />
                 `}
-                ${activeTab === 'memory' && html`
-                  <${KeeperMemoryTab}
-                    key=${`mem:${epoch}:${activeKeeper.name}`}
-                    keeperName=${activeKeeper.name}
-                  />
-                `}
-                ${activeTab === 'portrait-candle' && html`
-                  <${KeeperPortraitCandleTab}
-                    key=${`pc:${epoch}:${activeKeeper.name}`}
-                    keeper=${activeKeeper}
-                    onMutated=${() => void refreshRoster('manual')}
-                  />
-                `}
-                ${activeTab === 'work-sandbox' && html`
-                  <${KeeperWorkSandboxTab}
-                    key=${`ws:${epoch}:${activeKeeper.name}`}
-                    keeperName=${activeKeeper.name}
-                    onNavigate=${props.onNavigate}
-                    onInspect=${props.onInspect}
-                  />
-                `}
-                ${activeTab === 'config' && html`
-                  <${KeeperConfigTab}
-                    key=${`cfg:${epoch}:${activeKeeper.name}`}
-                    keeperName=${activeKeeper.name}
-                    onMutated=${() => void refreshRoster('manual')}
-                  />
+                ${activeTab !== 'chat' && html`
+                  <${Suspense} fallback=${null}>
+                    ${activeTab === 'memory' && html`
+                      <${keeperMemoryTab.Component}
+                        key=${`mem:${epoch}:${activeKeeper.name}`}
+                        keeperName=${activeKeeper.name}
+                      />
+                    `}
+                    ${activeTab === 'portrait-candle' && html`
+                      <${keeperPortraitCandleTab.Component}
+                        key=${`pc:${epoch}:${activeKeeper.name}`}
+                        keeper=${activeKeeper}
+                        onMutated=${() => void refreshRoster('manual')}
+                      />
+                    `}
+                    ${activeTab === 'work-sandbox' && html`
+                      <${keeperWorkSandboxTab.Component}
+                        key=${`ws:${epoch}:${activeKeeper.name}`}
+                        keeperName=${activeKeeper.name}
+                        onNavigate=${props.onNavigate}
+                        onInspect=${props.onInspect}
+                      />
+                    `}
+                    ${activeTab === 'config' && html`
+                      <${keeperConfigTab.Component}
+                        key=${`cfg:${epoch}:${activeKeeper.name}`}
+                        keeperName=${activeKeeper.name}
+                        onMutated=${() => void refreshRoster('manual')}
+                      />
+                    `}
+                  <//>
                 `}
               </div>
             `}

@@ -1,5 +1,5 @@
 import { html } from 'htm/preact'
-import { useEffect, useState } from 'preact/hooks'
+import { nowMs1sSignal, useNowMs1sTicker } from '../../lib/now-signal'
 import { formatElapsedCompact } from './chat-blocks'
 
 /** How long a running turn has run. While [live] it counts each second;
@@ -9,13 +9,8 @@ export function KeeperTurnElapsed({ startedAt, observedAt, live }: {
   readonly observedAt: number
   readonly live: boolean
 }) {
-  const [now, setNow] = useState(Date.now)
-  useEffect(() => {
-    if (!live) return
-    setNow(Date.now())
-    const interval = window.setInterval(() => setNow(Date.now()), 1000)
-    return () => window.clearInterval(interval)
-  }, [live])
+  useNowMs1sTicker(live)
+  const now = live ? Math.max(nowMs1sSignal.value, Date.now()) : observedAt
   const elapsedAt = live ? Math.max(now, observedAt) : observedAt
   const seconds = (elapsedAt - startedAt) / 1000
   return html`<span class="kp-turn-elapsed" role="timer" aria-label="턴 경과 시간">${formatElapsedCompact(seconds)}</span>`

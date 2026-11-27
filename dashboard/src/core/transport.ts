@@ -11,7 +11,10 @@
 
 import { ok, err, type Result } from '../lib/result'
 import {
+  activeWorkspaceId,
   authSession,
+  clearBootstrapShellHandoff,
+  consumeBootstrapShellPayload,
   currentSessionEpoch,
   getActiveCsrfToken,
   getSingleUserToken,
@@ -75,6 +78,90 @@ export type OkDataEnvelope<T> =
   | { readonly ok: false; readonly error: string; readonly code?: string }
 
 const UNSAFE_METHODS: ReadonlySet<HttpMethod> = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])
+
+interface EtagCacheEntry {
+  readonly epoch: number
+  readonly etag: string
+  readonly parsedBody: unknown
+  readonly status: number
+}
+
+interface RawGetOutcome {
+  readonly status: number
+  readonly ok: boolean
+  readonly parsedBody: unknown
+  readonly fromCache304: boolean
+}
+
+interface SharedGetFlight {
+  readonly controller: AbortController
+  refCount: number
+  readonly promise: Promise<Result<RawGetOutcome, ApiError>>
+}
+
+const ETAG_CACHE_MAX_ENTRIES = 64
+const inflightGetsByFetch = new WeakMap<typeof fetch, Map<string, SharedGetFlight>>()
+const etagCacheByFetch = new WeakMap<typeof fetch, Map<string, EtagCacheEntry>>()
+const mutationGenByFetch = new WeakMap<typeof fetch, number>()
+
+function currentMutationGen(fetchImpl: typeof fetch): number {
+  return mutationGenByFetch.get(fetchImpl) ?? 0
+}
+
+function bumpMutationGenFor(fetchImpl: typeof fetch): void {
+  mutationGenByFetch.set(fetchImpl, currentMutationGen(fetchImpl) + 1)
+  inflightGetsByFetch.get(fetchImpl)?.clear()
+  etagCacheByFetch.get(fetchImpl)?.clear()
+  if (fetchImpl === globalThis.fetch) {
+    clearBootstrapShellHandoff()
+  }
+}
+
+function inflightMapFor(fetchImpl: typeof fetch): Map<string, SharedGetFlight> {
+  let map = inflightGetsByFetch.get(fetchImpl)
+  if (!map) {
+    map = new Map()
+    inflightGetsByFetch.set(fetchImpl, map)
+  }
+  return map
+}
+
+function etagCacheFor(fetchImpl: typeof fetch): Map<string, EtagCacheEntry> {
+  let map = etagCacheByFetch.get(fetchImpl)
+  if (!map) {
+    map = new Map()
+    etagCacheByFetch.set(fetchImpl, map)
+  }
+  return map
+}
+
+function putEtagEntry(fetchImpl: typeof fetch, key: string, entry: EtagCacheEntry): void {
+  const map = etagCacheFor(fetchImpl)
+  map.delete(key)
+  map.set(key, entry)
+  if (map.size > ETAG_CACHE_MAX_ENTRIES) {
+    const oldest = map.keys().next().value
+    if (oldest !== undefined) map.delete(oldest)
+  }
+}
+
+function headerSignature(headers: Record<string, string>): string {
+  const keys = Object.keys(headers).sort()
+  let out = ''
+  for (let i = 0; i < keys.length; i++) {
+    const k = keys[i]!
+    out += `${k.toLowerCase()}=${headers[k]!}\0`
+  }
+  return out
+}
+
+function hasHeaderCI(headers: Record<string, string> | undefined, targetLower: string): boolean {
+  if (!headers) return false
+  for (const key of Object.keys(headers)) {
+    if (key.toLowerCase() === targetLower) return true
+  }
+  return false
+}
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v)
@@ -184,6 +271,39 @@ function buildHeaders(
   return headers
 }
 
+function decodeWirePayload<T>(
+  status: number,
+  parsedBody: unknown,
+  opts: ApiRequestOptions<T>,
+): Result<T, ApiError> {
+  let payload: unknown = parsedBody
+  if (opts.envelope === 'v2') {
+    const unwrapped = unwrapV2Envelope<unknown>(parsedBody)
+    if (!unwrapped.ok) return unwrapped
+    payload = unwrapped.value
+  } else if (opts.envelope === 'ok_data') {
+    const unwrapped = unwrapOkData<unknown>(parsedBody)
+    if (!unwrapped.ok) return unwrapped
+    payload = unwrapped.value
+  }
+
+  if (opts.decode) {
+    try {
+      return ok(opts.decode(payload))
+    } catch (cause) {
+      return err({
+        kind: 'decode',
+        status,
+        code: 'schema_drift',
+        message: cause instanceof Error ? cause.message : String(cause),
+        retryable: false,
+        cause,
+      })
+    }
+  }
+  return ok(payload as T)
+}
+
 export async function apiRequest<T>(opts: ApiRequestOptions<T>): Promise<Result<T, ApiError>> {
   const method: HttpMethod = opts.method ?? 'GET'
   const fetchImpl = opts.fetchImpl ?? globalThis.fetch
@@ -203,6 +323,239 @@ export async function apiRequest<T>(opts: ApiRequestOptions<T>): Promise<Result<
       controller.abort('epoch_stale')
     }
   })
+
+  // Shared in-flight GET coalescing + ETag 304 response reuse (epoch- and header-scoped).
+  const executeCoalescedGet = async (): Promise<Result<T, ApiError>> => {
+    if (!isEpochCurrent(startEpoch)) {
+      return err({ kind: 'epoch_stale', status: null, code: 'epoch_stale', message: 'Session epoch changed', retryable: false })
+    }
+    if (controller.signal.aborted) {
+      return err({ kind: 'aborted', status: null, code: null, message: 'Request aborted', retryable: false })
+    }
+
+    const baseHeaders = buildHeaders('GET', false, opts.headers)
+    const resolvedUrl = resolveWorkspaceUrl(opts.path)
+    const hdrSig = headerSignature(baseHeaders)
+    const etagEligible = opts.cache !== 'no-store' && !hasHeaderCI(opts.headers, 'if-none-match')
+    const etagKey = `${resolvedUrl}\0${hdrSig}`
+
+    // One-shot handoff of the /api/v1/dashboard/shell response already fetched by bootstrapAuthSession.
+    if (
+      fetchImpl === globalThis.fetch
+      && !opts.headers
+      && opts.cache !== 'no-store'
+      && opts.path === '/api/v1/dashboard/shell'
+      && resolvedUrl === '/api/v1/dashboard/shell'
+    ) {
+      const handoff = consumeBootstrapShellPayload(
+        startEpoch,
+        getSingleUserToken(),
+        activeWorkspaceId.peek(),
+      )
+      if (handoff !== null) {
+        if (handoff.etag && etagEligible) {
+          putEtagEntry(fetchImpl, etagKey, {
+            epoch: startEpoch,
+            etag: handoff.etag,
+            parsedBody: handoff.payload,
+            status: 200,
+          })
+        }
+        return decodeWirePayload(200, handoff.payload, opts)
+      }
+    }
+
+    const flightGen = currentMutationGen(fetchImpl)
+    const flightKey = `${startEpoch}\0${flightGen}\0${resolvedUrl}\0${opts.cache ?? ''}\0${hdrSig}`
+    const flights = inflightMapFor(fetchImpl)
+    let flight = flights.get(flightKey)
+    if (flight && flight.controller.signal.aborted) {
+      flights.delete(flightKey)
+      flight = undefined
+    }
+    if (!flight) {
+      const flightController = new AbortController()
+      const unsubFlightEpoch = sessionEpoch.subscribe((epoch) => {
+        if (epoch !== startEpoch) {
+          if (flights.get(flightKey)?.controller === flightController) {
+            flights.delete(flightKey)
+          }
+          flightController.abort('epoch_stale')
+        }
+      })
+      const cachedEtag = etagEligible ? etagCacheFor(fetchImpl).get(etagKey) : undefined
+      const validCachedEtag = cachedEtag && cachedEtag.epoch === startEpoch ? cachedEtag : undefined
+      const wireHeaders = validCachedEtag
+        ? { ...baseHeaders, 'If-None-Match': validCachedEtag.etag }
+        : baseHeaders
+      const init: RequestInit = {
+        method: 'GET',
+        credentials: 'same-origin',
+        headers: wireHeaders,
+        signal: flightController.signal,
+        ...(opts.cache && { cache: opts.cache }),
+      }
+
+      const promise = (async (): Promise<Result<RawGetOutcome, ApiError>> => {
+        try {
+          let response: Response
+          try {
+            response = await fetchImpl(resolvedUrl, init)
+          } catch (cause) {
+            if (!isEpochCurrent(startEpoch)) {
+              return err({ kind: 'epoch_stale', status: null, code: 'epoch_stale', message: 'Session epoch changed', retryable: false, cause })
+            }
+            if (flightController.signal.aborted) {
+              return err({ kind: 'aborted', status: null, code: null, message: 'Request aborted', retryable: false, cause })
+            }
+            return err({
+              kind: 'network',
+              status: null,
+              code: 'network_error',
+              message: cause instanceof Error ? cause.message : String(cause),
+              retryable: true,
+              cause,
+            })
+          }
+
+          if (!isEpochCurrent(startEpoch)) {
+            return err({ kind: 'epoch_stale', status: null, code: 'epoch_stale', message: 'Dropped stale response after epoch change', retryable: false })
+          }
+
+          if (response.status === 304 && validCachedEtag) {
+            return ok({
+              status: validCachedEtag.status,
+              ok: true,
+              parsedBody: validCachedEtag.parsedBody,
+              fromCache304: true,
+            })
+          }
+
+          let parsedBody: unknown = null
+          if (response.status !== 204 && response.status !== 304) {
+            const contentType = response.headers.get('content-type') ?? ''
+            try {
+              parsedBody = contentType.includes('application/json') || contentType === ''
+                ? await response.json()
+                : await response.text()
+            } catch (cause) {
+              if (!isEpochCurrent(startEpoch)) {
+                return err({ kind: 'epoch_stale', status: null, code: 'epoch_stale', message: 'Session epoch changed', retryable: false, cause })
+              }
+              if (flightController.signal.aborted) {
+                return err({ kind: 'aborted', status: null, code: null, message: 'Request aborted', retryable: false, cause })
+              }
+              if (!response.ok) {
+                return err(classifyHttpError(response.status, null))
+              }
+              return err({
+                kind: 'decode',
+                status: response.status,
+                code: 'invalid_json',
+                message: 'Failed to parse JSON response',
+                retryable: false,
+                cause,
+              })
+            }
+          }
+
+          if (!isEpochCurrent(startEpoch)) {
+            return err({ kind: 'epoch_stale', status: null, code: 'epoch_stale', message: 'Dropped stale response after epoch change', retryable: false })
+          }
+
+          if (response.ok && etagEligible && currentMutationGen(fetchImpl) === flightGen) {
+            const responseEtag = response.headers.get('etag')
+            if (responseEtag) {
+              putEtagEntry(fetchImpl, etagKey, {
+                epoch: startEpoch,
+                etag: responseEtag,
+                parsedBody,
+                status: response.status,
+              })
+            }
+          }
+
+          return ok({
+            status: response.status,
+            ok: response.ok,
+            parsedBody,
+            fromCache304: false,
+          })
+        } finally {
+          unsubFlightEpoch()
+          if (flights.get(flightKey)?.controller === flightController) {
+            flights.delete(flightKey)
+          }
+        }
+      })()
+
+      flight = { controller: flightController, refCount: 0, promise }
+      flights.set(flightKey, flight)
+    }
+
+    flight.refCount += 1
+    let detached = false
+    const detachFlight = (abortIfEmpty: boolean, reason?: unknown): void => {
+      if (detached) return
+      detached = true
+      flight!.refCount -= 1
+      if (abortIfEmpty && flight!.refCount <= 0) {
+        if (flights.get(flightKey) === flight) {
+          flights.delete(flightKey)
+        }
+        flight!.controller.abort(reason)
+      }
+    }
+
+    const timeoutMs = opts.timeoutMs ?? 0
+    let timeoutTimer: ReturnType<typeof setTimeout> | null = null
+    let onAbortWait: (() => void) | null = null
+
+    try {
+      const waitRace = new Promise<Result<RawGetOutcome, ApiError>>((resolve) => {
+        onAbortWait = () => {
+          detachFlight(true, controller.signal.reason)
+          if (!isEpochCurrent(startEpoch)) {
+            resolve(err({ kind: 'epoch_stale', status: null, code: 'epoch_stale', message: 'Session epoch changed', retryable: false }))
+          } else {
+            resolve(err({ kind: 'aborted', status: null, code: null, message: 'Request aborted', retryable: false }))
+          }
+        }
+        if (controller.signal.aborted) {
+          onAbortWait()
+          return
+        }
+        controller.signal.addEventListener('abort', onAbortWait, { once: true })
+        if (timeoutMs > 0) {
+          timeoutTimer = setTimeout(() => {
+            detachFlight(true, 'timeout')
+            resolve(err({
+              kind: 'timeout',
+              status: null,
+              code: 'request_timeout',
+              message: `Request timed out after ${timeoutMs}ms`,
+              retryable: true,
+            }))
+          }, timeoutMs)
+        }
+      })
+
+      const rawResult = await Promise.race([flight.promise, waitRace])
+      if (!isEpochCurrent(startEpoch)) {
+        return err({ kind: 'epoch_stale', status: null, code: 'epoch_stale', message: 'Dropped stale response after epoch change', retryable: false })
+      }
+      if (!rawResult.ok) return rawResult
+      const outcome = rawResult.value
+      if (!outcome.ok) {
+        return err(classifyHttpError(outcome.status, outcome.parsedBody))
+      }
+      return decodeWirePayload(outcome.status, outcome.parsedBody, opts)
+    } finally {
+      if (timeoutTimer !== null) clearTimeout(timeoutTimer)
+      if (onAbortWait !== null) controller.signal.removeEventListener('abort', onAbortWait)
+      detachFlight(false)
+    }
+  }
 
   const executeOnce = async (): Promise<Result<T, ApiError>> => {
     if (!isEpochCurrent(startEpoch)) {
@@ -331,32 +684,11 @@ export async function apiRequest<T>(opts: ApiRequestOptions<T>): Promise<Result<
         return err(classifyHttpError(response.status, parsedBody))
       }
 
-      let payload: unknown = parsedBody
-      if (opts.envelope === 'v2') {
-        const unwrapped = unwrapV2Envelope<unknown>(parsedBody)
-        if (!unwrapped.ok) return unwrapped
-        payload = unwrapped.value
-      } else if (opts.envelope === 'ok_data') {
-        const unwrapped = unwrapOkData<unknown>(parsedBody)
-        if (!unwrapped.ok) return unwrapped
-        payload = unwrapped.value
+      if (UNSAFE_METHODS.has(method)) {
+        bumpMutationGenFor(fetchImpl)
       }
 
-      if (opts.decode) {
-        try {
-          return ok(opts.decode(payload))
-        } catch (cause) {
-          return err({
-            kind: 'decode',
-            status: response.status,
-            code: 'schema_drift',
-            message: cause instanceof Error ? cause.message : String(cause),
-            retryable: false,
-            cause,
-          })
-        }
-      }
-      return ok(payload as T)
+      return decodeWirePayload(response.status, parsedBody, opts)
     } finally {
       if (timeoutTimer !== null) clearTimeout(timeoutTimer)
       controller.signal.removeEventListener('abort', onParentAbort)
@@ -364,8 +696,8 @@ export async function apiRequest<T>(opts: ApiRequestOptions<T>): Promise<Result<
   }
 
   try {
-    const prevCsrf = getActiveCsrfToken()
-    const first = await executeOnce()
+    const prevCsrf = method === 'GET' ? null : getActiveCsrfToken()
+    const first = method === 'GET' ? await executeCoalescedGet() : await executeOnce()
     if (
       !first.ok
       && first.error.kind === 'csrf_rejected'

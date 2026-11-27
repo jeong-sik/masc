@@ -132,6 +132,23 @@ function LogsTimeline({ epoch, ...props }: WorkspaceViewProps & { epoch: number 
   const pausedByUserRef = useRef(false)
   pausedByUserRef.current = pausedByUser
   const pendingLiveRef = useRef<PendingTimeline>({ entries: [], resetLogs: false })
+  const queuedLiveRef = useRef<{ entries: TimelineEntry[]; resetLogs: boolean; scheduled: boolean }>({
+    entries: [],
+    resetLogs: false,
+    scheduled: false,
+  })
+  const snapshotAbortRef = useRef<AbortController | null>(null)
+  const mountedRef = useRef(true)
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+      snapshotAbortRef.current?.abort()
+      queuedLiveRef.current.entries = []
+      queuedLiveRef.current.resetLogs = false
+      queuedLiveRef.current.scheduled = false
+    }
+  }, [])
   const streamObserved = useRef(false)
   const session = authSession.value
   const canReadLogs = canReadSuOrMaAdmin(session)
@@ -139,18 +156,46 @@ function LogsTimeline({ epoch, ...props }: WorkspaceViewProps & { epoch: number 
   const sseInstanceId = liveSupported ? observerSseInstanceId.value : null
   const pausedByVisibility = sseInstanceId !== null && viewStreamPaused.value
 
-  const enqueueLiveEntries = useCallback((incoming: readonly TimelineEntry[], resetLogs: boolean) => {
-    if (pausedByUserRef.current) {
-      const pending = pendingLiveRef.current
-      const entries = mergeTimeline(pending.entries, incoming, resetLogs)
-      pendingLiveRef.current = { entries, resetLogs: pending.resetLogs || resetLogs }
-      setBufferedCount(entries.length)
+  const flushQueuedLiveEntries = useCallback(() => {
+    const queue = queuedLiveRef.current
+    queue.scheduled = false
+    if (!mountedRef.current) {
+      queue.entries = []
+      queue.resetLogs = false
       return
     }
-    setEntries((prev) => mergeTimeline(prev, incoming, resetLogs))
+    if (!queue.resetLogs && queue.entries.length === 0) return
+    const batchEntries = queue.entries
+    const batchReset = queue.resetLogs
+    queue.entries = []
+    queue.resetLogs = false
+    if (pausedByUserRef.current) {
+      const pending = pendingLiveRef.current
+      const merged = mergeTimeline(pending.entries, batchEntries, batchReset)
+      pendingLiveRef.current = { entries: merged, resetLogs: pending.resetLogs || batchReset }
+      setBufferedCount(merged.length)
+      return
+    }
+    setEntries((prev) => mergeTimeline(prev, batchEntries, batchReset))
   }, [])
 
+  const enqueueLiveEntries = useCallback((incoming: readonly TimelineEntry[], resetLogs: boolean) => {
+    const queue = queuedLiveRef.current
+    if (resetLogs) {
+      queue.resetLogs = true
+      queue.entries = queue.entries.filter((e) => e.kind !== 'LOG')
+    }
+    for (let i = 0; i < incoming.length; i++) {
+      queue.entries.push(incoming[i]!)
+    }
+    if (!queue.scheduled) {
+      queue.scheduled = true
+      queueMicrotask(flushQueuedLiveEntries)
+    }
+  }, [flushQueuedLiveEntries])
+
   const toggleUserPause = useCallback(() => {
+    flushQueuedLiveEntries()
     if (pausedByUserRef.current) {
       const flushed = pendingLiveRef.current
       pendingLiveRef.current = { entries: [], resetLogs: false }
@@ -164,17 +209,7 @@ function LogsTimeline({ epoch, ...props }: WorkspaceViewProps & { epoch: number 
       pausedByUserRef.current = true
       setPausedByUser(true)
     }
-  }, [])
-
-  const snapshotAbortRef = useRef<AbortController | null>(null)
-  const mountedRef = useRef(true)
-  useEffect(() => {
-    mountedRef.current = true
-    return () => {
-      mountedRef.current = false
-      snapshotAbortRef.current?.abort()
-    }
-  }, [])
+  }, [flushQueuedLiveEntries])
 
   const loadSnapshot = useCallback((resetOnLoad = false) => {
     if (!canReadLogs) return

@@ -5,11 +5,11 @@
  */
 
 import { html } from 'htm/preact'
+import { Suspense } from 'preact/compat'
 import './knowledge.css'
+import { createPreloadableLazy } from '../../lib/lazy-component'
+import { registerSubroutePreloader } from '../registry'
 import { BoardTab } from './board-tab'
-import { WikiTab } from './wiki-tab'
-import { ArtifactsTab } from './artifacts-tab'
-import { MemoryTab } from './memory-tab'
 import {
   normalizeKnowledgeSubroute,
   type KnowledgeSubroute,
@@ -17,9 +17,30 @@ import {
   type WorkspaceViewProps,
 } from './types'
 
+const wikiTab = createPreloadableLazy<WorkspaceViewProps>(async () => (await import('./wiki-tab')).WikiTab)
+const artifactsTab = createPreloadableLazy<WorkspaceViewProps>(async () => (await import('./artifacts-tab')).ArtifactsTab)
+const memoryTab = createPreloadableLazy<WorkspaceViewProps>(async () => (await import('./memory-tab')).MemoryTab)
+
+export function preloadKnowledgeSubroute(subroute: KnowledgeSubroute | string): Promise<void> {
+  switch (normalizeKnowledgeSubroute(subroute)) {
+    case 'wiki':
+      return wikiTab.preload()
+    case 'artifacts':
+      return artifactsTab.preload()
+    case 'memory':
+      return memoryTab.preload()
+    default:
+      return Promise.resolve()
+  }
+}
+
+registerSubroutePreloader('knowledge', (subroute) => {
+  void preloadKnowledgeSubroute(subroute).catch(() => {})
+})
+
 export type { WorkspaceInspectPayload, WorkspaceViewProps, KnowledgeSubroute }
 export * from './types'
-export { BoardTab, WikiTab, ArtifactsTab, MemoryTab }
+export { BoardTab }
 
 export function KnowledgeWorkspace(props: WorkspaceViewProps) {
   const activeTab = normalizeKnowledgeSubroute(props.subroute)
@@ -28,9 +49,13 @@ export function KnowledgeWorkspace(props: WorkspaceViewProps) {
     <section class="kn-root" aria-label="Knowledge workspace">
       <div class="kn-body">
         ${activeTab === 'board' && html`<${BoardTab} ...${props} />`}
-        ${activeTab === 'wiki' && html`<${WikiTab} ...${props} />`}
-        ${activeTab === 'artifacts' && html`<${ArtifactsTab} ...${props} />`}
-        ${activeTab === 'memory' && html`<${MemoryTab} ...${props} />`}
+        ${activeTab !== 'board' && html`
+          <${Suspense} fallback=${null}>
+            ${activeTab === 'wiki' && html`<${wikiTab.Component} ...${props} />`}
+            ${activeTab === 'artifacts' && html`<${artifactsTab.Component} ...${props} />`}
+            ${activeTab === 'memory' && html`<${memoryTab.Component} ...${props} />`}
+          <//>
+        `}
       </div>
     </section>
   `

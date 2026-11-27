@@ -19,7 +19,10 @@ import { markViewSynced } from '../../core/observer'
 import { resourceCache } from '../../core/resource-cache'
 import { apiGetV2, apiMutateV2 } from '../../core/transport'
 import { KeeperBadge } from '../../components/keeper-badge'
-import { MasterDetail, PopoverMenu, VirtualList } from '../../components/primitives'
+import { MasterDetail } from '../../components/primitives/master-detail'
+import { PopoverMenu } from '../../components/primitives/popover-menu'
+import { VirtualList } from '../../components/primitives/virtual-list'
+import { computeMarkdownLineDiff } from './wiki-diff'
 import {
   expectOptionalArrayField,
   expectOptionalRecordArrayField,
@@ -34,7 +37,6 @@ import { isAdminLockedForSession } from '../../routes/router'
 import { pushShellToast } from '../../shell/shell-state'
 import {
   WIKI_SOURCES,
-  computeMarkdownLineDiff,
   formatRelativeTime,
   type WikiDuplicateCandidate,
   type WikiIndexData,

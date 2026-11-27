@@ -23,7 +23,10 @@ import { KeeperBadge } from '../../components/keeper-badge'
 import { TimeAgo } from '../../components/common/time-ago'
 import { InlineSpinner } from '../../components/common/inline-spinner'
 import { formatDuration } from '../../lib/format-time'
-import { MasterDetail, PopoverMenu, TargetLockedAction, VirtualList } from '../../components/primitives'
+import { MasterDetail } from '../../components/primitives/master-detail'
+import { PopoverMenu } from '../../components/primitives/popover-menu'
+import { TargetLockedAction } from '../../components/primitives/target-locked-action'
+import { VirtualList } from '../../components/primitives/virtual-list'
 import { pushShellToast } from '../../shell/shell-state'
 import {
   GOAL_PHASES,
@@ -683,10 +686,17 @@ export function GoalsTab(props: WorkspaceViewProps) {
 
   const linkedTaskSummary = useMemo(() => {
     if (!selectedGoal) return '—'
-    const total = selectedGoal.linkedTasks.length
-    const done = selectedGoal.linkedTasks.filter((t) => t.status === 'Done').length
-    const awaiting = selectedGoal.linkedTasks.filter((t) => t.status === 'AwaitingVerification').length
-    const cancelled = selectedGoal.linkedTasks.filter((t) => t.status === 'Cancelled').length
+    const tasks = selectedGoal.linkedTasks
+    const total = tasks.length
+    let done = 0
+    let awaiting = 0
+    let cancelled = 0
+    for (let i = 0; i < total; i++) {
+      const status = tasks[i]!.status
+      if (status === 'Done') done += 1
+      else if (status === 'AwaitingVerification') awaiting += 1
+      else if (status === 'Cancelled') cancelled += 1
+    }
     const rest = total - done - awaiting - cancelled
     return `태스크 ${total}개 · 완료 ${done} · 검증 대기 ${awaiting} · 취소 ${cancelled} · 그 외 ${rest}`
   }, [selectedGoal])

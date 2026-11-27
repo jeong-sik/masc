@@ -25,12 +25,8 @@ import { timeWindow, type TimeWindow } from '../../core/time-window'
 import { apiGet, apiGetV2, apiMutate } from '../../core/transport'
 import { InlineSpinner } from '../../components/common/inline-spinner'
 import { KeeperBadge } from '../../components/keeper-badge'
-import {
-  DataTable,
-  UPlotChart,
-  type DataTableColumn,
-  type UPlotSeriesSpec,
-} from '../../components/primitives'
+import { DataTable, type DataTableColumn } from '../../components/primitives/data-table'
+import { UPlotChart, type UPlotSeriesSpec } from '../../components/primitives/uplot-chart'
 import { pushShellToast } from '../../shell/shell-state'
 import {
   buildMemoryFlowSeries,

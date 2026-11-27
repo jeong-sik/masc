@@ -31,6 +31,7 @@ import { useVoiceInput } from './voice-input'
 
 const CHAT_FOCUS_RING = ringFocusClasses({ tone: 'accent-medium', width: 2 })
 import { formatTimeHms } from '../../lib/format-time'
+import { nowMs1sSignal, useNowMs1sTicker } from '../../lib/now-signal'
 import { formatCost, formatMsCompact } from '../../lib/format-number'
 import { isImeComposing, isSubmitEnter } from '../../lib/keyboard'
 import { isFailedDelivery } from '../../lib/keeper-delivery'
@@ -4810,8 +4811,7 @@ export function ChatComposer({
    *  diverge into a cross-keeper leak even without the remount. */
   draftPersistKey?: string
 }) {
-  const [elapsed, setElapsed] = useState(0)
-  const [voiceElapsed, setVoiceElapsed] = useState(0)
+  const [voiceStartedAt, setVoiceStartedAt] = useState<number | null>(null)
   const [focus, setFocus] = useState(false)
   // Inline image-reference entry (#33728): a URL or Files-API id the provider
   // resolves. Opened from the 🔗 tool; Enter adds the chip, Escape closes.
@@ -4884,36 +4884,28 @@ export function ChatComposer({
     onError: (message) => showToast(message, 'error'),
   })
 
+  const voiceRecording = voice.state === 'recording'
   useEffect(() => {
-    if (voice.state !== 'recording') {
-      setVoiceElapsed(0)
-      return
-    }
-    const startedAt = Date.now()
-    const tick = () => {
-      const duration = Math.round((Date.now() - startedAt) / 1000)
-      setVoiceElapsed(duration)
-    }
-    tick()
-    const id = setInterval(tick, 1000)
-    return () => clearInterval(id)
-  }, [voice.state])
+    setVoiceStartedAt(voiceRecording ? Date.now() : null)
+  }, [voiceRecording])
 
-  useEffect(() => {
-    if (!streaming || !streamStartedAt) {
-      setElapsed(0)
-      return
-    }
-    const tick = () => setElapsed(Math.round((Date.now() - streamStartedAt) / 1000))
-    tick()
-    const id = setInterval(tick, 1000)
-    return () => clearInterval(id)
-  }, [streaming, streamStartedAt])
+  const needs1sTick =
+    voiceRecording
+    || (Boolean(streaming) && (Boolean(streamStartedAt) || typeof lastEventAt === 'number'))
+  useNowMs1sTicker(needs1sTick)
+  const tickNow = needs1sTick ? Math.max(nowMs1sSignal.value, Date.now()) : 0
 
-  // Derived from the 1 s elapsed tick above — no extra interval needed.
+  const voiceElapsed = voiceRecording && voiceStartedAt !== null
+    ? Math.max(0, Math.round((Math.max(tickNow, voiceStartedAt) - voiceStartedAt) / 1000))
+    : 0
+  const elapsed = streaming && streamStartedAt
+    ? Math.max(0, Math.round((Math.max(tickNow, streamStartedAt) - streamStartedAt) / 1000))
+    : 0
+
+  // Derived from the shared 1 s ticker above — no extra interval needed.
   const sinceLastEvent =
     streaming && typeof lastEventAt === 'number'
-      ? Math.round((Date.now() - lastEventAt) / 1000)
+      ? Math.max(0, Math.round((Math.max(tickNow, lastEventAt) - lastEventAt) / 1000))
       : null
   const isStalled = sinceLastEvent !== null && sinceLastEvent >= STREAM_STALL_THRESHOLD_S
 

@@ -18,7 +18,7 @@ import { KeeperWaitingStrip } from './keeper-waiting-strip'
 import { WorkspaceChatImage } from '../../components/chat/workspace-image'
 import { PopoverMenu } from '../../components/primitives/popover-menu'
 import { lazy, Suspense } from 'preact/compat'
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks'
 import {
   authSession,
   canUseSingleUserTokenAdmin,
@@ -29,6 +29,7 @@ import {
 import { formatObserved } from '../../core/resource-cache'
 import { observerConnected, subscribeObserverFrames, subscribeObserverResync } from '../../core/observer'
 import { isWorkspaceRasterMime } from '../../lib/keeper-media'
+import { nowMs1sSignal, useNowMs1sTicker } from '../../lib/now-signal'
 import { randomUuid } from '../../lib/uuid'
 import { readDiscordOperator, type DiscordReplyAuthority } from './discord-reply'
 import { DiscordReplyPanel } from './discord-reply-panel'
@@ -154,13 +155,8 @@ function OpenWorkRows({ activities, live }: {
   readonly activities: readonly TurnOpenActivity[]
   readonly live: boolean
 }) {
-  const [now, setNow] = useState(Date.now)
-  useEffect(() => {
-    if (!live) return
-    setNow(Date.now())
-    const interval = window.setInterval(() => setNow(Date.now()), 1000)
-    return () => window.clearInterval(interval)
-  }, [live])
+  useNowMs1sTicker(live)
+  const now = live ? Math.max(nowMs1sSignal.value, Date.now()) : 0
   const row = (activity: TurnOpenActivity, key: string) => {
     const reach = openActivityReachLabel(activity)
     const seconds = Math.max(0, (now - activity.since_unix * 1000) / 1000)
@@ -2442,15 +2438,28 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
     : RING_CIRCUMFERENCE
   const ringTone = ctxPct === null ? 'absent' : ctxPct >= 85 ? 'bad' : ctxPct >= 65 ? 'warn' : 'ok'
 
-  const recentSlice = scopedMessages.slice(-renderWindow)
-  const parsedEntries = recentSlice.map((msg) => ({ msg, blocks: parseChatMessageBlocks(msg) }))
-  const hiddenInternalCount = parsedEntries.filter(
-    ({ blocks }) => blocks.isInternalOnly && blockPrefs.internal === 'hidden',
-  ).length
-  const visibleEntries = parsedEntries.filter(({ msg, blocks }) =>
-    shouldRenderChatEntry(msg, blocks, blockPrefs),
+  const parsedEntries = useMemo(
+    () => scopedMessages.slice(-renderWindow).map((msg) => ({ msg, blocks: parseChatMessageBlocks(msg) })),
+    [scopedMessages, renderWindow],
   )
-  const displayItems = groupTranscriptEntries(visibleEntries)
+  const { hiddenInternalCount, visibleEntries, displayItems } = useMemo(() => {
+    let hidden = 0
+    const visible = []
+    for (let i = 0; i < parsedEntries.length; i++) {
+      const entry = parsedEntries[i]!
+      if (entry.blocks.isInternalOnly && blockPrefs.internal === 'hidden') {
+        hidden += 1
+      }
+      if (shouldRenderChatEntry(entry.msg, entry.blocks, blockPrefs)) {
+        visible.push(entry)
+      }
+    }
+    return {
+      hiddenInternalCount: hidden,
+      visibleEntries: visible,
+      displayItems: groupTranscriptEntries(visible),
+    }
+  }, [parsedEntries, blockPrefs])
 
   // Bounded auto-hydration for `Tools: full` (latest 8 visible cards) plus
   // immediate hydration for explicitly user-opened cards once `executionId` attaches.

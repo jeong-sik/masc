@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { effect, signal } from '@preact/signals'
 import { readSse } from './sse-reader'
 const chunks = (values: Uint8Array[]) => new ReadableStream<Uint8Array>({ start(controller) { values.forEach(value => controller.enqueue(value)); controller.close() } })
 afterEach(() => vi.useRealTimers())
@@ -55,5 +56,22 @@ describe('authenticated SSE framing', () => {
     expect(await result).toEqual(expect.objectContaining({ name: 'AbortError' }))
     expect(cancel).toHaveBeenCalledOnce()
     expect(body.locked).toBe(false)
+  })
+
+  it('coalesces signal updates across a multi-frame SSE chunk in one batch()', async () => {
+    const seq = signal(0)
+    let notifications = 0
+    const dispose = effect(() => {
+      void seq.value
+      notifications += 1
+    })
+    const burst = Array.from({ length: 20 }, (_, i) => `event: delta\ndata: ${i + 1}\n\n`).join('')
+    await readSse(chunks([new TextEncoder().encode(burst)]), (_event, data) => {
+      seq.value = Number(data)
+    })
+    dispose()
+    expect(seq.value).toBe(20)
+    // 1 initial run + 1 batched chunk flush (NOT 20 separate renders!)
+    expect(notifications).toBe(2)
   })
 })

@@ -9,6 +9,7 @@
  *   `/api/v1/dashboard/goals`, `/api/v1/dashboard/board`
  */
 
+import { batch } from '@preact/signals'
 import { ok, type Result } from '../../lib/result'
 import { authSession, canAccessMemberWorkspace } from '../../core/auth'
 import { apiGet, apiGetV2, type ApiError } from '../../core/transport'
@@ -492,6 +493,32 @@ export function readPulseBundle(win: TimeWindow): PulseLoadBundle {
   }
 }
 
+const PULSE_RESOURCE_TOPICS = {
+  shell: ['keeper', 'keeper_row_changed', 'keeper_roster_changed', 'task', 'goal', 'goal_projection_changed', 'shell'],
+  keepers: ['keeper', 'keeper_row_changed', 'keeper_roster_changed', 'keeper_turn_complete', 'provider_standing', 'keeper_turn', 'keeper_lifecycle'],
+  costs: ['keeper_turn', 'keeper_turn_complete', 'cost'],
+  usage: ['provider', 'provider_standing', 'provider_usage', 'quota'],
+  approvals: ['tool_approval', 'keeper_tool_approval_waits_changed', 'keeper_turn'],
+  asks: ['keeper_ask', 'keeper_asks_changed', 'ask'],
+  goals: ['goal', 'goals', 'goal_projection_changed', 'verification_requests', 'task'],
+  board: ['board', 'board_changed', 'board_post', 'board_comment'],
+  worldMemory: ['memory', 'world_memory'],
+  candle: ['candle', 'goal'],
+} as const
+
+export const PULSE_OBSERVER_TOPICS: ReadonlySet<string> = new Set<string>([
+  ...PULSE_RESOURCE_TOPICS.shell,
+  ...PULSE_RESOURCE_TOPICS.keepers,
+  ...PULSE_RESOURCE_TOPICS.costs,
+  ...PULSE_RESOURCE_TOPICS.usage,
+  ...PULSE_RESOURCE_TOPICS.approvals,
+  ...PULSE_RESOURCE_TOPICS.asks,
+  ...PULSE_RESOURCE_TOPICS.goals,
+  ...PULSE_RESOURCE_TOPICS.board,
+  ...PULSE_RESOURCE_TOPICS.worldMemory,
+  ...PULSE_RESOURCE_TOPICS.candle,
+])
+
 export async function loadPulseBundle(
   win: TimeWindow,
   reason: FetchReason = 'mount',
@@ -501,66 +528,67 @@ export async function loadPulseBundle(
   const usageDays = timeWindowProviderDays(win)
   const isMultiAccount = cur.kind === 'multi_account_signed_in'
 
-  await Promise.all([
+  const tasks = batch(() => [
     resourceCache.fetch<PulseShellSnapshot>(
       PULSE_CACHE_KEYS.shell,
       (signal) => wrapResult(apiGet('/api/v1/dashboard/shell', { signal, decode: decodeShell })),
-      { ttlMs: 15_000, topics: ['keeper', 'keeper_row_changed', 'keeper_roster_changed', 'task', 'goal', 'goal_projection_changed', 'shell'], reason },
+      { ttlMs: 15_000, topics: PULSE_RESOURCE_TOPICS.shell, reason },
     ),
     isMultiAccount
       ? Promise.resolve(observedAbsent<readonly PulseKeeperRow[]>('multi_account_unbridged'))
       : resourceCache.fetch<readonly PulseKeeperRow[]>(
           PULSE_CACHE_KEYS.keepers,
           (signal) => wrapResult(apiGet('/api/v1/gate/keepers?detailed=true', { signal, decode: decodePulseKeepers })),
-          { ttlMs: 12_000, topics: ['keeper', 'keeper_row_changed', 'keeper_roster_changed', 'keeper_turn_complete', 'provider_standing', 'keeper_turn', 'keeper_lifecycle'], reason },
+          { ttlMs: 12_000, topics: PULSE_RESOURCE_TOPICS.keepers, reason },
         ),
     isMultiAccount
       ? Promise.resolve(observedAbsent<readonly PulseKeeperCostRow[]>('multi_account_unbridged'))
       : resourceCache.fetch<readonly PulseKeeperCostRow[]>(
           PULSE_CACHE_KEYS.costs,
           (signal) => wrapResult(apiGet(`/api/v1/dashboard/keeper-costs?window=${KEEPER_COSTS_MAX_WINDOW_MINUTES}`, { signal, decode: decodeCosts })),
-          { ttlMs: 30_000, topics: ['keeper_turn', 'keeper_turn_complete', 'cost'], reason },
+          { ttlMs: 30_000, topics: PULSE_RESOURCE_TOPICS.costs, reason },
         ),
     isMultiAccount
       ? Promise.resolve(observedAbsent<PulseProviderUsageSnapshot>('multi_account_unbridged'))
       : resourceCache.fetch<PulseProviderUsageSnapshot>(
           PULSE_CACHE_KEYS.usage(win),
           (signal) => wrapResult(apiGet(`/api/v1/dashboard/provider-usage-history?days=${usageDays}`, { signal, decode: decodeProviderUsage })),
-          { ttlMs: 60_000, topics: ['provider', 'provider_standing', 'provider_usage', 'quota'], reason },
+          { ttlMs: 60_000, topics: PULSE_RESOURCE_TOPICS.usage, reason },
         ),
     isMultiAccount
       ? Promise.resolve(observedAbsent<readonly PulseApprovalItem[]>('multi_account_unbridged'))
       : resourceCache.fetch<readonly PulseApprovalItem[]>(
           PULSE_CACHE_KEYS.approvals,
           (signal) => wrapResult(apiGet('/api/v1/keepers/tool-approvals', { signal, decode: decodeApprovals })),
-          { ttlMs: 10_000, topics: ['tool_approval', 'keeper_tool_approval_waits_changed', 'keeper_turn'], reason },
+          { ttlMs: 10_000, topics: PULSE_RESOURCE_TOPICS.approvals, reason },
         ),
     isMultiAccount
       ? Promise.resolve(observedAbsent<readonly PulseAskItem[]>('multi_account_unbridged'))
       : resourceCache.fetch<readonly PulseAskItem[]>(
           PULSE_CACHE_KEYS.asks,
           (signal) => wrapResult(apiGet('/api/v1/keepers/asks?include_resolved=false', { signal, decode: decodeAsks })),
-          { ttlMs: 10_000, topics: ['keeper_ask', 'keeper_asks_changed', 'ask'], reason },
+          { ttlMs: 10_000, topics: PULSE_RESOURCE_TOPICS.asks, reason },
         ),
     resourceCache.fetch<PulseGoalsSnapshot>(
       PULSE_CACHE_KEYS.goals,
       (signal) => wrapResult(apiGet('/api/v1/dashboard/goals', { signal, decode: decodeGoals })),
-      { ttlMs: 20_000, topics: ['goal', 'goals', 'goal_projection_changed', 'verification_requests', 'task'], reason },
+      { ttlMs: 20_000, topics: PULSE_RESOURCE_TOPICS.goals, reason },
     ),
     resourceCache.fetch<readonly PulseBoardPost[]>(
       PULSE_CACHE_KEYS.board,
       (signal) => wrapResult(apiGet('/api/v1/dashboard/board?sort_by=recent&limit=24&exclude_system=true', { signal, decode: decodeBoardPosts })),
-      { ttlMs: 20_000, topics: ['board', 'board_changed', 'board_post', 'board_comment'], reason },
+      { ttlMs: 20_000, topics: PULSE_RESOURCE_TOPICS.board, reason },
     ),
     resourceCache.fetch<PulseWorldMemoryDigest>(
       PULSE_CACHE_KEYS.worldMemory,
       (signal) => wrapResult(apiGetV2('/api/v1/memory/world', { signal, decode: decodeWorldMemory })),
-      { ttlMs: 30_000, topics: ['memory', 'world_memory'], reason },
+      { ttlMs: 30_000, topics: PULSE_RESOURCE_TOPICS.worldMemory, reason },
     ),
     resourceCache.fetch<PulseCandleDigest>(
       PULSE_CACHE_KEYS.candle,
       (signal) => wrapResult(apiGetV2('/api/v1/candle/ledger?limit=20', { signal, decode: decodeCandleDigest })),
-      { ttlMs: 30_000, topics: ['candle', 'goal'], reason },
+      { ttlMs: 30_000, topics: PULSE_RESOURCE_TOPICS.candle, reason },
     ),
   ])
+  await Promise.all(tasks)
 }

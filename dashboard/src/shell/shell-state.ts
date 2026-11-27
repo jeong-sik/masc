@@ -13,12 +13,13 @@
  * - Lightweight shell toast notifications
  */
 
-import { computed, signal, type ReadonlySignal } from '@preact/signals'
+import { batch, computed, signal, type ReadonlySignal } from '@preact/signals'
 import {
   activeWorkspaceId,
   authSession,
   canAccessAdmin,
   canAccessMemberWorkspace,
+  consumeBootstrapHealthPayload,
   currentSessionEpoch,
   isEpochCurrent,
   isSingleUserMember,
@@ -26,11 +27,6 @@ import {
 } from '../core/auth'
 import { apiGet, apiMutate } from '../core/transport'
 import { resourceCache } from '../core/resource-cache'
-import {
-  decodeGateQueueStrict,
-  decodeKeeperAsksWire,
-  decodeToolApprovalsWire,
-} from '../api/hitl-decoders'
 import {
   extractObserverTopics,
   subscribeObserverFrames,
@@ -47,8 +43,15 @@ import {
   type ContrastId,
   type ThemeId,
 } from '../lib/theme'
-import { decodeVerificationCoverage } from '../lib/verification-coverage'
 import type { WorkspaceInspectPayload } from '../workspaces/types'
+
+export {
+  parseAwaitingGoalsPayload,
+  parseGateQueuePayload,
+  parseKeeperAsksPayload,
+  parsePendingVerificationsPayload,
+  parseToolApprovalsPayload,
+} from './hitl-parsers'
 
 const RAIL_STORAGE_KEY = 'masc.shell.rail_expanded'
 const MAX_INCIDENTS = 100
@@ -127,8 +130,10 @@ export function toggleIncidentsOverlay(): void {
   if (cur?.kind === 'incidents') {
     activeOverlay.value = null
   } else {
-    markAllIncidentsRead()
-    activeOverlay.value = { kind: 'incidents' }
+    batch(() => {
+      markAllIncidentsRead()
+      activeOverlay.value = { kind: 'incidents' }
+    })
   }
 }
 
@@ -137,8 +142,10 @@ export function closeActiveOverlay(): void {
 }
 
 export function openCommandPalette(): void {
-  commandPaletteMounted.value = true
-  commandPaletteOpen.value = true
+  batch(() => {
+    commandPaletteMounted.value = true
+    commandPaletteOpen.value = true
+  })
 }
 
 export function closeCommandPalette(): void {
@@ -280,30 +287,52 @@ function asNonEmptyString(v: unknown): string | null {
 
 export async function probeBuildConnectionInfo(
   fetchImpl: typeof fetch = globalThis.fetch,
+  opts: { readonly force?: boolean } = {},
 ): Promise<void> {
   const startEpoch = currentSessionEpoch()
   let version: string | null = null
   let serverCommit: string | null = null
   let bundleCommit: string | null = null
 
-  try {
-    const healthRes = await fetchImpl('/health', {
-      method: 'GET',
-      credentials: 'same-origin',
-      headers: { Accept: 'application/json' },
-    })
-    if (healthRes.ok) {
-      const ct = healthRes.headers.get('content-type') ?? ''
-      if (ct === '' || ct.includes('application/json')) {
-        const h = (await healthRes.json()) as unknown
-        if (isRecord(h)) {
-          version = asNonEmptyString(h.version)
-          serverCommit = asNonEmptyString(h.source_commit) ?? asNonEmptyString(h.commit) ?? asNonEmptyString(h.build_commit)
-          bundleCommit = asNonEmptyString(h.dashboard_commit) ?? asNonEmptyString(h.bundle_commit)
+  const applyHealthRecord = (h: unknown): {
+    version: string | null
+    serverCommit: string | null
+    bundleCommit: string | null
+  } => {
+    if (!isRecord(h)) return { version: null, serverCommit: null, bundleCommit: null }
+    return {
+      version: asNonEmptyString(h.version),
+      serverCommit: asNonEmptyString(h.source_commit) ?? asNonEmptyString(h.commit) ?? asNonEmptyString(h.build_commit),
+      bundleCommit: asNonEmptyString(h.dashboard_commit) ?? asNonEmptyString(h.bundle_commit),
+    }
+  }
+
+  const reused = !opts.force && fetchImpl === globalThis.fetch
+    ? consumeBootstrapHealthPayload(startEpoch)
+    : null
+  if (reused !== null) {
+    const parsed = applyHealthRecord(reused)
+    version = parsed.version
+    serverCommit = parsed.serverCommit
+    bundleCommit = parsed.bundleCommit
+  } else {
+    try {
+      const healthRes = await fetchImpl('/health', {
+        method: 'GET',
+        credentials: 'same-origin',
+        headers: { Accept: 'application/json' },
+      })
+      if (healthRes.ok) {
+        const ct = healthRes.headers.get('content-type') ?? ''
+        if (ct === '' || ct.includes('application/json')) {
+          const parsed = applyHealthRecord(await healthRes.json())
+          version = parsed.version
+          serverCommit = parsed.serverCommit
+          bundleCommit = parsed.bundleCommit
         }
       }
-    }
-  } catch { /* non-fatal diagnostic probe */ }
+    } catch { /* non-fatal diagnostic probe */ }
+  }
 
   if (!isEpochCurrent(startEpoch)) return
   const mismatched = Boolean(
@@ -470,114 +499,41 @@ export const inboxPendingCount = computed<number>(
     + pendingGoalConfirmations.value.length,
 )
 
-export function parseToolApprovalsPayload(
-  raw: unknown,
-  workspaceId: string,
-): readonly PendingApprovalItem[] {
-  const items: PendingApprovalItem[] = []
-  for (const row of decodeToolApprovalsWire(raw)) {
-    if (!row.hasExplicitApprovalId || !row.toolCallId) continue
-    items.push({
-      approvalId: row.approvalId,
-      keeper: row.keeper,
-      toolCallId: row.toolCallId,
-      tool: row.tool,
-      args: row.args,
-      question: row.question,
-      because: row.because,
-      askedAt: row.askedAt,
-      workspaceId,
-      revision: row.revision,
-    })
-  }
-  return items
-}
-
-export function parseKeeperAsksPayload(
-  raw: unknown,
-  workspaceId: string,
-): readonly PendingAskItem[] {
-  const decoded = decodeKeeperAsksWire(raw)
-  if (!decoded.ok) return []
-  return decoded.asks.map((ask) => ({
-    askId: ask.askId,
-    keeper: ask.keeper,
-    prompt: ask.promptSummary ?? 'Keeper awaiting operator answer',
-    askedAt: ask.askedAt,
-    workspaceId,
-    revision: ask.revision,
-  }))
-}
-
-export function parseGateQueuePayload(
-  raw: unknown,
-  workspaceId: string,
-): readonly PendingGateItem[] {
-  const decoded = decodeGateQueueStrict(raw)
-  if (!decoded.ok) return []
-  return decoded.rows.map((row) => ({
-    id: row.id,
-    keeper: row.keeper,
-    toolName: row.toolName,
-    phase: row.phase ?? 'unknown',
-    waitingSec: row.waitingSec,
-    workspaceId,
-  }))
-}
-
-export function parseAwaitingGoalsPayload(
-  raw: unknown,
-  workspaceId: string,
-): readonly PendingGoalConfirmItem[] {
-  if (!isRecord(raw) || !Array.isArray(raw.goals)) return []
-  const items: PendingGoalConfirmItem[] = []
-  for (const row of raw.goals) {
-    if (!isRecord(row)) continue
-    const phase = asNonEmptyString(row.phase)
-    if (!phase || phase.toLowerCase() !== 'awaiting_confirmation') continue
-    const goalId = asNonEmptyString(row.id)
-    const title = asNonEmptyString(row.title)
-    if (!goalId || !title) continue
-    items.push({
-      goalId,
-      title,
-      updatedAt: asNonEmptyString(row.updated_at),
-      workspaceId,
-    })
-  }
-  return items
-}
-
-export function parsePendingVerificationsPayload(
-  raw: unknown,
-  workspaceId: string,
-): readonly PendingVerificationItem[] {
-  if (!isRecord(raw)) return []
-  const list = Array.isArray(raw.requests)
-    ? raw.requests
-    : Array.isArray(raw.items)
-      ? raw.items
-      : []
-  const items: PendingVerificationItem[] = []
-  for (const row of list) {
-    if (!isRecord(row)) continue
-    const requestId = asNonEmptyString(row.request_id) ?? asNonEmptyString(row.id)
-    const taskId = asNonEmptyString(row.task_id)
-    if (!requestId || !taskId) continue
-    items.push({
-      requestId,
-      taskId,
-      title: asNonEmptyString(row.task_title) ?? asNonEmptyString(row.title) ?? taskId,
-      worker: asNonEmptyString(row.submitted_by) ?? asNonEmptyString(row.worker) ?? asNonEmptyString(row.producer),
-      workspaceId,
-    })
-  }
-  return items
-}
+export const hasFastApprovalStripContent = computed<boolean>(
+  () =>
+    inboxPendingCount.value > 0
+    || (canAccessMemberWorkspace(authSession.value) && inboxUncheckedSources.value.length > 0),
+)
 
 let hitlRefreshSeq = 0
 let hitlAbortCtrl: AbortController | null = null
 const hitlIncidentLastSig = new Map<string, string>()
+let hitlParsersPromise: Promise<typeof import('./hitl-parsers')> | null = null
+
+type HitlParsersLoadResult =
+  | { readonly ok: true; readonly parsers: typeof import('./hitl-parsers') }
+  | { readonly ok: false; readonly message: string }
+
+function loadHitlParsers(): Promise<typeof import('./hitl-parsers')> {
+  if (!hitlParsersPromise) {
+    hitlParsersPromise = import('./hitl-parsers').catch((err) => {
+      hitlParsersPromise = null
+      throw err
+    })
+  }
+  return hitlParsersPromise
+}
+
+async function loadHitlParsersSafe(): Promise<HitlParsersLoadResult> {
+  try {
+    return { ok: true, parsers: await loadHitlParsers() }
+  } catch (err) {
+    return {
+      ok: false,
+      message: err instanceof Error && err.message ? err.message : 'HITL 파서 모듈을 불러오지 못했습니다',
+    }
+  }
+}
 
 export async function refreshPendingHitl(
   fetchImpl?: typeof fetch,
@@ -588,13 +544,15 @@ export async function refreshPendingHitl(
   const session = authSession.peek()
   if (!canAccessMemberWorkspace(session)) {
     hitlAbortCtrl = null
-    hitlLoading.value = false
-    pendingApprovals.value = []
-    pendingAsks.value = []
-    pendingGateApprovals.value = []
-    pendingGoalConfirmations.value = []
-    pendingVerifications.value = []
-    hitlSourceStatus.value = DEFAULT_HITL_SOURCE_STATUS
+    batch(() => {
+      hitlLoading.value = false
+      pendingApprovals.value = []
+      pendingAsks.value = []
+      pendingGateApprovals.value = []
+      pendingGoalConfirmations.value = []
+      pendingVerifications.value = []
+      hitlSourceStatus.value = DEFAULT_HITL_SOURCE_STATUS
+    })
     return
   }
   const sessionKind = session.kind
@@ -624,44 +582,58 @@ export async function refreshPendingHitl(
 
   hitlLoading.value = true
   try {
+    // Load HITL decoders concurrently with network reads so they stay out of the boot chunk.
+    const parsersJob = loadHitlParsersSafe()
     if (sessionKind === 'multi_account_signed_in') {
-      pendingApprovals.value = []
-      pendingAsks.value = []
-      pendingGateApprovals.value = []
-      pendingVerifications.value = []
-      hitlSourceStatus.value = {
-        approvals: { kind: 'unbridged', reason: 'multi_account_unbridged' },
-        asks: { kind: 'unbridged', reason: 'multi_account_unbridged' },
-        gate: { kind: 'unbridged', reason: 'multi_account_unbridged' },
-        planning: hitlSourceStatus.peek().planning.kind === 'unbridged' ? { kind: 'unread' } : hitlSourceStatus.peek().planning,
-        verification: { kind: 'unbridged', reason: 'multi_account_unbridged' },
-      }
-      const planRes = await apiGet<unknown>('/api/v1/dashboard/planning', reqOpts)
-      if (!isCurrent()) return
-      if (planRes.ok) {
-        if (!isRecord(planRes.value) || planRes.value.ok === false || !Array.isArray(planRes.value.goals)) {
-          const message =
-            isRecord(planRes.value) && typeof planRes.value.error === 'string' && planRes.value.error.trim()
-              ? planRes.value.error.trim()
-              : '목표 확인 큐 응답 형식이 올바르지 않습니다'
-          setHitlSourceState('planning', { kind: 'failed', message })
-          recordHitlIncidentOnce('planning', 'Goal confirmation queue response invalid', message)
-          return
+      batch(() => {
+        pendingApprovals.value = []
+        pendingAsks.value = []
+        pendingGateApprovals.value = []
+        pendingVerifications.value = []
+        hitlSourceStatus.value = {
+          approvals: { kind: 'unbridged', reason: 'multi_account_unbridged' },
+          asks: { kind: 'unbridged', reason: 'multi_account_unbridged' },
+          gate: { kind: 'unbridged', reason: 'multi_account_unbridged' },
+          planning: hitlSourceStatus.peek().planning.kind === 'unbridged' ? { kind: 'unread' } : hitlSourceStatus.peek().planning,
+          verification: { kind: 'unbridged', reason: 'multi_account_unbridged' },
         }
-        clearHitlIncident('planning')
-        pendingGoalConfirmations.value = parseAwaitingGoalsPayload(planRes.value, workspaceId)
-        setHitlSourceState('planning', { kind: 'ok' })
-      } else if (
-        planRes.error.kind !== 'epoch_stale'
-        && planRes.error.kind !== 'aborted'
-      ) {
-        setHitlSourceState('planning', { kind: 'failed', message: planRes.error.message })
-        recordHitlIncidentOnce(
-          'planning',
-          `Goal confirmation queue unavailable (${planRes.error.status ?? planRes.error.kind})`,
-          planRes.error.message,
-        )
-      }
+      })
+      const [planRes, parsersRes] = await Promise.all([
+        apiGet<unknown>('/api/v1/dashboard/planning', reqOpts),
+        parsersJob,
+      ])
+      if (!isCurrent()) return
+      batch(() => {
+        if (planRes.ok) {
+          if (!parsersRes.ok) {
+            setHitlSourceState('planning', { kind: 'failed', message: parsersRes.message })
+            recordHitlIncidentOnce('planning', 'Goal confirmation decoder unavailable', parsersRes.message)
+            return
+          }
+          if (!isRecord(planRes.value) || planRes.value.ok === false || !Array.isArray(planRes.value.goals)) {
+            const message =
+              isRecord(planRes.value) && typeof planRes.value.error === 'string' && planRes.value.error.trim()
+                ? planRes.value.error.trim()
+                : '목표 확인 큐 응답 형식이 올바르지 않습니다'
+            setHitlSourceState('planning', { kind: 'failed', message })
+            recordHitlIncidentOnce('planning', 'Goal confirmation queue response invalid', message)
+            return
+          }
+          clearHitlIncident('planning')
+          pendingGoalConfirmations.value = parsersRes.parsers.parseAwaitingGoalsPayload(planRes.value, workspaceId)
+          setHitlSourceState('planning', { kind: 'ok' })
+        } else if (
+          planRes.error.kind !== 'epoch_stale'
+          && planRes.error.kind !== 'aborted'
+        ) {
+          setHitlSourceState('planning', { kind: 'failed', message: planRes.error.message })
+          recordHitlIncidentOnce(
+            'planning',
+            `Goal confirmation queue unavailable (${planRes.error.status ?? planRes.error.kind})`,
+            planRes.error.message,
+          )
+        }
+      })
       return
     }
 
@@ -678,187 +650,237 @@ export async function refreshPendingHitl(
 
     // Apply each HITL source independently as soon as it settles so one slow
     // or hung endpoint never blocks the other 4 sources from updating.
-    const approvalsJob = apiGet<unknown>('/api/v1/keepers/tool-approvals', reqOpts).then((approvalsRes) => {
+    const approvalsJob = apiGet<unknown>('/api/v1/keepers/tool-approvals', reqOpts).then(async (approvalsRes) => {
       if (!isCurrent()) return
-      if (approvalsRes.ok) {
-        const raw = approvalsRes.value
-        const hasValidList =
-          isRecord(raw)
-          && raw.ok !== false
-          && Array.isArray(raw.pending)
-        if (!hasValidList) {
-          const message =
-            isRecord(raw) && typeof raw.error === 'string' && raw.error.trim()
-              ? raw.error.trim()
-              : '도구 승인 큐 응답 형식이 올바르지 않습니다'
-          setHitlSourceState('approvals', { kind: 'failed', message })
-          recordHitlIncidentOnce('approvals', 'Tool approval queue response invalid', message)
-          return
+      const parsersRes = approvalsRes.ok ? await parsersJob : null
+      if (!isCurrent()) return
+      batch(() => {
+        if (approvalsRes.ok && parsersRes) {
+          if (!parsersRes.ok) {
+            setHitlSourceState('approvals', { kind: 'failed', message: parsersRes.message })
+            recordHitlIncidentOnce('approvals', 'Tool approval decoder unavailable', parsersRes.message)
+            return
+          }
+          const raw = approvalsRes.value
+          const hasValidList =
+            isRecord(raw)
+            && raw.ok !== false
+            && Array.isArray(raw.pending)
+          if (!hasValidList) {
+            const message =
+              isRecord(raw) && typeof raw.error === 'string' && raw.error.trim()
+                ? raw.error.trim()
+                : '도구 승인 큐 응답 형식이 올바르지 않습니다'
+            setHitlSourceState('approvals', { kind: 'failed', message })
+            recordHitlIncidentOnce('approvals', 'Tool approval queue response invalid', message)
+            return
+          }
+          clearHitlIncident('approvals')
+          pendingApprovals.value = parsersRes.parsers.parseToolApprovalsPayload(raw, workspaceId)
+          setHitlSourceState('approvals', { kind: 'ok' })
+        } else if (
+          !approvalsRes.ok
+          && approvalsRes.error.kind !== 'epoch_stale'
+          && approvalsRes.error.kind !== 'aborted'
+        ) {
+          setHitlSourceState('approvals', { kind: 'failed', message: approvalsRes.error.message })
+          recordHitlIncidentOnce(
+            'approvals',
+            `Tool approval queue unavailable (${approvalsRes.error.status ?? approvalsRes.error.kind})`,
+            approvalsRes.error.message,
+          )
         }
-        clearHitlIncident('approvals')
-        pendingApprovals.value = parseToolApprovalsPayload(raw, workspaceId)
-        setHitlSourceState('approvals', { kind: 'ok' })
-      } else if (
-        approvalsRes.error.kind !== 'epoch_stale'
-        && approvalsRes.error.kind !== 'aborted'
-      ) {
-        setHitlSourceState('approvals', { kind: 'failed', message: approvalsRes.error.message })
-        recordHitlIncidentOnce(
-          'approvals',
-          `Tool approval queue unavailable (${approvalsRes.error.status ?? approvalsRes.error.kind})`,
-          approvalsRes.error.message,
-        )
-      }
+      })
     })
 
-    const asksJob = apiGet<unknown>('/api/v1/keepers/asks?include_resolved=false', reqOpts).then((asksRes) => {
+    const asksJob = apiGet<unknown>('/api/v1/keepers/asks?include_resolved=false', reqOpts).then(async (asksRes) => {
       if (!isCurrent()) return
-      if (asksRes.ok) {
-        const decoded = decodeKeeperAsksWire(asksRes.value)
-        if (!decoded.ok) {
-          setHitlSourceState('asks', { kind: 'failed', message: decoded.error })
-          recordHitlIncidentOnce('asks', 'Keeper asks queue response invalid', decoded.error)
-          return
+      const parsersRes = asksRes.ok ? await parsersJob : null
+      if (!isCurrent()) return
+      batch(() => {
+        if (asksRes.ok && parsersRes) {
+          if (!parsersRes.ok) {
+            setHitlSourceState('asks', { kind: 'failed', message: parsersRes.message })
+            recordHitlIncidentOnce('asks', 'Keeper asks decoder unavailable', parsersRes.message)
+            return
+          }
+          const decoded = parsersRes.parsers.decodeKeeperAsksWire(asksRes.value)
+          if (!decoded.ok) {
+            setHitlSourceState('asks', { kind: 'failed', message: decoded.error })
+            recordHitlIncidentOnce('asks', 'Keeper asks queue response invalid', decoded.error)
+            return
+          }
+          clearHitlIncident('asks')
+          pendingAsks.value = decoded.asks.map((ask) => ({
+            askId: ask.askId,
+            keeper: ask.keeper,
+            prompt: ask.promptSummary ?? 'Keeper awaiting operator answer',
+            askedAt: ask.askedAt,
+            workspaceId,
+            revision: ask.revision,
+          }))
+          setHitlSourceState('asks', { kind: 'ok' })
+        } else if (
+          !asksRes.ok
+          && asksRes.error.kind !== 'epoch_stale'
+          && asksRes.error.kind !== 'aborted'
+        ) {
+          setHitlSourceState('asks', { kind: 'failed', message: asksRes.error.message })
+          recordHitlIncidentOnce(
+            'asks',
+            `Keeper asks queue unavailable (${asksRes.error.status ?? asksRes.error.kind})`,
+            asksRes.error.message,
+          )
         }
-        clearHitlIncident('asks')
-        pendingAsks.value = decoded.asks.map((ask) => ({
-          askId: ask.askId,
-          keeper: ask.keeper,
-          prompt: ask.promptSummary ?? 'Keeper awaiting operator answer',
-          askedAt: ask.askedAt,
-          workspaceId,
-          revision: ask.revision,
-        }))
-        setHitlSourceState('asks', { kind: 'ok' })
-      } else if (
-        asksRes.error.kind !== 'epoch_stale'
-        && asksRes.error.kind !== 'aborted'
-      ) {
-        setHitlSourceState('asks', { kind: 'failed', message: asksRes.error.message })
-        recordHitlIncidentOnce(
-          'asks',
-          `Keeper asks queue unavailable (${asksRes.error.status ?? asksRes.error.kind})`,
-          asksRes.error.message,
-        )
-      }
+      })
     })
 
-    const gateJob = apiGet<unknown>('/api/v1/dashboard/gate', reqOpts).then((gateRes) => {
+    const gateJob = apiGet<unknown>('/api/v1/dashboard/gate', reqOpts).then(async (gateRes) => {
       if (!isCurrent()) return
-      if (gateRes.ok) {
-        const decoded = decodeGateQueueStrict(gateRes.value)
-        if (!decoded.ok) {
-          setHitlSourceState('gate', { kind: 'failed', message: decoded.error })
+      const parsersRes = gateRes.ok ? await parsersJob : null
+      if (!isCurrent()) return
+      batch(() => {
+        if (gateRes.ok && parsersRes) {
+          if (!parsersRes.ok) {
+            setHitlSourceState('gate', { kind: 'failed', message: parsersRes.message })
+            recordHitlIncidentOnce('gate', 'Channel gate decoder unavailable', parsersRes.message)
+            return
+          }
+          const decoded = parsersRes.parsers.decodeGateQueueStrict(gateRes.value)
+          if (!decoded.ok) {
+            setHitlSourceState('gate', { kind: 'failed', message: decoded.error })
+            recordHitlIncidentOnce(
+              'gate',
+              decoded.unavailable
+                ? 'Channel gate approval queue unavailable'
+                : 'Channel gate queue response invalid',
+              decoded.error,
+            )
+            return
+          }
+          clearHitlIncident('gate')
+          setHitlSourceState('gate', { kind: 'ok' })
+          pendingGateApprovals.value = decoded.rows.map((row) => ({
+            id: row.id,
+            keeper: row.keeper,
+            toolName: row.toolName,
+            phase: row.phase ?? 'unknown',
+            waitingSec: row.waitingSec,
+            workspaceId,
+          }))
+        } else if (
+          !gateRes.ok
+          && gateRes.error.kind !== 'epoch_stale'
+          && gateRes.error.kind !== 'aborted'
+        ) {
+          setHitlSourceState('gate', { kind: 'failed', message: gateRes.error.message })
           recordHitlIncidentOnce(
             'gate',
-            decoded.unavailable
-              ? 'Channel gate approval queue unavailable'
-              : 'Channel gate queue response invalid',
-            decoded.error,
+            `Channel gate queue unavailable (${gateRes.error.status ?? gateRes.error.kind})`,
+            gateRes.error.message,
           )
-          return
         }
-        clearHitlIncident('gate')
-        setHitlSourceState('gate', { kind: 'ok' })
-        pendingGateApprovals.value = decoded.rows.map((row) => ({
-          id: row.id,
-          keeper: row.keeper,
-          toolName: row.toolName,
-          phase: row.phase ?? 'unknown',
-          waitingSec: row.waitingSec,
-          workspaceId,
-        }))
-      } else if (
-        gateRes.error.kind !== 'epoch_stale'
-        && gateRes.error.kind !== 'aborted'
-      ) {
-        setHitlSourceState('gate', { kind: 'failed', message: gateRes.error.message })
-        recordHitlIncidentOnce(
-          'gate',
-          `Channel gate queue unavailable (${gateRes.error.status ?? gateRes.error.kind})`,
-          gateRes.error.message,
-        )
-      }
+      })
     })
 
-    const planningJob = apiGet<unknown>('/api/v1/dashboard/planning', reqOpts).then((planRes) => {
+    const planningJob = apiGet<unknown>('/api/v1/dashboard/planning', reqOpts).then(async (planRes) => {
       if (!isCurrent()) return
-      if (planRes.ok) {
-        const raw = planRes.value
-        if (!isRecord(raw) || raw.ok === false || !Array.isArray(raw.goals)) {
-          const message =
-            isRecord(raw) && typeof raw.error === 'string' && raw.error.trim()
-              ? raw.error.trim()
-              : '목표 확인 큐 응답 형식이 올바르지 않습니다'
-          setHitlSourceState('planning', { kind: 'failed', message })
-          recordHitlIncidentOnce('planning', 'Goal confirmation queue response invalid', message)
-          return
+      const parsersRes = planRes.ok ? await parsersJob : null
+      if (!isCurrent()) return
+      batch(() => {
+        if (planRes.ok && parsersRes) {
+          if (!parsersRes.ok) {
+            setHitlSourceState('planning', { kind: 'failed', message: parsersRes.message })
+            recordHitlIncidentOnce('planning', 'Goal confirmation decoder unavailable', parsersRes.message)
+            return
+          }
+          const raw = planRes.value
+          if (!isRecord(raw) || raw.ok === false || !Array.isArray(raw.goals)) {
+            const message =
+              isRecord(raw) && typeof raw.error === 'string' && raw.error.trim()
+                ? raw.error.trim()
+                : '목표 확인 큐 응답 형식이 올바르지 않습니다'
+            setHitlSourceState('planning', { kind: 'failed', message })
+            recordHitlIncidentOnce('planning', 'Goal confirmation queue response invalid', message)
+            return
+          }
+          clearHitlIncident('planning')
+          pendingGoalConfirmations.value = parsersRes.parsers.parseAwaitingGoalsPayload(raw, workspaceId)
+          setHitlSourceState('planning', { kind: 'ok' })
+        } else if (
+          !planRes.ok
+          && planRes.error.kind !== 'epoch_stale'
+          && planRes.error.kind !== 'aborted'
+        ) {
+          setHitlSourceState('planning', { kind: 'failed', message: planRes.error.message })
+          recordHitlIncidentOnce(
+            'planning',
+            `Goal confirmation queue unavailable (${planRes.error.status ?? planRes.error.kind})`,
+            planRes.error.message,
+          )
         }
-        clearHitlIncident('planning')
-        pendingGoalConfirmations.value = parseAwaitingGoalsPayload(raw, workspaceId)
-        setHitlSourceState('planning', { kind: 'ok' })
-      } else if (
-        planRes.error.kind !== 'epoch_stale'
-        && planRes.error.kind !== 'aborted'
-      ) {
-        setHitlSourceState('planning', { kind: 'failed', message: planRes.error.message })
-        recordHitlIncidentOnce(
-          'planning',
-          `Goal confirmation queue unavailable (${planRes.error.status ?? planRes.error.kind})`,
-          planRes.error.message,
-        )
-      }
+      })
     })
 
-    const verificationJob = apiGet<unknown>('/api/v1/verification/requests?view=awaiting', reqOpts).then((verifRes) => {
+    const verificationJob = apiGet<unknown>('/api/v1/verification/requests?view=awaiting', reqOpts).then(async (verifRes) => {
       if (!isCurrent()) return
-      if (verifRes.ok) {
-        const raw = verifRes.value
-        if (!isRecord(raw) || (!Array.isArray(raw.requests) && !Array.isArray(raw.items))) {
-          const message = '응답에 검증 목록이 없습니다'
-          setHitlSourceState('verification', { kind: 'failed', message })
-          recordHitlIncidentOnce('verification', 'Verification queue response invalid', message)
-          return
+      const parsersRes = verifRes.ok ? await parsersJob : null
+      if (!isCurrent()) return
+      batch(() => {
+        if (verifRes.ok && parsersRes) {
+          if (!parsersRes.ok) {
+            setHitlSourceState('verification', { kind: 'failed', message: parsersRes.message })
+            recordHitlIncidentOnce('verification', 'Verification decoder unavailable', parsersRes.message)
+            return
+          }
+          const raw = verifRes.value
+          if (!isRecord(raw) || (!Array.isArray(raw.requests) && !Array.isArray(raw.items))) {
+            const message = '응답에 검증 목록이 없습니다'
+            setHitlSourceState('verification', { kind: 'failed', message })
+            recordHitlIncidentOnce('verification', 'Verification queue response invalid', message)
+            return
+          }
+          const coverage = parsersRes.parsers.decodeVerificationCoverage(raw)
+          const details: string[] = []
+          if (coverage.unresolvedTotal !== null && coverage.unresolvedTotal > 0) {
+            details.push(`대기 기록 누락 ${coverage.unresolvedTotal}건`)
+          }
+          if (coverage.unreadableTotal !== null && coverage.unreadableTotal > 0) {
+            details.push(`읽기 불가 ${coverage.unreadableTotal}건`)
+          }
+          if (coverage.truncated) details.push('일부 항목만 표시')
+          if (coverage.backlogError) {
+            const message = [coverage.backlogError, ...details].join(' · ')
+            setHitlSourceState('verification', { kind: 'failed', message })
+            recordHitlIncidentOnce('verification', 'Verification backlog read error', message)
+            return
+          }
+          pendingVerifications.value = parsersRes.parsers.parsePendingVerificationsPayload(raw, workspaceId)
+          if (coverage.backlogRecovery) {
+            const message = [coverage.backlogRecovery, ...details].join(' · ')
+            setHitlSourceState('verification', { kind: 'recovered', message })
+            recordHitlIncidentOnce('verification', 'Verification backlog recovered', message)
+          } else if (details.length > 0) {
+            const message = details.join(' · ')
+            setHitlSourceState('verification', { kind: 'partial', message })
+            recordHitlIncidentOnce('verification', 'Verification backlog partially observed', message)
+          } else {
+            clearHitlIncident('verification')
+            setHitlSourceState('verification', { kind: 'ok' })
+          }
+        } else if (
+          !verifRes.ok
+          && verifRes.error.kind !== 'epoch_stale'
+          && verifRes.error.kind !== 'aborted'
+        ) {
+          setHitlSourceState('verification', { kind: 'failed', message: verifRes.error.message })
+          recordHitlIncidentOnce(
+            'verification',
+            `Verification queue unavailable (${verifRes.error.status ?? verifRes.error.kind})`,
+            verifRes.error.message,
+          )
         }
-        const coverage = decodeVerificationCoverage(raw)
-        const details: string[] = []
-        if (coverage.unresolvedTotal !== null && coverage.unresolvedTotal > 0) {
-          details.push(`대기 기록 누락 ${coverage.unresolvedTotal}건`)
-        }
-        if (coverage.unreadableTotal !== null && coverage.unreadableTotal > 0) {
-          details.push(`읽기 불가 ${coverage.unreadableTotal}건`)
-        }
-        if (coverage.truncated) details.push('일부 항목만 표시')
-        if (coverage.backlogError) {
-          const message = [coverage.backlogError, ...details].join(' · ')
-          setHitlSourceState('verification', { kind: 'failed', message })
-          recordHitlIncidentOnce('verification', 'Verification backlog read error', message)
-          return
-        }
-        pendingVerifications.value = parsePendingVerificationsPayload(raw, workspaceId)
-        if (coverage.backlogRecovery) {
-          const message = [coverage.backlogRecovery, ...details].join(' · ')
-          setHitlSourceState('verification', { kind: 'recovered', message })
-          recordHitlIncidentOnce('verification', 'Verification backlog recovered', message)
-        } else if (details.length > 0) {
-          const message = details.join(' · ')
-          setHitlSourceState('verification', { kind: 'partial', message })
-          recordHitlIncidentOnce('verification', 'Verification backlog partially observed', message)
-        } else {
-          clearHitlIncident('verification')
-          setHitlSourceState('verification', { kind: 'ok' })
-        }
-      } else if (
-        verifRes.error.kind !== 'epoch_stale'
-        && verifRes.error.kind !== 'aborted'
-      ) {
-        setHitlSourceState('verification', { kind: 'failed', message: verifRes.error.message })
-        recordHitlIncidentOnce(
-          'verification',
-          `Verification queue unavailable (${verifRes.error.status ?? verifRes.error.kind})`,
-          verifRes.error.message,
-        )
-      }
+      })
     })
 
     await Promise.all([approvalsJob, asksJob, gateJob, planningJob, verificationJob])
@@ -915,16 +937,18 @@ export async function submitFastToolApproval(
     })
     return { ok: false, message: detail }
   }
-  pendingApprovals.value = pendingApprovals.peek().filter(
-    (row) => row.approvalId !== item.approvalId,
-  )
-  resourceCache.invalidateTopic('tool_approval')
-  pushShellToast(
-    settled
-      ? `${item.keeper} · ${item.tool || item.approvalId} ${decision === 'approve' ? '승인 완료' : '거절 완료'}`
-      : `${item.keeper} · ${item.tool || item.approvalId} · 같은 호출 재시도 시 적용할 결정으로 저장했습니다.`,
-    decision === 'approve' ? 'success' : 'warning',
-  )
+  batch(() => {
+    pendingApprovals.value = pendingApprovals.peek().filter(
+      (row) => row.approvalId !== item.approvalId,
+    )
+    resourceCache.invalidateTopic('tool_approval')
+    pushShellToast(
+      settled
+        ? `${item.keeper} · ${item.tool || item.approvalId} ${decision === 'approve' ? '승인 완료' : '거절 완료'}`
+        : `${item.keeper} · ${item.tool || item.approvalId} · 같은 호출 재시도 시 적용할 결정으로 저장했습니다.`,
+      decision === 'approve' ? 'success' : 'warning',
+    )
+  })
   return { ok: true, message: 'ok' }
 }
 
@@ -1073,36 +1097,40 @@ export function installShellObservers(fetchImpl?: typeof fetch): () => void {
   const unsubEpoch = sessionEpoch.subscribe((epoch) => {
     if (epoch === lastEpoch) return
     lastEpoch = epoch
-    const overlay = activeOverlay.peek()
-    if (overlay?.kind === 'inspect' && overlay.epoch !== epoch) activeOverlay.value = null
     if (hitlDebounceTimer) {
       clearTimeout(hitlDebounceTimer)
       hitlDebounceTimer = null
     }
     hitlAbortCtrl?.abort()
     hitlIncidentLastSig.clear()
-    pendingApprovals.value = []
-    pendingAsks.value = []
-    pendingGateApprovals.value = []
-    pendingGoalConfirmations.value = []
-    pendingVerifications.value = []
-    hitlSourceStatus.value = DEFAULT_HITL_SOURCE_STATUS
+    batch(() => {
+      const overlay = activeOverlay.peek()
+      if (overlay?.kind === 'inspect' && overlay.epoch !== epoch) activeOverlay.value = null
+      pendingApprovals.value = []
+      pendingAsks.value = []
+      pendingGateApprovals.value = []
+      pendingGoalConfirmations.value = []
+      pendingVerifications.value = []
+      hitlSourceStatus.value = DEFAULT_HITL_SOURCE_STATUS
+    })
     if (canAccessMemberWorkspace(authSession.peek())) {
       void refreshPendingHitl(fetchImpl)
     }
   })
 
   const unsubAuth = authSession.subscribe((session) => {
-    if (!isSingleUserMember(session)) {
-      pendingApprovals.value = []
-      pendingAsks.value = []
-      pendingGateApprovals.value = []
-      pendingVerifications.value = []
-    }
-    if (!canAccessMemberWorkspace(session)) {
-      pendingGoalConfirmations.value = []
-      hitlSourceStatus.value = DEFAULT_HITL_SOURCE_STATUS
-    }
+    batch(() => {
+      if (!isSingleUserMember(session)) {
+        pendingApprovals.value = []
+        pendingAsks.value = []
+        pendingGateApprovals.value = []
+        pendingVerifications.value = []
+      }
+      if (!canAccessMemberWorkspace(session)) {
+        pendingGoalConfirmations.value = []
+        hitlSourceStatus.value = DEFAULT_HITL_SOURCE_STATUS
+      }
+    })
   })
 
   const unsubReconnect = subscribeObserverReconnect(() => {
@@ -1125,30 +1153,32 @@ export function installShellObservers(fetchImpl?: typeof fetch): () => void {
 }
 
 export function resetShellStateForTests(): void {
-  viewportWidth.value = 1440
-  railPreferredExpanded.value = true
-  activeOverlay.value = null
-  commandPaletteOpen.value = false
-  commandPaletteMounted.value = false
-  mobileMoreOpen.value = false
-  incidentsSignal.value = []
   hitlIncidentLastSig.clear()
-  pendingApprovals.value = []
-  pendingAsks.value = []
-  pendingGateApprovals.value = []
-  pendingGoalConfirmations.value = []
-  pendingVerifications.value = []
-  hitlSourceStatus.value = DEFAULT_HITL_SOURCE_STATUS
-  hitlLoading.value = false
   for (const id of [...shellToastTimers.keys()]) {
     clearShellToastTimer(id)
   }
-  toastsSignal.value = []
-  buildConnectionInfo.value = {
-    version: null,
-    serverCommit: null,
-    bundleCommit: null,
-    mismatched: false,
-    checkedAt: null,
-  }
+  batch(() => {
+    viewportWidth.value = 1440
+    railPreferredExpanded.value = true
+    activeOverlay.value = null
+    commandPaletteOpen.value = false
+    commandPaletteMounted.value = false
+    mobileMoreOpen.value = false
+    incidentsSignal.value = []
+    pendingApprovals.value = []
+    pendingAsks.value = []
+    pendingGateApprovals.value = []
+    pendingGoalConfirmations.value = []
+    pendingVerifications.value = []
+    hitlSourceStatus.value = DEFAULT_HITL_SOURCE_STATUS
+    hitlLoading.value = false
+    toastsSignal.value = []
+    buildConnectionInfo.value = {
+      version: null,
+      serverCommit: null,
+      bundleCommit: null,
+      mismatched: false,
+      checkedAt: null,
+    }
+  })
 }

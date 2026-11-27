@@ -10,7 +10,7 @@
  * - Automatically clears cached entries & aborts in-flight loaders on `sessionEpoch` advance.
  */
 
-import { signal, type ReadonlySignal, type Signal } from '@preact/signals'
+import { batch, signal, type ReadonlySignal, type Signal } from '@preact/signals'
 import type { Result } from '../lib/result'
 import { currentSessionEpoch, isEpochCurrent, sessionEpoch } from './auth'
 import type { ApiError } from './transport'
@@ -78,7 +78,7 @@ export interface CacheFetchOptions {
 
 interface CacheEntry<T> {
   readonly state: Signal<Observed<T>>
-  topics: ReadonlySet<string>
+  readonly topics: Set<string>
   ttlMs: number
   updatedAt: number
   invalidated: boolean
@@ -93,6 +93,7 @@ const DEFAULT_TTL_MS = 15_000
 
 export class ResourceCache {
   private readonly entries = new Map<string, CacheEntry<unknown>>()
+  private readonly entriesByTopic = new Map<string, Set<CacheEntry<unknown>>>()
   private readonly unsubEpoch: () => void
   private readonly now: () => number
 
@@ -103,12 +104,31 @@ export class ResourceCache {
     })
   }
 
+  private indexTopic(topic: string, entry: CacheEntry<unknown>): void {
+    let bucket = this.entriesByTopic.get(topic)
+    if (!bucket) {
+      bucket = new Set()
+      this.entriesByTopic.set(topic, bucket)
+    }
+    bucket.add(entry)
+  }
+
+  private markEntryInvalidated(entry: CacheEntry<unknown>): void {
+    entry.invalidated = true
+    entry.invalidationGen += 1
+    const cur = entry.state.peek()
+    if (cur.kind === 'value' && !cur.stale) {
+      entry.state.value = { ...cur, stale: true }
+    }
+  }
+
   private getOrCreate<T>(key: string, ttlMs: number, topics: readonly string[]): CacheEntry<T> {
     let entry = this.entries.get(key) as CacheEntry<T> | undefined
     if (!entry) {
+      const topicSet = new Set<string>(topics)
       entry = {
         state: signal<Observed<T>>(observedLoading<T>()),
-        topics: new Set(topics),
+        topics: topicSet,
         ttlMs,
         updatedAt: 0,
         invalidated: false,
@@ -119,10 +139,19 @@ export class ResourceCache {
         abortController: null,
       }
       this.entries.set(key, entry as CacheEntry<unknown>)
+      for (const topic of topicSet) {
+        this.indexTopic(topic, entry as CacheEntry<unknown>)
+      }
     } else {
       entry.ttlMs = ttlMs
       if (topics.length > 0) {
-        entry.topics = new Set([...entry.topics, ...topics])
+        for (let i = 0; i < topics.length; i++) {
+          const topic = topics[i]!
+          if (!entry.topics.has(topic)) {
+            entry.topics.add(topic)
+            this.indexTopic(topic, entry as CacheEntry<unknown>)
+          }
+        }
       }
     }
     return entry
@@ -185,9 +214,9 @@ export class ResourceCache {
     entry.inFlightGen = fetchGen
     entry.epoch = startEpoch
 
-    if (cur.kind === 'value') {
+    if (cur.kind === 'value' && !cur.stale) {
       entry.state.value = { ...cur, stale: true }
-    } else if (cur.kind !== 'loading') {
+    } else if (cur.kind !== 'value' && cur.kind !== 'loading') {
       entry.state.value = observedLoading<T>()
     }
 
@@ -267,56 +296,83 @@ export class ResourceCache {
    * Mounted views will refresh lazily on their next read or scheduled observation cycle.
    */
   invalidateTopic(topic: string): number {
-    let count = 0
-    for (const entry of this.entries.values()) {
-      if (!entry.topics.has(topic)) continue
-      entry.invalidated = true
-      entry.invalidationGen += 1
-      const cur = entry.state.peek()
-      if (cur.kind === 'value' && !cur.stale) {
-        entry.state.value = { ...cur, stale: true }
+    const bucket = this.entriesByTopic.get(topic)
+    if (!bucket || bucket.size === 0) return 0
+    batch(() => {
+      for (const entry of bucket) {
+        this.markEntryInvalidated(entry)
       }
-      count += 1
+    })
+    return bucket.size
+  }
+
+  /**
+   * Coalesced multi-topic invalidation for SSE frame bursts: deduplicates entries
+   * subscribed to overlapping topics so each entry bumps `invalidationGen` once and
+   * all stale transitions flush inside a single Preact `batch()`.
+   */
+  invalidateTopics(topics: Iterable<string>): number {
+    let singleBucket: Set<CacheEntry<unknown>> | null = null
+    let matched: Set<CacheEntry<unknown>> | null = null
+    for (const topic of topics) {
+      const bucket = this.entriesByTopic.get(topic)
+      if (!bucket || bucket.size === 0) continue
+      if (singleBucket === null && matched === null) {
+        singleBucket = bucket
+      } else {
+        if (matched === null) {
+          matched = new Set(singleBucket!)
+          singleBucket = null
+        }
+        for (const entry of bucket) {
+          matched.add(entry)
+        }
+      }
     }
-    return count
+    const target = matched ?? singleBucket
+    if (!target || target.size === 0) return 0
+    batch(() => {
+      for (const entry of target) {
+        this.markEntryInvalidated(entry)
+      }
+    })
+    return target.size
   }
 
   invalidateKey(key: string): boolean {
     const entry = this.entries.get(key)
     if (!entry) return false
-    entry.invalidated = true
-    entry.invalidationGen += 1
-    const cur = entry.state.peek()
-    if (cur.kind === 'value' && !cur.stale) {
-      entry.state.value = { ...cur, stale: true }
-    }
+    this.markEntryInvalidated(entry)
     return true
   }
 
   invalidateAll(): number {
+    if (this.entries.size === 0) return 0
     let count = 0
-    for (const entry of this.entries.values()) {
-      entry.invalidated = true
-      entry.invalidationGen += 1
-      const cur = entry.state.peek()
-      if (cur.kind === 'value' && !cur.stale) {
-        entry.state.value = { ...cur, stale: true }
+    batch(() => {
+      for (const entry of this.entries.values()) {
+        this.markEntryInvalidated(entry)
+        count += 1
       }
-      count += 1
-    }
+    })
     return count
   }
 
   clearAll(): void {
-    for (const entry of this.entries.values()) {
-      entry.abortController?.abort('cache_cleared')
-      entry.abortController = null
-      entry.inFlight = null
-      entry.updatedAt = 0
-      entry.invalidated = true
-      entry.invalidationGen += 1
-      entry.state.value = observedLoading()
-    }
+    if (this.entries.size === 0) return
+    batch(() => {
+      for (const entry of this.entries.values()) {
+        entry.abortController?.abort('cache_cleared')
+        entry.abortController = null
+        entry.inFlight = null
+        entry.updatedAt = 0
+        entry.invalidated = true
+        entry.invalidationGen += 1
+        if (entry.state.peek().kind !== 'loading') {
+          entry.state.value = observedLoading()
+        }
+      }
+    })
   }
 
   size(): number {
@@ -327,6 +383,7 @@ export class ResourceCache {
     this.clearAll()
     this.unsubEpoch()
     this.entries.clear()
+    this.entriesByTopic.clear()
   }
 }
 

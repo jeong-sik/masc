@@ -324,9 +324,68 @@ export function isEpochCurrent(epoch: number): boolean {
 }
 
 export function bumpSessionEpoch(): number {
+  clearBootstrapHandoffs()
   const next = sessionEpoch.peek() + 1
   sessionEpoch.value = next
   return next
+}
+
+interface BootstrapHealthHandoff {
+  readonly epoch: number
+  readonly payload: Record<string, unknown>
+  readonly capturedAt: number
+}
+
+interface BootstrapShellHandoff {
+  readonly epoch: number
+  readonly token: string | null
+  readonly workspaceId: string
+  readonly payload: unknown
+  readonly etag: string | null
+  readonly capturedAt: number
+}
+
+const BOOTSTRAP_HANDOFF_TTL_MS = 5_000
+let bootstrapHealthHandoff: BootstrapHealthHandoff | null = null
+let bootstrapShellHandoff: BootstrapShellHandoff | null = null
+
+function clearBootstrapHandoffs(): void {
+  bootstrapHealthHandoff = null
+  bootstrapShellHandoff = null
+}
+
+export function clearBootstrapShellHandoff(): void {
+  bootstrapShellHandoff = null
+}
+
+/** One-shot handoff of the `/health` JSON parsed during `bootstrapAuthSession`. */
+export function consumeBootstrapHealthPayload(epoch: number): Record<string, unknown> | null {
+  const entry = bootstrapHealthHandoff
+  if (!entry || entry.epoch !== epoch || Date.now() - entry.capturedAt > BOOTSTRAP_HANDOFF_TTL_MS) {
+    return null
+  }
+  bootstrapHealthHandoff = null
+  return entry.payload
+}
+
+/** One-shot handoff of the `/api/v1/dashboard/shell` response probed during single-user boot. */
+export function consumeBootstrapShellPayload(
+  epoch: number,
+  token: string | null,
+  workspaceId: string,
+): { readonly payload: unknown; readonly etag: string | null } | null {
+  const entry = bootstrapShellHandoff
+  if (
+    !entry
+    || entry.epoch !== epoch
+    || entry.token !== token
+    || entry.workspaceId !== workspaceId
+    || Date.now() - entry.capturedAt > BOOTSTRAP_HANDOFF_TTL_MS
+  ) {
+    return null
+  }
+  bootstrapShellHandoff = null
+  return { payload: entry.payload, etag: entry.etag }
 }
 
 export function getSingleUserToken(): string | null {
@@ -390,23 +449,27 @@ export function wipeTransientSecrets(): void {
 
 export function registerWorkspaceTargets(targets: readonly WorkspaceTarget[]): void {
   const list = targets.length > 0 ? [...targets] : [{ id: 'default', label: 'Default Workspace' }]
-  workspaceTargets.value = Object.freeze(list)
-  if (!list.some(t => t.id === activeWorkspaceId.peek())) {
-    selectWorkspace(list[0]!.id)
-  }
+  batch(() => {
+    workspaceTargets.value = Object.freeze(list)
+    if (!list.some(t => t.id === activeWorkspaceId.peek())) {
+      selectWorkspace(list[0]!.id)
+    }
+  })
 }
 
 export function selectWorkspace(workspaceId: string): boolean {
   const trimmed = workspaceId.trim()
   if (!trimmed || trimmed === activeWorkspaceId.peek()) return false
-  activeWorkspaceId.value = trimmed
-  bumpSessionEpoch()
-  const cur = authSession.peek()
-  if (cur.kind === 'single_user_local') {
-    authSession.value = { ...cur, workspaceId: trimmed }
-  } else if (cur.kind === 'multi_account_signed_in') {
-    authSession.value = { ...cur, workspaceId: trimmed }
-  }
+  batch(() => {
+    activeWorkspaceId.value = trimmed
+    bumpSessionEpoch()
+    const cur = authSession.peek()
+    if (cur.kind === 'single_user_local') {
+      authSession.value = { ...cur, workspaceId: trimmed }
+    } else if (cur.kind === 'multi_account_signed_in') {
+      authSession.value = { ...cur, workspaceId: trimmed }
+    }
+  })
   return true
 }
 
@@ -692,8 +755,10 @@ async function readMultiAccountSession(
   const serverWorkspaceId = nonEmptyString(whoBody.workspace_id) ?? nonEmptyString(sessionBody.workspace_id)
   const workspaceId = serverWorkspaceId ?? prevWorkspaceId
   if (workspaceId !== prevWorkspaceId) {
-    activeWorkspaceId.value = workspaceId
-    bumpSessionEpoch()
+    batch(() => {
+      activeWorkspaceId.value = workspaceId
+      bumpSessionEpoch()
+    })
   }
   writeAccountMarker(userId)
   return {
@@ -894,6 +959,9 @@ export async function bootstrapAuthSession(
       authSession.value = next
       return next
     }
+    if (fetchImpl === globalThis.fetch) {
+      bootstrapHealthHandoff = { epoch, payload: health, capturedAt: Date.now() }
+    }
     const mode = parseAccountMode(health.account_mode)
     if (mode === 'invalid') {
       const next: AuthSession = {
@@ -920,8 +988,14 @@ export async function bootstrapAuthSession(
       // credential change preempted this bootstrap.
       const workspaceBumpedBySelf = activeWorkspaceId.peek() !== prevWs && currentStoredTokenRevision() === bearerRevision
       if (!ownsCredential() && !workspaceBumpedBySelf) return authSession.peek()
-      if (next.kind === 'account_changed') bumpSessionEpoch()
-      authSession.value = next
+      if (next.kind === 'account_changed') {
+        batch(() => {
+          bumpSessionEpoch()
+          authSession.value = next
+        })
+      } else {
+        authSession.value = next
+      }
       return next
     }
 
@@ -1033,6 +1107,16 @@ export async function bootstrapAuthSession(
       resolvedRole = parsedShellAuth.role
       resolvedCanTokenAdmin = parsedShellAuth.canTokenAdmin
       resolvedCanTokenRead = parsedShellAuth.canTokenRead
+      if (fetchImpl === globalThis.fetch && shellBody !== null) {
+        bootstrapShellHandoff = {
+          epoch,
+          token: singleUserBearerToken,
+          workspaceId: activeWorkspaceId.peek(),
+          payload: shellBody,
+          etag: shellRes.headers.get('etag'),
+          capturedAt: Date.now(),
+        }
+      }
     }
 
     const next: AuthSession = {
@@ -1209,14 +1293,16 @@ export function installAuthLifecycleGuards(
     const nextAccountId = event.newValue
     if (nextAccountId !== cur.accountId) {
       activeCsrfToken = null
-      bumpSessionEpoch()
-      authSession.value = {
-        kind: 'account_changed',
-        mode: 'multi_account',
-        previousAccountId: cur.accountId,
-        nextAccountId,
-        authMethods: cur.authMethods,
-      }
+      batch(() => {
+        bumpSessionEpoch()
+        authSession.value = {
+          kind: 'account_changed',
+          mode: 'multi_account',
+          previousAccountId: cur.accountId,
+          nextAccountId,
+          authMethods: cur.authMethods,
+        }
+      })
     }
   }
 
@@ -1251,13 +1337,16 @@ export function installAuthLifecycleGuards(
 }
 
 export function resetAuthStateForTests(): void {
+  clearBootstrapHandoffs()
   wipeTransientSecrets()
   writeSessionBearerToken(null)
   lastForbiddenRecheckAt = 0
   forbiddenRecheckInFlight = null
-  authSession.value = { kind: 'probing' }
-  sessionEpoch.value = 1
-  activeWorkspaceId.value = 'default'
-  workspaceTargets.value = Object.freeze([{ id: 'default', label: 'Default Workspace' }])
+  batch(() => {
+    authSession.value = { kind: 'probing' }
+    sessionEpoch.value = 1
+    activeWorkspaceId.value = 'default'
+    workspaceTargets.value = Object.freeze([{ id: 'default', label: 'Default Workspace' }])
+  })
   writeAccountMarker(null)
 }

@@ -26,7 +26,8 @@ import { resourceCache } from '../../core/resource-cache'
 import { apiGet, apiMutate } from '../../core/transport'
 import { ok } from '../../lib/result'
 import { KeeperBadge } from '../../components/keeper-badge'
-import { MasterDetail, VirtualList } from '../../components/primitives'
+import { MasterDetail } from '../../components/primitives/master-detail'
+import { VirtualList } from '../../components/primitives/virtual-list'
 import { isAdminLockedForSession } from '../../routes/router'
 import { pushShellToast } from '../../shell/shell-state'
 import {
@@ -216,21 +217,44 @@ function ReactionBar(props: {
   `
 }
 
+const EMPTY_BOARD_BUNDLE: BoardBundle = {
+  posts: [],
+  hearths: [],
+  subBoards: [],
+  hasMore: false,
+  filteredOutCount: 0,
+  signalScanTruncated: false,
+}
+
+function boardCacheKeyFor(
+  multiAccount: boolean,
+  sortBy: 'recent' | 'hot' | 'trending' | 'discussed',
+  signalOnly: boolean,
+  selectedHearth: string,
+): { readonly params: URLSearchParams; readonly cacheKey: string } {
+  const params = new URLSearchParams({ sort_by: sortBy, limit: '200' })
+  if (signalOnly) {
+    params.set('signal_only', 'true')
+    params.set('exclude_system', 'true')
+  }
+  if (selectedHearth) params.set('hearth', selectedHearth)
+  return { params, cacheKey: `kn:board:${multiAccount ? 'ma' : 'local'}:${params.toString()}` }
+}
+
 export function BoardTab(props: WorkspaceViewProps) {
   const session = authSession.value
   const isSingleUser = session.kind === 'single_user_local'
   const isMultiAccount = !isSingleUser
   const canAdminBoard = isSingleUser && !isAdminLockedForSession('admin', session)
   const canReactBoard = canUseSingleUserTokenRead(session)
-  const [bundle, setBundle] = useState<BoardBundle>({
-    posts: [],
-    hearths: [],
-    subBoards: [],
-    hasMore: false,
-    filteredOutCount: 0,
-    signalScanTruncated: false,
-  })
-  const [loading, setLoading] = useState(true)
+  // Hydrate synchronously from ResourceCache when revisiting Board so frame 1 paints without flicker.
+  const initialCached = useMemo(() => {
+    const { cacheKey } = boardCacheKeyFor(isMultiAccount, 'recent', true, '')
+    const peeked = resourceCache.peek<BoardBundle>(cacheKey)
+    return peeked?.kind === 'value' ? peeked.data : null
+  }, [])
+  const [bundle, setBundle] = useState<BoardBundle>(() => initialCached ?? EMPTY_BOARD_BUNDLE)
+  const [loading, setLoading] = useState(() => initialCached === null)
   const [loadError, setLoadError] = useState<string | null>(null)
 
   // Filters: Signal-only ON by default per TUI `#6`
@@ -240,7 +264,9 @@ export function BoardTab(props: WorkspaceViewProps) {
   const [query, setQuery] = useState('')
 
   // Selection & Detail
-  const [selectedPostId, setSelectedPostId] = useState<string | null>(props.entityId ?? null)
+  const [selectedPostId, setSelectedPostId] = useState<string | null>(
+    () => props.entityId ?? initialCached?.posts[0]?.id ?? null,
+  )
   const [detail, setDetail] = useState<BoardDetailData | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
   const [detailRefreshing, setDetailRefreshing] = useState(false)
@@ -287,13 +313,7 @@ export function BoardTab(props: WorkspaceViewProps) {
     if (reason !== 'sse') setLoading(true)
     setLoadError(null)
     const multiAccountNow = authSession.peek().kind === 'multi_account_signed_in'
-    const params = new URLSearchParams({ sort_by: sortBy, limit: '200' })
-    if (signalOnly) {
-      params.set('signal_only', 'true')
-      params.set('exclude_system', 'true')
-    }
-    if (selectedHearth) params.set('hearth', selectedHearth)
-    const cacheKey = `kn:board:${multiAccountNow ? 'ma' : 'local'}:${params.toString()}`
+    const { params, cacheKey } = boardCacheKeyFor(multiAccountNow, sortBy, signalOnly, selectedHearth)
 
     const obs = await resourceCache.fetch<BoardBundle>(
       cacheKey,
@@ -616,12 +636,15 @@ export function BoardTab(props: WorkspaceViewProps) {
   }, [loadBoard, loadPostDetail])
 
   const activeDetail = detail && detail.post.id === selectedPostId ? detail : null
-
-  const visibleComments = activeDetail?.comments.slice(commentWindowStart, commentWindowStart + MAX_RENDERED_COMMENTS) ?? []
   const focusedComment = activeDetail?.focusedComment
-  if (focusedComment && !activeDetail?.comments.some((row) => row.id === focusedComment.id)) {
-    visibleComments.push(focusedComment)
-  }
+
+  const visibleComments = useMemo(() => {
+    const slice = activeDetail?.comments.slice(commentWindowStart, commentWindowStart + MAX_RENDERED_COMMENTS) ?? []
+    if (focusedComment && !activeDetail?.comments.some((row) => row.id === focusedComment.id)) {
+      return [...slice, focusedComment]
+    }
+    return slice
+  }, [activeDetail, commentWindowStart, focusedComment])
 
   useEffect(() => {
     const view = replyViewRef.current
@@ -737,6 +760,9 @@ export function BoardTab(props: WorkspaceViewProps) {
 
   const foldedFeed = useMemo<readonly FoldedBoardEntry[]>(() => {
     const q = query.trim().toLowerCase()
+    if (!signalOnly && !selectedHearth && q.length === 0) {
+      return foldSuccessionChains(bundle.posts)
+    }
     const visible = bundle.posts.filter((p) => {
       if (signalOnly && !p.isSignal) return false
       if (selectedHearth && p.hearth !== selectedHearth) return false
@@ -959,7 +985,38 @@ export function BoardTab(props: WorkspaceViewProps) {
 
   const overflowHearthCount = Math.max(0, allHearthOptions.length - TOP_HEARTH_CHIP_LIMIT)
 
-  const masterPane = html`
+  const renderNowBucketMs = Math.floor(Date.now() / 15_000) * 15_000
+  const getBoardRowKey = useCallback((e: FoldedBoardEntry) => e.head.id, [])
+  const renderBoardRow = useCallback((entry: FoldedBoardEntry) => {
+    const p = entry.head
+    return html`
+      <button
+        type="button"
+        class="kn-row-btn kn-board-row"
+        data-selected=${selectedPostId === p.id ? 'true' : 'false'}
+        onClick=${() => setSelectedPostId(p.id)}
+      >
+        <div class="kn-row-top">
+          <span class="kn-row-title">
+            ${p.pinned ? '📌 ' : ''}${p.title}
+          </span>
+          ${p.hearth && html`<span class="kn-badge">#${p.hearth}</span>`}
+        </div>
+        <div class="kn-row-meta">
+          <${KeeperBadge} id=${p.author} size="sm" />
+          <span class="tnum">▲ ${p.votes}</span>
+          <span class="tnum">💬 ${p.commentCount}</span>
+          <span>${formatRelativeTime(p.updatedAt || p.createdAt, renderNowBucketMs)}</span>
+          ${renderAudienceBadges(p.audience, true)}
+          ${entry.predecessors.length > 0 && html`
+            <span class="kn-badge kn-badge--info">계승 체인 +${entry.predecessors.length}</span>
+          `}
+        </div>
+      </button>
+    `
+  }, [selectedPostId, renderNowBucketMs])
+
+  const masterPane = useMemo(() => html`
     <div class="kn-pane-col">
       <div class="kn-pane-head">
         <h2 class="kn-pane-title">Board <span class="kn-chip-count">(${foldedFeed.length})</span></h2>
@@ -1120,40 +1177,37 @@ export function BoardTab(props: WorkspaceViewProps) {
               estimateSize=${84}
               height="100%"
               ariaLabel="게시판 목록"
-              getItemKey=${(e: FoldedBoardEntry) => e.head.id}
+              getItemKey=${getBoardRowKey}
               empty=${html`<div class="kn-detail-pad"><span class="dtable-absent">표시할 게시글이 없습니다.</span></div>`}
-              renderItem=${(entry: FoldedBoardEntry) => {
-                const p = entry.head
-                return html`
-                  <button
-                    type="button"
-                    class="kn-row-btn kn-board-row"
-                    data-selected=${selectedPostId === p.id ? 'true' : 'false'}
-                    onClick=${() => setSelectedPostId(p.id)}
-                  >
-                    <div class="kn-row-top">
-                      <span class="kn-row-title">
-                        ${p.pinned ? '📌 ' : ''}${p.title}
-                      </span>
-                      ${p.hearth && html`<span class="kn-badge">#${p.hearth}</span>`}
-                    </div>
-                    <div class="kn-row-meta">
-                      <${KeeperBadge} id=${p.author} size="sm" />
-                      <span class="tnum">▲ ${p.votes}</span>
-                      <span class="tnum">💬 ${p.commentCount}</span>
-                      <span>${formatRelativeTime(p.updatedAt || p.createdAt)}</span>
-                      ${renderAudienceBadges(p.audience, true)}
-                      ${entry.predecessors.length > 0 && html`
-                        <span class="kn-badge kn-badge--info">계승 체인 +${entry.predecessors.length}</span>
-                      `}
-                    </div>
-                  </button>
-                `
-              }}
+              renderItem=${renderBoardRow}
             />
           `}
     </div>
-  `
+  `, [
+    foldedFeed,
+    isMultiAccount,
+    showCreate,
+    loadBoard,
+    signalOnly,
+    sortBy,
+    query,
+    allHearthOptions,
+    selectedHearth,
+    visibleHearthChips,
+    overflowHearthCount,
+    newTitle,
+    newHearth,
+    newBody,
+    busy,
+    loadError,
+    bundle.signalScanTruncated,
+    bundle.hasMore,
+    bundle.filteredOutCount,
+    bundle.posts.length,
+    loading,
+    getBoardRowKey,
+    renderBoardRow,
+  ])
 
   const detailPane = activePost
     ? html`

@@ -31,7 +31,9 @@ import { apiGet, apiMutate } from '../../core/transport'
 import { InlineSpinner } from '../../components/common/inline-spinner'
 import { decodeVerificationCoverage, type VerificationCoverage } from '../../lib/verification-coverage'
 import { KeeperBadge } from '../../components/keeper-badge'
-import { MasterDetail, PopoverMenu, VirtualList } from '../../components/primitives'
+import { MasterDetail } from '../../components/primitives/master-detail'
+import { PopoverMenu } from '../../components/primitives/popover-menu'
+import { VirtualList } from '../../components/primitives/virtual-list'
 import { pushShellToast } from '../../shell/shell-state'
 import {
   asNonEmptyString,
@@ -478,11 +480,17 @@ export function TasksTab(props: WorkspaceViewProps) {
     )
   }, [tasks, chip, query])
 
-  const selectedTask = tasks.find((t) => t.id === selectedTaskId)
-    ?? (selectedTaskId === null ? tasks[0] ?? null : null)
-  const selectedSchedule = schedules?.state === 'available'
-    ? schedules.rows.find((s) => s.scheduleId === selectedScheduleId) ?? schedules.rows[0] ?? null
-    : null
+  const selectedTask = useMemo(
+    () => tasks.find((t) => t.id === selectedTaskId) ?? (selectedTaskId === null ? tasks[0] ?? null : null),
+    [tasks, selectedTaskId],
+  )
+  const selectedSchedule = useMemo(
+    () =>
+      schedules?.state === 'available'
+        ? schedules.rows.find((s) => s.scheduleId === selectedScheduleId) ?? schedules.rows[0] ?? null
+        : null,
+    [schedules, selectedScheduleId],
+  )
 
   const loadHistoryPage = useCallback(async (
     taskId: string,

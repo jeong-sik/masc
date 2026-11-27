@@ -18,7 +18,7 @@ import { useEffect } from 'preact/hooks'
 
 export interface SharedTicker {
   signal: Signal<number>
-  use: () => void
+  use: (active?: boolean) => void
 }
 
 export function createSharedTicker(
@@ -32,6 +32,7 @@ export function createSharedTicker(
   function start(): void {
     if (timerId != null) return
     if (typeof window === 'undefined') return
+    sig.value = initialValue()
     timerId = window.setInterval(() => {
       sig.value = initialValue()
     }, intervalMs)
@@ -44,15 +45,16 @@ export function createSharedTicker(
     timerId = null
   }
 
-  function use(): void {
+  function use(active = true): void {
     useEffect(() => {
+      if (!active) return
       consumerCount += 1
       start()
       return () => {
         consumerCount = Math.max(0, consumerCount - 1)
         if (consumerCount === 0) stop()
       }
-    }, [])
+    }, [active])
   }
 
   return { signal: sig, use }

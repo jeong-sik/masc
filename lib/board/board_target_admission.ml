@@ -9,24 +9,7 @@ type t = {
 
 let unavailable () = Error (Io_error "Board data is unavailable.")
 
-let comment_in_snapshot ~comment_id (snapshot : Fs_compat.private_jsonl_snapshot) =
-  let rec rows found = function
-    | [] -> (match found with
-        | Some comment -> Ok comment
-        | None -> Error (Comment_not_found comment_id))
-    | text :: remaining when String.equal (String.trim text) "" -> rows found remaining
-    | text :: remaining ->
-      match Yojson.Safe.from_string text with
-      | json ->
-        let decoded = Board_content_json.comment_of_yojson json in
-        (match decoded.value with
-         | None -> unavailable ()
-         | Some comment ->
-           let found = if String.equal comment_id (Comment_id.to_string comment.id)
-             then Some comment else found in
-           rows found remaining)
-      | exception Yojson.Json_error _ -> unavailable () in
-  rows None (String.split_on_char '\n' snapshot.bytes)
+let comment_in_snapshot = Board_comments_source.find_in_snapshot
 
 let capture store ~reader ~target_type ~target_id =
   let* target_id = match target_type with

@@ -119,6 +119,14 @@ val read_entries : ?n:int -> config -> audit_entry list
     date-split store. Malformed lines are logged (capped) and
     dropped. *)
 
+val settled_tail_stamp : n:int -> config -> string option
+(** Cheap, stat-validated cache key covering the audit root, visited month
+    directories, and exact newest day files needed to satisfy an unfiltered
+    tail read of [n] entries. Returns [None] when any visited directory or
+    file is missing, unsettled, not yet in the decoded day cache, oversized,
+    non-regular, or contains corrupt rows (so corrupt-row error reporting is
+    never bypassed by HTTP response caching). *)
+
 val append_entry : config -> audit_entry -> unit
 (** Atomic append to today's day-file; creates the directory and
     file on first call. *)

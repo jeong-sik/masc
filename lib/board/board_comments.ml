@@ -355,13 +355,106 @@ let get_comment store ~comment_id : (comment, board_error) Result.t =
           | None -> Error (Comment_not_found comment_id)))
 ;;
 
+let list_newest_comments_unlocked store ?predicate ~limit () : comment list =
+  let limit = max 0 limit in
+  let total = Hashtbl.length store.comments in
+  if limit = 0 || total = 0 then []
+  else
+    let matches comment =
+      match predicate with
+      | None -> true
+      | Some pred -> pred comment
+    in
+    if limit >= 4096 || limit >= total / 4 then
+      let all =
+        Hashtbl.fold
+          (fun _ (c : comment) acc -> if matches c then c :: acc else acc)
+          store.comments
+          []
+      in
+      let sorted =
+        List.sort
+          (fun (a : comment) (b : comment) -> compare_comments_oldest_first b a)
+          all
+      in
+      take limit sorted
+    else begin
+      (* Bounded min-heap of the [limit] newest matching comments so the root
+         holds the oldest kept comment. Non-qualifying older rows perform a
+         single comparison with zero heap allocation. *)
+      let heap_opt : comment array option ref = ref None in
+      let size = ref 0 in
+      let sift_up heap idx =
+        let i = ref idx in
+        while !i > 0 do
+          let p = (!i - 1) lsr 1 in
+          if compare_comments_oldest_first heap.(!i) heap.(p) < 0 then begin
+            let tmp = heap.(!i) in
+            heap.(!i) <- heap.(p);
+            heap.(p) <- tmp;
+            i := p
+          end else
+            i := 0
+        done
+      in
+      let sift_down heap len =
+        let i = ref 0 in
+        let continue = ref true in
+        while !continue do
+          let left = (!i lsl 1) + 1 in
+          if left >= len then
+            continue := false
+          else begin
+            let right = left + 1 in
+            let smallest =
+              if right < len && compare_comments_oldest_first heap.(right) heap.(left) < 0
+              then right
+              else left
+            in
+            if compare_comments_oldest_first heap.(smallest) heap.(!i) < 0 then begin
+              let tmp = heap.(!i) in
+              heap.(!i) <- heap.(smallest);
+              heap.(smallest) <- tmp;
+              i := smallest
+            end else
+              continue := false
+          end
+        done
+      in
+      Hashtbl.iter
+        (fun _ (c : comment) ->
+           if matches c then
+             match !heap_opt with
+             | None ->
+               let heap = Array.make limit c in
+               heap_opt := Some heap;
+               size := 1
+             | Some heap ->
+               if !size < limit then begin
+                 let idx = !size in
+                 heap.(idx) <- c;
+                 size := idx + 1;
+                 sift_up heap idx
+               end else if compare_comments_oldest_first c heap.(0) > 0 then begin
+                 heap.(0) <- c;
+                 sift_down heap limit
+               end)
+        store.comments;
+      match !heap_opt with
+      | None -> []
+      | Some heap ->
+        let acc = ref [] in
+        for i = 0 to !size - 1 do
+          acc := heap.(i) :: !acc
+        done;
+        List.sort
+          (fun (a : comment) (b : comment) -> compare_comments_oldest_first b a)
+          !acc
+    end
+;;
+
 (** List all comments (for profile aggregation) *)
 let list_comments store ?(limit = 1000) () : comment list =
   maybe_sweep store;
-  with_lock store (fun () ->
-    let all = Hashtbl.fold (fun _ c acc -> c :: acc) store.comments [] in
-    let sorted =
-      List.sort (fun (a : comment) (b : comment) -> compare_comments_oldest_first b a) all
-    in
-    List.filteri (fun i _ -> i < limit) sorted)
+  with_lock store (fun () -> list_newest_comments_unlocked store ~limit ())
 ;;

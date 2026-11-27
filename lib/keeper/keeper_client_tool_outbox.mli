@@ -64,8 +64,20 @@ val start_host_producer :
     release hook.
     [load] skips its results while that exact kernel lease is held, including
     from another process. Crash/exit releases the lease without PID guessing,
-    TTL or replay. Lease files are retained stable and never enumerated as
-    results. Prevalidation must not start a producer. *)
+    TTL or replay. Lease files are never enumerated as results: on switch
+    release the lease file is unlinked if no pending receipt of this producer
+    remains in the outbox, and once the last pending receipt of an inactive
+    producer is retired by {!acknowledge} its lease file is removed too.
+    Prevalidation must not start a producer. *)
+
+val prune_stale_leases :
+  base_path:string -> keeper_name:string -> (int, string) result
+(** Remove stale, unlocked producer lease files in the Keeper's lease directory
+    whose producer identity is not referenced by any pending receipt in the
+    outbox. Fails closed (removes nothing and returns [Error]) if the outbox
+    cannot be listed or any pending receipt fails validation, and never removes
+    a lease whose kernel lock is held elsewhere. Returns the number of lease
+    files removed. *)
 
 type host_delivery
 val retain_host_result_with_delivery :

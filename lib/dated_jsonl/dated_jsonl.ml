@@ -206,10 +206,33 @@ let forget_kept_of_the_directory resolved location =
     forget_kept now;
     forget_kept resolved.File_system_named.entry
 
+type cached_dir_listing =
+  { d_dev : int
+  ; d_ino : int
+  ; d_size : int
+  ; d_perm : int
+  ; d_uid : int
+  ; d_gid : int
+  ; d_mtime : float
+  ; d_ctime : float
+  ; d_entries : string list
+  ; mutable d_last_used : int
+  }
+
+let dir_cache_mu = Stdlib.Mutex.create ()
+let dir_cache : (string, cached_dir_listing) Hashtbl.t = Hashtbl.create 32
+let dir_cache_max = 128
+let dir_cache_clock = ref 0
+let dir_stat_settle_window_sec = 0.05
+
+let clear_dir_cache () =
+  Stdlib.Mutex.protect dir_cache_mu (fun () -> Hashtbl.clear dir_cache)
+
 (* Store directories were removed by code outside this module. Every
    remembered name and every kept fact goes: which directories went is not
    looked at, and neither is whether the removal succeeded. *)
 let directories_removed () =
+  clear_dir_cache ();
   File_system_named.removed registry;
   List.iter forget_kept (File_system_named.entries registry)
 
@@ -228,7 +251,108 @@ let open_store ?max_bytes location =
 
 let base_dir t = t.base_dir
 
-(* ── Directory listing (sorted descending) ────────────── *)
+(* ── Directory listing (sorted descending, stat-cached when settled) ── *)
+
+let dir_stat_is_settled ~now (st : Unix.stats) =
+  now -. st.Unix.st_mtime >= dir_stat_settle_window_sec
+  && now -. st.Unix.st_ctime >= dir_stat_settle_window_sec
+
+let dir_stats_equal (a : Unix.stats) (b : Unix.stats) =
+  a.Unix.st_dev = b.Unix.st_dev
+  && a.Unix.st_ino = b.Unix.st_ino
+  && a.Unix.st_size = b.Unix.st_size
+  && a.Unix.st_perm = b.Unix.st_perm
+  && a.Unix.st_uid = b.Unix.st_uid
+  && a.Unix.st_gid = b.Unix.st_gid
+  && Float.equal a.Unix.st_mtime b.Unix.st_mtime
+  && Float.equal a.Unix.st_ctime b.Unix.st_ctime
+
+let dir_stat_matches_cached (st : Unix.stats) (c : cached_dir_listing) =
+  c.d_dev = st.Unix.st_dev
+  && c.d_ino = st.Unix.st_ino
+  && c.d_size = st.Unix.st_size
+  && c.d_perm = st.Unix.st_perm
+  && c.d_uid = st.Unix.st_uid
+  && c.d_gid = st.Unix.st_gid
+  && Float.equal c.d_mtime st.Unix.st_mtime
+  && Float.equal c.d_ctime st.Unix.st_ctime
+
+let dir_cache_remove key =
+  Stdlib.Mutex.protect dir_cache_mu (fun () -> Hashtbl.remove dir_cache key)
+
+let dir_cache_store key (st : Unix.stats) entries =
+  Stdlib.Mutex.protect dir_cache_mu (fun () ->
+    incr dir_cache_clock;
+    let entry =
+      { d_dev = st.Unix.st_dev
+      ; d_ino = st.Unix.st_ino
+      ; d_size = st.Unix.st_size
+      ; d_perm = st.Unix.st_perm
+      ; d_uid = st.Unix.st_uid
+      ; d_gid = st.Unix.st_gid
+      ; d_mtime = st.Unix.st_mtime
+      ; d_ctime = st.Unix.st_ctime
+      ; d_entries = entries
+      ; d_last_used = !dir_cache_clock
+      }
+    in
+    Hashtbl.replace dir_cache key entry;
+    while Hashtbl.length dir_cache > dir_cache_max do
+      let victim =
+        Hashtbl.fold
+          (fun k v best ->
+             match best with
+             | None -> Some (k, v)
+             | Some (_, bv) -> if v.d_last_used < bv.d_last_used then Some (k, v) else best)
+          dir_cache
+          None
+      in
+      match victim with
+      | None -> ()
+      | Some (k, _) -> Hashtbl.remove dir_cache k
+    done)
+
+let list_dir_cached ~cache_prefix path ~compute =
+  let key = cache_prefix ^ path in
+  let now_before = Unix.gettimeofday () in
+  match Unix.stat path with
+  | exception Unix.Unix_error _ ->
+    dir_cache_remove key;
+    []
+  | st ->
+    if st.Unix.st_kind <> Unix.S_DIR then begin
+      dir_cache_remove key;
+      []
+    end else
+      let settled_before = dir_stat_is_settled ~now:now_before st in
+      let hit =
+        if not settled_before then None
+        else
+          Stdlib.Mutex.protect dir_cache_mu (fun () ->
+            match Hashtbl.find_opt dir_cache key with
+            | Some cached when dir_stat_matches_cached st cached ->
+              incr dir_cache_clock;
+              cached.d_last_used <- !dir_cache_clock;
+              Some cached.d_entries
+            | Some _ | None -> None)
+      in
+      match hit with
+      | Some entries -> entries
+      | None ->
+        (match Sys.readdir path with
+         | exception Sys_error _ -> []
+         | raw ->
+           let entries = compute raw in
+           if settled_before then begin
+             match Unix.stat path with
+             | after
+               when after.Unix.st_kind = Unix.S_DIR
+                    && dir_stats_equal st after
+                    && dir_stat_is_settled ~now:(Unix.gettimeofday ()) after ->
+               dir_cache_store key after entries
+             | _ | (exception Unix.Unix_error _) -> ()
+           end;
+           entries)
 
 let list_subdirs path =
   if not (Sys.file_exists path) then []
@@ -241,17 +365,26 @@ let list_subdirs path =
 
 (** Month directories matching [YYYY-MM] pattern, newest first. *)
 let list_month_dirs base_dir =
-  list_subdirs base_dir
-  |> List.filter (fun d ->
-    String.length d = 7
-    && d.[4] = '-'
-    && Option.is_some (int_of_string_opt (String.sub d 0 4)))
+  list_dir_cached ~cache_prefix:"m:" base_dir ~compute:(fun raw ->
+    let acc = ref [] in
+    for i = 0 to Array.length raw - 1 do
+      let d = Array.unsafe_get raw i in
+      if String.length d = 7
+         && d.[4] = '-'
+         && Option.is_some (int_of_string_opt (String.sub d 0 4))
+      then acc := d :: !acc
+    done;
+    List.sort (fun a b -> String.compare b a) !acc)
 
 (** Current and completed day files, newest first. *)
 let list_day_files month_path =
-  list_subdirs month_path
-  |> List.filter (fun f -> Filename.check_suffix f ".jsonl")
-  |> List.sort (fun left right -> compare_day_files right left)
+  list_dir_cached ~cache_prefix:"d:" month_path ~compute:(fun raw ->
+    let acc = ref [] in
+    for i = 0 to Array.length raw - 1 do
+      let f = Array.unsafe_get raw i in
+      if Filename.check_suffix f ".jsonl" then acc := f :: !acc
+    done;
+    List.sort (fun left right -> compare_day_files right left) !acc)
 
 type directory_presence =
   | Directory_present
@@ -586,7 +719,13 @@ let load_tail_rows_from_channel input ~max_lines =
     if file_len = 0
     then []
     else begin
-      let chunk_size = 8192 in
+      let chunk_size =
+        let scaled =
+          if max_lines >= 256 then 65536
+          else max 8192 (max_lines * 256)
+        in
+        min file_len scaled
+      in
       let chunks = ref [] in
       let non_empty_line_count = ref 0 in
       let current_line_is_non_empty = ref false in
@@ -609,18 +748,24 @@ let load_tail_rows_from_channel input ~max_lines =
         done;
         position := read_start
       done;
-      let total_bytes =
-        List.fold_left (fun total chunk -> total + Bytes.length chunk) 0 !chunks
-      in
-      let combined = Bytes.create total_bytes in
-      let _next_offset =
-        List.fold_left
-          (fun offset chunk ->
-             let length = Bytes.length chunk in
-             Bytes.blit chunk 0 combined offset length;
-             offset + length)
-          0
-          !chunks
+      let combined =
+        match !chunks with
+        | [ single ] -> single
+        | many ->
+          let total_bytes =
+            List.fold_left (fun total chunk -> total + Bytes.length chunk) 0 many
+          in
+          let buf = Bytes.create total_bytes in
+          let _next_offset =
+            List.fold_left
+              (fun offset chunk ->
+                 let length = Bytes.length chunk in
+                 Bytes.blit chunk 0 buf offset length;
+                 offset + length)
+              0
+              many
+          in
+          buf
       in
       last_non_empty_rows combined ~base:!position ~max_lines
     end
@@ -788,23 +933,44 @@ type scan_state =
         step's read. None of them holds a newline. *)
   }
 
+let rec substring_has_content s index stop =
+  index < stop
+  && (not (trim_whitespace (String.unsafe_get s index))
+      || substring_has_content s (index + 1) stop)
+
 let scan_step ?(lower_bound = 0) input ~chunk_size ~decode { scan_position = position; read_size; unfinished_line } =
-  let decode_newest_first lines =
-    List.fold_left
-      (fun acc line -> if line_is_non_empty line then decode line :: acc else acc)
-      []
-      lines
+  let decode_if_non_empty line acc =
+    if line_is_non_empty line then decode line :: acc else acc
+  in
+  let decode_slice_if_non_empty chunk start stop acc =
+    if substring_has_content chunk start stop
+    then decode (String.sub chunk start (stop - start)) :: acc
+    else acc
+  in
+  let decode_between chunk ~from ~until ~acc =
+    if from >= until then acc
+    else
+      let rec loop pos acc =
+        match String.index_from_opt chunk pos '\n' with
+        | Some nl when nl < until ->
+          let acc = decode_slice_if_non_empty chunk pos nl acc in
+          loop (nl + 1) acc
+        | Some _ | None ->
+          decode_slice_if_non_empty chunk pos until acc
+      in
+      loop from acc
   in
   let close_line first_piece = String.concat "" (first_piece :: unfinished_line) in
   if position <= lower_bound
-  then decode_newest_first [ String.concat "" unfinished_line ], None
+  then decode_if_non_empty (String.concat "" unfinished_line) [], None
   else begin
     let read_start = max lower_bound (position - read_size) in
     let read_len = position - read_start in
     seek_in input read_start;
     let chunk = really_input_string input read_len in
     match String.index_opt chunk '\n' with
-    | None when read_start = lower_bound -> decode_newest_first [ close_line chunk ], None
+    | None when read_start = lower_bound ->
+      decode_if_non_empty (close_line chunk) [], None
     | None ->
       ( []
       , Some
@@ -814,32 +980,29 @@ let scan_step ?(lower_bound = 0) input ~chunk_size ~decode { scan_position = pos
           } )
     | Some first_newline ->
       let last_newline = String.rindex chunk '\n' in
-      let between =
-        if last_newline > first_newline
-        then
-          String.split_on_char
-            '\n'
-            (String.sub chunk (first_newline + 1) (last_newline - first_newline - 1))
-        else []
-      in
       let closed =
         close_line (String.sub chunk (last_newline + 1) (read_len - last_newline - 1))
       in
-      let leading = String.sub chunk 0 first_newline in
       if read_start = lower_bound
-      then decode_newest_first ((leading :: between) @ [ closed ]), None
-      else
-        ( decode_newest_first (between @ [ closed ])
+      then begin
+        let acc = decode_slice_if_non_empty chunk 0 first_newline [] in
+        let acc = decode_between chunk ~from:(first_newline + 1) ~until:last_newline ~acc in
+        decode_if_non_empty closed acc, None
+      end
+      else begin
+        let acc = decode_between chunk ~from:(first_newline + 1) ~until:last_newline ~acc:[] in
+        let leading = String.sub chunk 0 first_newline in
+        ( decode_if_non_empty closed acc
         , Some
             { scan_position = read_start
             ; read_size = chunk_size
             ; unfinished_line = [ leading ]
             } )
+      end
   end
 ;;
 
-let find_latest_decoded_from_channel ?(from = 0) ?until input ~decode f =
-  let initial_chunk_size = 8192 in
+let find_latest_decoded_from_channel ?(initial_chunk_size = 8192) ?(from = 0) ?until input ~decode f =
   let max_chunk_size = 256 * 1024 in
   let rec drive ~chunk_size state =
     let decoded_newest_first, next =
@@ -1367,8 +1530,14 @@ let collect_matching_files ?(offset = 0) t n ~month_is_in_range
                (match Fs_compat.Input.with_open_result ~path ~open_input
                  (fun input ->
                     (* See [find_latest_decoded_from_channel]: only its selected value matters. *)
+                    let initial_chunk_size =
+                      let remaining = n - !count + !skip in
+                      if remaining >= 128 then 65536
+                      else max 8192 (remaining * 512)
+                    in
                     ignore
                       (find_latest_decoded_from_channel
+                         ~initial_chunk_size
                          input
                          ~decode:(fun line ->
                            try Some (Yojson.Safe.from_string line)

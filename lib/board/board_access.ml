@@ -17,6 +17,10 @@ let name = function
 
 let is_operator = function Operator -> true | Anonymous | Named _ | Workspace_member _ -> false
 
+let rec is_strictly_sorted = function
+  | [] | [ _ ] -> true
+  | a :: (b :: _ as rest) -> String.compare a b < 0 && is_strictly_sorted rest
+
 let cache_key = function
   | Anonymous -> "anonymous"
   | Operator -> "operator"
@@ -26,13 +30,24 @@ let cache_key = function
        the dashboard cache, so the key names the actor and every Keeper whose
        deliveries it may read. The Keeper list is sorted: two readers with the
        same set must share one entry. *)
-    let keepers = List.sort_uniq String.compare reader.owned_keeper_ids in
-    Printf.sprintf
-      "member:%d:%s|keepers:%d:%s"
-      (String.length reader.actor_id)
-      reader.actor_id
-      (List.length keepers)
-      (String.concat "," keepers)
+    match reader.owned_keeper_ids with
+    | [] ->
+      Printf.sprintf "member:%d:%s|keepers:0:"
+        (String.length reader.actor_id) reader.actor_id
+    | [ single ] ->
+      Printf.sprintf "member:%d:%s|keepers:1:%s"
+        (String.length reader.actor_id) reader.actor_id single
+    | ids ->
+      let keepers =
+        if is_strictly_sorted ids then ids
+        else List.sort_uniq String.compare ids
+      in
+      Printf.sprintf
+        "member:%d:%s|keepers:%d:%s"
+        (String.length reader.actor_id)
+        reader.actor_id
+        (List.length keepers)
+        (String.concat "," keepers)
 
 let can_read_fields ~reader ~author ~visibility ~audience =
   match visibility, reader with

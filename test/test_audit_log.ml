@@ -458,6 +458,142 @@ let test_day_bounds_match_the_written_day_file () =
            (Audit_log.read_entries_matching ~n:5 ~since:(now +. day) ~keep config)))
 ;;
 
+let test_cached_day_file_tracks_appends_replacements_and_truncation () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Workspace.default_config base_dir in
+      let settle () = Unix.sleepf 0.06 in
+      let row_json ts agent =
+        Printf.sprintf
+          {|{"timestamp":%.1f,"agent_id":"%s","action":"auth_success","details":null,"outcome":{"status":"success"}}|}
+          ts agent
+      in
+      append_entry_at config 100.0;
+      append_entry_at config 200.0;
+      let day_file = sole_audit_day_file config in
+      (* Unsettled immediate same-length in-place overwrite must never be served stale. *)
+      let unsettled_first =
+        Audit_log.read_entries_matching ~n:10 ~keep:(fun _ -> true) config
+      in
+      check (list (float 0.001)) "initial unsettled read" [ 100.0; 200.0 ]
+        (List.map (fun (e : Audit_log.audit_entry) -> e.timestamp) unsettled_first);
+      let same_len_body = row_json 111.0 "keeper-a" ^ "\n" ^ row_json 222.0 "keeper-a" ^ "\n" in
+      Out_channel.with_open_bin day_file (fun oc -> output_string oc same_len_body);
+      let unsettled_after =
+        Audit_log.read_entries_matching ~n:10 ~keep:(fun _ -> true) config
+      in
+      check (list (float 0.001)) "unsettled same-length overwrite is observed immediately"
+        [ 111.0; 222.0 ]
+        (List.map (fun (e : Audit_log.audit_entry) -> e.timestamp) unsettled_after);
+      (* Settle the file so the stat-validated cache populates and serves warm hits. *)
+      settle ();
+      let first = Audit_log.read_entries_matching ~n:10 ~keep:(fun _ -> true) config in
+      check (list (float 0.001)) "settled read" [ 111.0; 222.0 ]
+        (List.map (fun (e : Audit_log.audit_entry) -> e.timestamp) first);
+      let warm = Audit_log.read_entries_matching ~n:10 ~keep:(fun _ -> true) config in
+      check (list (float 0.001)) "warm cached read" [ 111.0; 222.0 ]
+        (List.map (fun (e : Audit_log.audit_entry) -> e.timestamp) warm);
+      (* Settled external append with unterminated line, then completion + newline. *)
+      Fs_compat.append_file day_file (row_json 300.0 "keeper-a");
+      settle ();
+      let with_unterminated =
+        Audit_log.read_entries_matching ~n:10 ~keep:(fun _ -> true) config
+      in
+      check (list (float 0.001)) "unterminated trailing row is observed" [ 111.0; 222.0; 300.0 ]
+        (List.map (fun (e : Audit_log.audit_entry) -> e.timestamp) with_unterminated);
+      Fs_compat.append_file day_file ("\n" ^ row_json 400.0 "keeper-a" ^ "\n");
+      settle ();
+      let after_complete =
+        Audit_log.read_entries_matching ~n:10 ~keep:(fun _ -> true) config
+      in
+      check (list (float 0.001)) "completed line + appended line are not duplicated"
+        [ 111.0; 222.0; 300.0; 400.0 ]
+        (List.map (fun (e : Audit_log.audit_entry) -> e.timestamp) after_complete);
+      (* Same-inode O_TRUNC + larger rewrite must trigger full re-parse via sample check. *)
+      let larger_rewrite =
+        String.concat "\n"
+          [ row_json 501.0 "keeper-b"
+          ; row_json 502.0 "keeper-b"
+          ; row_json 503.0 "keeper-b"
+          ; row_json 504.0 "keeper-b"
+          ; row_json 505.0 "keeper-b"
+          ]
+        ^ "\n"
+      in
+      Out_channel.with_open_bin day_file (fun oc -> output_string oc larger_rewrite);
+      settle ();
+      let after_larger_trunc =
+        Audit_log.read_entries_matching ~n:10 ~keep:(fun _ -> true) config
+      in
+      check (list (float 0.001)) "same-inode O_TRUNC + larger rewrite does not splice stale prefix"
+        [ 501.0; 502.0; 503.0; 504.0; 505.0 ]
+        (List.map (fun (e : Audit_log.audit_entry) -> e.timestamp) after_larger_trunc);
+      (* Atomic file replacement changes inode and invalidates cache. *)
+      let replacement = day_file ^ ".replacement" in
+      let replacement_body = row_json 900.0 "keeper-z" ^ "\n" in
+      Out_channel.with_open_bin replacement (fun oc -> output_string oc replacement_body);
+      Unix.rename replacement day_file;
+      settle ();
+      let after_replace =
+        Audit_log.read_entries_matching ~n:10 ~keep:(fun _ -> true) config
+      in
+      check (list (float 0.001)) "replacement invalidates day cache" [ 900.0 ]
+        (List.map (fun (e : Audit_log.audit_entry) -> e.timestamp) after_replace);
+      (* Deletion invalidates cache cleanly. *)
+      Sys.remove day_file;
+      check (list (float 0.001)) "removed file returns empty" []
+        (List.map (fun (e : Audit_log.audit_entry) -> e.timestamp)
+           (Audit_log.read_entries_matching ~n:10 ~keep:(fun _ -> true) config)))
+;;
+
+let test_settled_tail_stamp_tracks_mutations_and_corrupt_rows () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Workspace.default_config base_dir in
+      let settle () = Unix.sleepf 0.06 in
+      (* Missing audit directory is not cacheable. *)
+      check (option string) "missing audit dir returns None" None
+        (Audit_log.settled_tail_stamp ~n:10 config);
+      append_entry_at config 100.0;
+      append_entry_at config 200.0;
+      (* Unsettled freshly-written file returns None. *)
+      check bool "unsettled file returns None" true
+        (Option.is_none (Audit_log.settled_tail_stamp ~n:10 config));
+      settle ();
+      (* Before day_cache is populated by a read, returns None. *)
+      check bool "uncached settled file returns None before first read" true
+        (Option.is_none (Audit_log.settled_tail_stamp ~n:10 config));
+      ignore (Audit_log.read_entries_matching ~n:10 ~keep:(fun _ -> true) config);
+      let stamp1 = Audit_log.settled_tail_stamp ~n:10 config in
+      check bool "settled cached store yields a stamp" true (Option.is_some stamp1);
+      check (option string) "unchanged store yields identical stamp" stamp1
+        (Audit_log.settled_tail_stamp ~n:10 config);
+      (* Appending a new entry changes the stamp after settling. *)
+      append_entry_at config 300.0;
+      check bool "unsettled append returns None" true
+        (Option.is_none (Audit_log.settled_tail_stamp ~n:10 config));
+      settle ();
+      ignore (Audit_log.read_entries_matching ~n:10 ~keep:(fun _ -> true) config);
+      let stamp2 = Audit_log.settled_tail_stamp ~n:10 config in
+      check bool "settled append yields a new stamp" true
+        (Option.is_some stamp2 && stamp1 <> stamp2);
+      (* Corrupt row suppresses settled_tail_stamp so error logging is never skipped. *)
+      let day_file = sole_audit_day_file config in
+      Fs_compat.append_file day_file "{\"timestamp\":400.0}\n";
+      settle ();
+      ignore (Audit_log.read_entries_matching ~n:10 ~keep:(fun _ -> true) config);
+      check bool "corrupt row forces None stamp" true
+        (Option.is_none (Audit_log.settled_tail_stamp ~n:10 config)))
+;;
+
 let () =
   run "Audit_log"
     [
@@ -475,6 +611,10 @@ let () =
             test_read_entries_survives_interleaved_undecodable_rows;
           test_case "read_entries window bounds rows read" `Quick
             test_read_entries_window_bounds_rows_read_not_entries_returned;
+          test_case "cached day file tracks appends, replacements, and deletion" `Quick
+            test_cached_day_file_tracks_appends_replacements_and_truncation;
+          test_case "settled_tail_stamp tracks mutations and corrupt rows" `Quick
+            test_settled_tail_stamp_tracks_mutations_and_corrupt_rows;
         ] );
       ( "codec_roundtrip",
         [

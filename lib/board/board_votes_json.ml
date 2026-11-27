@@ -23,6 +23,7 @@ let log_loaded ~noun ~loaded ~path ~elapsed = function
 
 let replace_loaded_posts store posts =
   Hashtbl.clear store.posts;
+  Hashtbl.reset store.post_rows;
   Hashtbl.clear store.posts_by_turn_ref;
   Hashtbl.clear store.posts_by_run_id;
   List.iter (fun (post : post) ->
@@ -34,6 +35,7 @@ let replace_loaded_posts store posts =
 
 let replace_loaded_comments store comments =
   Hashtbl.clear store.comments;
+  Hashtbl.reset store.comment_rows;
   Hashtbl.clear store.comments_by_post;
   List.iter (fun (comment : comment) ->
     let id = Comment_id.to_string comment.id in

@@ -460,14 +460,14 @@ let post_matches_text text =
 
 module Post_id_set = Set.Make (String)
 
-let matching_post_ids_for_comment_author_filter ~needle (comments : Board.comment list) =
-  List.fold_left
-    (fun acc (comment : Board.comment) ->
+let matching_post_ids_for_comment_author_filter ~needle (store : Board.store) =
+  Hashtbl.fold
+    (fun _ (comment : Board.comment) acc ->
       if agent_matches_author_filter ~needle comment.author then
         Post_id_set.add (Board.Post_id.to_string comment.post_id) acc
       else acc)
+    store.Board.comments
     Post_id_set.empty
-    comments
 
 let emit_post_created ~(audience : Board.audience) (post : Board.post) =
   let pid = Board.Post_id.to_string post.id in
@@ -696,105 +696,96 @@ let list_posts ~reader ?(visibility_filter = None) ?hearth ?author_filter ?exclu
     ?post_kind_filter ?text_query
     ?(sort_by = Hot) ?(exclude_system = false) ?(exclude_automation = false)
     ?(limit = 50) () =
-  let author_filter = normalize_author_filter author_filter in
-  let exclude_author_filter = normalize_author_filter exclude_author_filter in
-  let text_predicate =
-    String_util.option_trim text_query |> Option.map post_matches_text
-  in
-  let apply_text_filter posts =
-    match text_predicate with
-    | Some matches -> List.filter matches posts
-    | None -> posts
-  in
-  let apply_visibility_and_hearth_filters posts =
-    let posts =
-      match visibility_filter with
-      | Some visibility ->
-          List.filter (fun (post : Board.post) -> (=) post.visibility visibility) posts
-      | None -> posts
-    in
-    match hearth with
-    | Some hearth_name ->
-        let hearth_name = String.lowercase_ascii (String.trim hearth_name) in
-        List.filter (fun (post : Board.post) -> Option.equal String.equal post.hearth (Some hearth_name)) posts
-    | None -> posts
-  in
-  let apply_post_kind_filter posts =
-    posts
-    |> List.filter (fun (p : Board.post) ->
-           Board.post_matches_filters ~exclude_system ~exclude_automation p)
-    |> (match post_kind_filter with
-       | Some kind ->
-           List.filter
-             (fun (p : Board.post) -> (=) (Board.classify_post_kind p) kind)
-       | None -> Stdlib.Fun.id)
-  in
   let store = backend () in
-      (* A text query reads every post: the Hot window below is cut before
-         any filter runs, so a match ranked past it would be missed. *)
-      let needs_full_scan =
-        not (Board_access.is_operator reader)
-        || Option.is_some author_filter
-        || Option.is_some exclude_author_filter
-        || Option.is_some text_predicate
-        ||
-        match sort_by with
-        | Hot -> false
-        | Trending | Recent | Updated | Discussed -> true
-      in
-      let fetch_limit = if needs_full_scan then Stdlib.max_int else max limit 500 in
-      let posts =
-        if needs_full_scan then
-          Board.search_posts store ~predicate:(fun _ -> true) ~limit:fetch_limit
-        else
-          Board.list_posts store ~visibility_filter ?hearth ~limit:fetch_limit ()
-      in
-      let sorted =
-        if needs_full_scan then
-          posts
-          |> apply_visibility_and_hearth_filters
-          |> sort_posts_in_memory ~sort_by
-        else
-          posts
-      in
-      (* The text filter runs on what the reader may read, so a match in a
-         post the reader cannot read is never counted or returned. *)
-      let filtered =
-        sorted
-        |> List.filter (Board_access.can_read ~reader)
-        |> apply_post_kind_filter
-        |> apply_text_filter
-      in
-      let filtered =
+  Board_core_persist.maybe_sweep store;
+  let limit = max 0 limit in
+  if limit = 0 then []
+  else
+    let author_filter = normalize_author_filter author_filter in
+    let exclude_author_filter = normalize_author_filter exclude_author_filter in
+    let hearth_norm =
+      Option.map (fun h -> String.lowercase_ascii (String.trim h)) hearth
+    in
+    let text_predicate =
+      String_util.option_trim text_query |> Option.map post_matches_text
+    in
+    Board.with_lock store (fun () ->
+      let matching_comment_post_ids =
         match author_filter with
-        | None -> filtered
+        | None -> None
         | Some needle ->
-            let matching_comment_post_ids =
-              Board.list_comments store ~limit:Stdlib.max_int ()
-              |> matching_post_ids_for_comment_author_filter ~needle
-            in
-            List.filter
-              (fun (post : Board.post) ->
-                agent_matches_author_filter ~needle post.author
-                || Post_id_set.mem
-                     (Board.Post_id.to_string post.id)
-                     matching_comment_post_ids)
-              filtered
+          Some (matching_post_ids_for_comment_author_filter ~needle store)
       in
-      (* Exclude posts by author (post author only, not comment author).
-         Unlike the positive author_filter which matches comment authors too,
-         exclusion is post-author-only: hiding agent X should not remove
-         agent Y's post just because X commented on it. *)
-      let filtered =
-        match exclude_author_filter with
-        | None -> filtered
-        | Some needle ->
-            List.filter
-              (fun (post : Board.post) ->
-                not (agent_matches_author_filter ~needle post.author))
-              filtered
+      let matches_post (post : Board.post) =
+        Board_access.can_read ~reader post
+        && (match visibility_filter with
+            | None -> true
+            | Some visibility -> post.visibility = visibility)
+        && (match hearth_norm with
+            | None -> true
+            | Some hearth_name -> Option.equal String.equal post.hearth (Some hearth_name))
+        && Board.post_matches_filters ~exclude_system ~exclude_automation post
+        && (match post_kind_filter with
+            | None -> true
+            | Some kind -> Board.classify_post_kind post = kind)
+        && (match text_predicate with
+            | None -> true
+            | Some matches -> matches post)
+        && (match author_filter, matching_comment_post_ids with
+            | None, _ -> true
+            | Some needle, Some comment_post_ids ->
+              agent_matches_author_filter ~needle post.author
+              || Post_id_set.mem (Board.Post_id.to_string post.id) comment_post_ids
+            | Some needle, None ->
+              agent_matches_author_filter ~needle post.author)
+        && (match exclude_author_filter with
+            | None -> true
+            | Some needle -> not (agent_matches_author_filter ~needle post.author))
       in
-      Board.take limit filtered
+      let collect_indexed ~get_id ~remove_stale seq =
+        let rec loop seq remaining acc =
+          if remaining <= 0 then List.rev acc
+          else
+            match seq () with
+            | Seq.Nil -> List.rev acc
+            | Seq.Cons (key, rest) ->
+              (match Hashtbl.find_opt store.Board.posts (get_id key) with
+               | Some post when matches_post post ->
+                 loop rest (remaining - 1) (post :: acc)
+               | Some _ -> loop rest remaining acc
+               | None ->
+                 remove_stale key;
+                 loop rest remaining acc)
+        in
+        loop seq limit []
+      in
+      match sort_by with
+      | Hot ->
+        collect_indexed
+          ~get_id:(fun (k : Board.hot_post_key) -> k.post_id)
+          ~remove_stale:(fun k ->
+            store.hot_post_index <- Board.Hot_post_set.remove k store.hot_post_index)
+          (Board.Hot_post_set.to_seq store.hot_post_index)
+      | Recent ->
+        collect_indexed
+          ~get_id:(fun (k : Board.recent_post_key) -> k.recent_post_id)
+          ~remove_stale:(fun k ->
+            store.recent_post_index <- Board.Recent_post_set.remove k store.recent_post_index)
+          (Board.Recent_post_set.to_seq store.recent_post_index)
+      | Updated ->
+        collect_indexed
+          ~get_id:snd
+          ~remove_stale:(fun k ->
+            store.updated_post_index <- Board.Updated_post_set.remove k store.updated_post_index)
+          (Board.Updated_post_set.to_rev_seq store.updated_post_index)
+      | Trending | Discussed ->
+        Hashtbl.fold
+          (fun _ (post : Board.post) acc ->
+             if matches_post post then post :: acc else acc)
+          store.Board.posts
+          []
+        |> sort_posts_in_memory ~sort_by
+        |> Board.take limit)
 
 let list_posts_unchecked ?visibility_filter ?hearth ?author_filter ?exclude_author_filter
     ?post_kind_filter ?sort_by ?exclude_system ?exclude_automation ?limit () =
@@ -911,9 +902,30 @@ let add_comment ~reader ~post_id ~author ~content ?parent_id ?ttl_hours () =
   |> Result.map fst
 
 let current_vote_for_post ~reader ~voter ~post_id =
-  match get_post ~reader ~post_id with
-  | Error _ as error -> error
-  | Ok _ -> let store = backend () in Board.current_vote_for_post store ~voter ~post_id
+  let store = backend () in
+  Board_core_persist.maybe_sweep store;
+  match Board.Post_id.of_string_for_read post_id with
+  | Error read_err -> Error (Board.board_error_of_read_error read_err)
+  | Ok pid ->
+    let post_key = Board.Post_id.to_string pid in
+    Board.with_persist_lock store (fun () ->
+      Board.with_lock store (fun () ->
+        match Hashtbl.find_opt store.Board.posts post_key with
+        | None -> Error (Board.Post_not_found post_id)
+        | Some post when not (Board_access.can_read ~reader post) ->
+          Error (Board.Post_not_found post_id)
+        | Some _ ->
+          (match Board.Agent_id.of_string voter with
+           | Error _ as err -> err
+           | Ok agent ->
+             (match Board_votes_source.require_readable store with
+              | Error _ as err -> err
+              | Ok () ->
+                let vote_key =
+                  Board_vote_key.post ~post_id:pid ~voter:agent
+                  |> Board_vote_key.to_string
+                in
+                Ok (Option.map fst (Hashtbl.find_opt store.Board.vote_log vote_key))))))
 
 (* A vote is thread activity the voted-on author can act on, so it travels
    the same hook as comments and reactions. The signal's [author] is the
@@ -1111,20 +1123,62 @@ let list_reactions ~reader ~target_type ~target_id ?user_id () =
   | Ok () -> let store = backend () in Board.list_reactions store ~target_type ~target_id ?user_id ()
 
 let list_reactions_batch ~reader ~targets ?user_id () =
-  let rec visible acc = function
-    | [] -> Ok (List.rev acc)
-    | ((target_type, target_id) as target) :: rest ->
-      (match require_readable_target ~reader ~target_type ~target_id with
-       | Ok () -> visible (target :: acc) rest
-       | Error (Board.Invalid_id _ | Board.Post_not_found _ | Board.Comment_not_found _
-                | Board.Unauthorized _) -> visible acc rest
-       | Error ((Board.Io_error _ | Board.Recipient_lookup_failed _ | Board.Validation_error _
-                 | Board.Already_voted _ | Board.Already_exists _) as error) -> Error error)
+  let store = backend () in
+  Board_core_persist.maybe_sweep store;
+  let user_id = Board_reactions.normalize_reaction_user_id user_id in
+  (* Parse target IDs up front (pure CPU, no locks) so invalid IDs are skipped
+     and we know whether any valid comment target requires checking the
+     comments source under [persist_mutex]. *)
+  let has_valid_comment = ref false in
+  let parsed_targets =
+    List.filter_map
+      (fun (target_type, target_id) ->
+         match target_type with
+         | Board.Reaction_post ->
+           (match Board.Post_id.of_string_for_read target_id with
+            | Ok pid -> Some (`Post (Board.Post_id.to_string pid))
+            | Error _ -> None)
+         | Board.Reaction_comment ->
+           (match Board.Comment_id.of_string target_id with
+            | Ok cid ->
+              has_valid_comment := true;
+              Some (`Comment (Board.Comment_id.to_string cid))
+            | Error _ -> None))
+      targets
   in
   let open Result.Syntax in
-  let* targets = visible [] targets in
-  let store = backend () in
-  Board.list_reactions_batch store ~targets ?user_id ()
+  Board.with_persist_lock store (fun () ->
+    let* () =
+      if !has_valid_comment then
+        Board.require_comments_source_readable store
+        |> Result.map_error (fun error ->
+          Board.board_error_of_read_error (Board.Read_source_unavailable error))
+      else Ok ()
+    in
+    let* () = Board_reactions_source.require_readable store in
+    Board.with_lock store (fun () ->
+      let visible_targets =
+        List.filter_map
+          (function
+            | `Post post_key ->
+              (match Hashtbl.find_opt store.Board.posts post_key with
+               | Some post when Board_access.can_read ~reader post ->
+                 Some (Board.Reaction_post, post_key)
+               | Some _ | None -> None)
+            | `Comment comment_key ->
+              (match Hashtbl.find_opt store.Board.comments comment_key with
+               | None -> None
+               | Some (comment : Board.comment) ->
+                 let post_key = Board.Post_id.to_string comment.post_id in
+                 (match Hashtbl.find_opt store.Board.posts post_key with
+                  | Some post when Board_access.can_read ~reader post ->
+                    Some (Board.Reaction_comment, comment_key)
+                  | Some _ | None -> None)))
+          parsed_targets
+      in
+      Ok
+        (Board_reactions.reaction_summaries_batch_unlocked
+           store ~targets:visible_targets ?user_id ())))
 
 let post_visible_in_store ~reader store post_id =
   match Hashtbl.find_opt store.Board.posts post_id with
@@ -1148,27 +1202,31 @@ let stats ~reader () =
 
 let list_comments ~reader ?(limit = 1000) () =
   let store = backend () in
-  let comments = Board.list_comments store ~limit:max_int () in
+  Board_core_persist.maybe_sweep store;
   Board.with_lock store (fun () ->
-    comments |> List.filter (fun (comment : Board.comment) ->
-      post_visible_in_store ~reader store (Board.Post_id.to_string comment.post_id))
-    |> Board.take limit)
-
-module Reader_counts = Map.Make (String)
+    Board_comments.list_newest_comments_unlocked
+      store
+      ~predicate:(fun (comment : Board.comment) ->
+        post_visible_in_store ~reader store (Board.Post_id.to_string comment.post_id))
+      ~limit
+      ())
 
 let list_hearths ~reader ?(exclude_system = false) ?(exclude_automation = false) () =
   let store = backend () in
   Board.with_lock store (fun () ->
-    let counts = Hashtbl.fold (fun _ (post : Board.post) counts ->
+    let counts : (string, int ref) Hashtbl.t = Hashtbl.create 32 in
+    Hashtbl.iter (fun _ (post : Board.post) ->
       if Board_access.can_read ~reader post
          && Board.post_matches_filters ~exclude_system ~exclude_automation post then
         match post.hearth with
-        | None -> counts
+        | None -> ()
         | Some hearth ->
-          let count = match Reader_counts.find_opt hearth counts with None -> 0 | Some count -> count in
-          Reader_counts.add hearth (count + 1) counts
-      else counts) store.Board.posts Reader_counts.empty in
-    Reader_counts.bindings counts |> List.sort (fun (a, x) (b, y) ->
+          (match Hashtbl.find_opt counts hearth with
+           | Some r -> incr r
+           | None -> Hashtbl.add counts hearth (ref 1)))
+      store.Board.posts;
+    Hashtbl.fold (fun k r acc -> (k, !r) :: acc) counts []
+    |> List.sort (fun (a, x) (b, y) ->
       let c = Int.compare y x in if c = 0 then String.compare a b else c))
 
 let set_thread_id ~post_id ~thread_id =
@@ -1230,17 +1288,54 @@ let get_karma_ledger ~reader ?agent ?(limit = max_int) () =
       && (match agent with None -> true | Some name -> String.equal name event.recipient))
     |> Board.take limit)
 
+type cached_reader_karma = {
+  rk_store : Board.store;
+  rk_index : (string * (string * int) list) list;
+  rk_totals : (string * int) list;
+}
+
+let reader_karma_cache_mu = Stdlib.Mutex.create ()
+let reader_karma_cache : (string, cached_reader_karma) Hashtbl.t = Hashtbl.create 16
+let reader_karma_cache_max = 32
+
 let get_all_karma ~reader () =
   let store = backend () in
   if Board_access.is_operator reader then Board.get_all_karma store
   else
     let index = Board.get_karma_by_post store in
-    Board.with_lock store (fun () ->
-      index |> List.filter_map (fun (author, posts) ->
-        let score = List.fold_left (fun total (post_id, delta) ->
-          if post_visible_in_store ~reader store post_id then total + delta else total) 0 posts in
-        if score = 0 then None else Some (author, score))
-      |> List.sort (fun (a, x) (b, y) -> let c = Int.compare y x in if c = 0 then String.compare a b else c))
+    let compute () =
+      Board.with_lock store (fun () ->
+        index |> List.filter_map (fun (author, posts) ->
+          let score = List.fold_left (fun total (post_id, delta) ->
+            if post_visible_in_store ~reader store post_id then total + delta else total) 0 posts in
+          if score = 0 then None else Some (author, score))
+        |> List.sort (fun (a, x) (b, y) -> let c = Int.compare y x in if c = 0 then String.compare a b else c))
+    in
+    match reader with
+    | Board_access.Operator -> Board.get_all_karma store
+    | Board_access.Named _ ->
+      (* Named carries an arbitrary [addressed_by] closure; never memoize by key. *)
+      compute ()
+    | Board_access.Anonymous | Board_access.Workspace_member _ ->
+      let key = Board_access.cache_key reader in
+      let hit =
+        Stdlib.Mutex.protect reader_karma_cache_mu (fun () ->
+          match Hashtbl.find_opt reader_karma_cache key with
+          | Some cached when cached.rk_store == store && cached.rk_index == index ->
+            Some cached.rk_totals
+          | Some _ | None -> None)
+      in
+      match hit with
+      | Some totals -> totals
+      | None ->
+        let totals = compute () in
+        Stdlib.Mutex.protect reader_karma_cache_mu (fun () ->
+          if Hashtbl.length reader_karma_cache >= reader_karma_cache_max
+             && not (Hashtbl.mem reader_karma_cache key)
+          then Hashtbl.clear reader_karma_cache;
+          Hashtbl.replace reader_karma_cache key
+            { rk_store = store; rk_index = index; rk_totals = totals });
+        totals
 
 let get_agent_karma ~reader ~agent_name =
   match List.assoc_opt agent_name (get_all_karma ~reader ()) with None -> 0 | Some karma -> karma

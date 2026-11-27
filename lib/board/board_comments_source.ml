@@ -1,5 +1,200 @@
 open Board_types
 
+module String_map = Set_util.StringMap
+
+type comments_index = {
+  by_id : comment String_map.t;
+  slices : Board_posts_rows.slice String_map.t;
+  covered_bytes : int;
+}
+
+let comments_cache : comments_index Board_posts_rows.Snapshot_bytes_cache.t =
+  Board_posts_rows.Snapshot_bytes_cache.create 8
+
+let register_comments_snapshot ~bytes ~by_id ~slices ~covered_bytes =
+  Board_posts_rows.Snapshot_bytes_cache.replace comments_cache bytes
+    { by_id; slices; covered_bytes }
+
+let register_comments_append ~before_bytes ~after_bytes ~offset ~length (comment : comment) =
+  match Board_posts_rows.Snapshot_bytes_cache.find_opt comments_cache before_bytes with
+  | None -> ()
+  | Some prev ->
+    let id = Comment_id.to_string comment.id in
+    let prev_len =
+      match String_map.find_opt id prev.slices with
+      | Some (s : Board_posts_rows.slice) -> s.length
+      | None -> 0
+    in
+    let by_id = String_map.add id comment prev.by_id in
+    let canonical =
+      Board_posts_rows.is_canonical_slice after_bytes ~start:offset
+        ~stop:(offset + length - 1) ~has_newline:true
+    in
+    let slices =
+      if canonical then String_map.add id { Board_posts_rows.offset; length } prev.slices
+      else String_map.remove id prev.slices
+    in
+    let covered_bytes =
+      if canonical then prev.covered_bytes - prev_len + length
+      else prev.covered_bytes - prev_len
+    in
+    Board_posts_rows.Snapshot_bytes_cache.replace comments_cache after_bytes
+      { by_id; slices; covered_bytes }
+
+let parse_comments_index bytes =
+  let by_id = ref String_map.empty in
+  let slices = ref String_map.empty in
+  let covered = ref 0 in
+  let rejected = ref false in
+  let exception Bad_row in
+  (try
+     Board_posts_rows.iter_lines_with_offsets bytes
+       (fun ~line_number:_ ~start ~stop ~has_newline ->
+          let text = String.sub bytes start (stop - start) in
+          if String.trim text <> "" then
+            match Yojson.Safe.from_string text with
+            | json ->
+              (match (Board_content_json.comment_of_yojson json).value with
+               | None ->
+                 rejected := true;
+                 raise_notrace Bad_row
+               | Some comment ->
+                 let id = Comment_id.to_string comment.id in
+                 by_id := String_map.add id comment !by_id;
+                 let prev_len =
+                   match String_map.find_opt id !slices with
+                   | Some (s : Board_posts_rows.slice) -> s.length
+                   | None -> 0
+                 in
+                 if Board_posts_rows.is_canonical_slice bytes ~start ~stop ~has_newline then begin
+                   let length = stop - start + 1 in
+                   slices := String_map.add id { Board_posts_rows.offset = start; length } !slices;
+                   covered := !covered - prev_len + length
+                 end else begin
+                   slices := String_map.remove id !slices;
+                   covered := !covered - prev_len
+                 end)
+            | exception Yojson.Json_error _ ->
+              rejected := true;
+              raise_notrace Bad_row)
+   with Bad_row -> ());
+  if !rejected then Error (Io_error "Board data is unavailable.")
+  else
+    let index = { by_id = !by_id; slices = !slices; covered_bytes = !covered } in
+    Board_posts_rows.Snapshot_bytes_cache.replace comments_cache bytes index;
+    Ok index
+
+let get_comments_index (snapshot : Fs_compat.private_jsonl_snapshot) =
+  match Board_posts_rows.Snapshot_bytes_cache.find_opt comments_cache snapshot.bytes with
+  | Some index -> Ok index
+  | None -> parse_comments_index snapshot.bytes
+
+let find_in_snapshot ~comment_id snapshot =
+  match get_comments_index snapshot with
+  | Error _ as error -> error
+  | Ok index ->
+    (match String_map.find_opt comment_id index.by_id with
+     | Some comment -> Ok comment
+     | None -> Error (Comment_not_found comment_id))
+
+let children_in_snapshot ~post_id snapshot =
+  match get_comments_index snapshot with
+  | Error _ as error -> error
+  | Ok index ->
+    (* [index.by_id] is keyed by comment_id in ascending string order, so
+       collecting matching comments in reverse and reversing produces the exact
+       same ascending Comment_id order as [Comment_set.elements]. *)
+    let rev_ids =
+      String_map.fold
+        (fun _ (comment : comment) acc ->
+           if String.equal (Post_id.to_string comment.post_id) post_id
+           then comment.id :: acc
+           else acc)
+        index.by_id
+        []
+    in
+    Ok (List.rev rev_ids)
+
+type planned_comment_row =
+  | Reuse_comment_slice of { key : string; comment : comment; offset : int; length : int }
+  | Fresh_comment_line of { key : string; comment : comment; line : string }
+
+let render_comments_snapshot ~base_bytes (table : (string, comment) Hashtbl.t) =
+  let index_opt =
+    Board_posts_rows.Snapshot_bytes_cache.find_opt comments_cache base_bytes
+  in
+  let unchanged_fast_path =
+    match index_opt with
+    | Some idx
+      when idx.covered_bytes = String.length base_bytes
+           && Hashtbl.length table = String_map.cardinal idx.by_id ->
+      let all_match = ref true in
+      Hashtbl.iter
+        (fun key comment ->
+           if !all_match then
+             match String_map.find_opt key idx.by_id with
+             | Some prev when prev == comment -> ()
+             | Some _ | None -> all_match := false)
+        table;
+      !all_match
+    | Some _ | None -> false
+  in
+  if unchanged_fast_path then base_bytes
+  else
+    let total_len, rows_rev =
+      Hashtbl.fold
+        (fun key (comment : comment) (total, acc) ->
+           let planned =
+             match index_opt with
+             | Some idx ->
+               (match String_map.find_opt key idx.by_id, String_map.find_opt key idx.slices with
+                | Some prev, Some { Board_posts_rows.offset; length } when prev == comment ->
+                  Reuse_comment_slice { key; comment; offset; length }
+                | _ ->
+                  let line = Yojson.Safe.to_string (Board_content_json.comment_to_yojson comment) ^ "\n" in
+                  Fresh_comment_line { key; comment; line })
+             | None ->
+               let line = Yojson.Safe.to_string (Board_content_json.comment_to_yojson comment) ^ "\n" in
+               Fresh_comment_line { key; comment; line }
+           in
+           let row_len =
+             match planned with
+             | Reuse_comment_slice { length; _ } -> length
+             | Fresh_comment_line { line; _ } -> String.length line
+           in
+           total + row_len, planned :: acc)
+        table
+        (0, [])
+    in
+    if total_len = 0 then begin
+      register_comments_snapshot ~bytes:"" ~by_id:String_map.empty ~slices:String_map.empty ~covered_bytes:0;
+      ""
+    end else begin
+      let out = Bytes.create total_len in
+      let by_id = ref String_map.empty in
+      let slices = ref String_map.empty in
+      let rec blit dst = function
+        | [] -> ()
+        | Reuse_comment_slice { key; comment; offset; length } :: rest ->
+          let start = dst - length in
+          Bytes.blit_string base_bytes offset out start length;
+          by_id := String_map.add key comment !by_id;
+          slices := String_map.add key { Board_posts_rows.offset = start; length } !slices;
+          blit start rest
+        | Fresh_comment_line { key; comment; line } :: rest ->
+          let length = String.length line in
+          let start = dst - length in
+          Bytes.blit_string line 0 out start length;
+          by_id := String_map.add key comment !by_id;
+          slices := String_map.add key { Board_posts_rows.offset = start; length } !slices;
+          blit start rest
+      in
+      blit total_len rows_rev;
+      let bytes = Bytes.unsafe_to_string out in
+      register_comments_snapshot ~bytes ~by_id:!by_id ~slices:!slices ~covered_bytes:total_len;
+      bytes
+    end
+
 type read =
   | Complete of { observation : comments_source_observation; comments : comment list;
                   diagnostics : comments_source_diagnostic list }
@@ -247,22 +442,48 @@ let read store = match store.comments_source with
               then unavailable Comments_missing
               else (
                 stage := Decode_comments;
-                let comments = ref [] and errors = ref [] in
-                String.split_on_char '\n' receipt.value.bytes |> List.iteri (fun index text ->
-                  if String.trim text <> "" then
-                    match Yojson.Safe.from_string text with
-                    | json ->
-                      let decoded = Board_content_json.comment_of_yojson json in
-                      Board_content_diagnostics.emit decoded.diagnostics;
-                      (match decoded.value with
-                       | Some comment -> comments := comment :: !comments
-                       | None -> errors := Invalid_comments_row { line = index + 1 } :: !errors)
-                    | exception Yojson.Json_error detail ->
-                      errors := Invalid_comments_json { line = index + 1; detail } :: !errors);
+                let raw_bytes = receipt.value.bytes in
+                let comments = ref []
+                and errors = ref []
+                and by_id = ref String_map.empty
+                and slices = ref String_map.empty
+                and covered = ref 0 in
+                Board_posts_rows.iter_lines_with_offsets raw_bytes
+                  (fun ~line_number ~start ~stop ~has_newline ->
+                    let text = String.sub raw_bytes start (stop - start) in
+                    if String.trim text <> "" then
+                      match Yojson.Safe.from_string text with
+                      | json ->
+                        let decoded = Board_content_json.comment_of_yojson json in
+                        Board_content_diagnostics.emit decoded.diagnostics;
+                        (match decoded.value with
+                         | Some comment ->
+                           comments := comment :: !comments;
+                           let id = Comment_id.to_string comment.id in
+                           by_id := String_map.add id comment !by_id;
+                           let prev_len =
+                             match String_map.find_opt id !slices with
+                             | Some (s : Board_posts_rows.slice) -> s.length
+                             | None -> 0
+                           in
+                           if Board_posts_rows.is_canonical_slice raw_bytes ~start ~stop ~has_newline then begin
+                             let length = stop - start + 1 in
+                             slices := String_map.add id { Board_posts_rows.offset = start; length } !slices;
+                             covered := !covered - prev_len + length
+                           end else begin
+                             slices := String_map.remove id !slices;
+                             covered := !covered - prev_len
+                           end
+                         | None -> errors := Invalid_comments_row { line = line_number } :: !errors)
+                      | exception Yojson.Json_error detail ->
+                        errors := Invalid_comments_json { line = line_number; detail } :: !errors);
                 let observation : comments_source_observation =
                   { source_path = path; snapshot = receipt.value; workspace_observation } in
                 match List.rev !errors with
-                | [] -> Complete { observation; comments = List.rev !comments; diagnostics = !diagnostics }
+                | [] ->
+                  register_comments_snapshot ~bytes:raw_bytes ~by_id:!by_id
+                    ~slices:!slices ~covered_bytes:!covered;
+                  Complete { observation; comments = List.rev !comments; diagnostics = !diagnostics }
                 | errors -> Partial { observation; comments = List.rev !comments; errors; diagnostics = !diagnostics })
     with exception_ ->
       let backtrace = Printexc.get_raw_backtrace () in
@@ -418,21 +639,31 @@ let append store ~(admission : Board_comment_admission.t) (comment : comment) = 
         let comments_io = store.comments_source_io in
         let parent_io = store.posts_source_io.posts in
         let policy_io = store.sub_boards_source_io in
-        write store ~before ~kind:Comments_append ~bytes:(before.snapshot.bytes ^ suffix)
-          (fun () ->
-            (* Nested callbacks execute in the filesystem worker. Capture every
-               IO/source value above; publish source/model state only on return. *)
-            let append () = match comments_io with
-              | None -> Fs_compat.append_private_jsonl_durable_locked_at_snapshot_result
-                  before.source_path ~expected:before.snapshot suffix
-              | Some io -> Fs_compat.append_private_jsonl_durable_locked_at_snapshot_with_io_for_testing
-                  ~io before.source_path ~expected:before.snapshot suffix in
-            match admission.policy with
-            | None -> Parent_io (guard_with_io parent_io admission.parent.source_path
-                ~expected:admission.parent.snapshot ~f:append)
-            | Some policy -> Parent_policy_io (policy, guard_with_io parent_io admission.parent.source_path
-                ~expected:admission.parent.snapshot ~f:(fun () ->
-                  guard_with_io policy_io policy.policy_path ~expected:policy.policy_snapshot ~f:append)))
+        let before_bytes = before.snapshot.bytes in
+        let after_bytes = before_bytes ^ suffix in
+        let outcome =
+          write store ~before ~kind:Comments_append ~bytes:after_bytes
+            (fun () ->
+              (* Nested callbacks execute in the filesystem worker. Capture every
+                 IO/source value above; publish source/model state only on return. *)
+              let append () = match comments_io with
+                | None -> Fs_compat.append_private_jsonl_durable_locked_at_snapshot_result
+                    before.source_path ~expected:before.snapshot suffix
+                | Some io -> Fs_compat.append_private_jsonl_durable_locked_at_snapshot_with_io_for_testing
+                    ~io before.source_path ~expected:before.snapshot suffix in
+              match admission.policy with
+              | None -> Parent_io (guard_with_io parent_io admission.parent.source_path
+                  ~expected:admission.parent.snapshot ~f:append)
+              | Some policy -> Parent_policy_io (policy, guard_with_io parent_io admission.parent.source_path
+                  ~expected:admission.parent.snapshot ~f:(fun () ->
+                    guard_with_io policy_io policy.policy_path ~expected:policy.policy_snapshot ~f:append)))
+        in
+        (match outcome with
+         | Written _ ->
+           register_comments_append ~before_bytes ~after_bytes
+             ~offset:(String.length before_bytes) ~length:(String.length suffix) comment
+         | Not_written _ | Unknown _ -> ());
+        outcome
 
 let publish_append store receipt = match store.comments_source with
   | Comments_publishing current when current == receipt ->
@@ -445,8 +676,8 @@ let capture store =
   let expected = expected store in
   let bytes = match expected with
     | Error _ -> ""
-    | Ok _ -> Board_snapshot_rows.render ~rows:store.comment_rows
-        ~to_json:Board_content_json.comment_to_yojson store.comments in
+    | Ok observation ->
+      render_comments_snapshot ~base_bytes:observation.snapshot.bytes store.comments in
   { expected; bytes }
 
 let rewrite store snapshot =

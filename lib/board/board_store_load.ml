@@ -9,73 +9,87 @@ let load_persisted_comments = Board_votes_json.load_persisted_comments
     the posts snapshot can predate comment WAL rows appended after the
     last flush, so both the count and the timestamp are re-derived. *)
 let recalculate_reply_counts store =
-  (* First, reset all reply_counts to 0 *)
-  Hashtbl.iter (fun key (p : post) ->
-    Hashtbl.replace store.posts key { p with reply_count = 0 }
-  ) store.posts;
-  (* Then, count actual comments per post *)
+  let stats = Hashtbl.create (max 16 (Hashtbl.length store.posts)) in
   Hashtbl.iter (fun _ (c : comment) ->
     let post_key = Post_id.to_string c.post_id in
-    match Hashtbl.find_opt store.posts post_key with
-    | Some p ->
-        put_post store
-          { p with
-            reply_count = p.reply_count + 1
-          ; updated_at = Stdlib.Float.max p.updated_at c.created_at }
-    | None -> ()
+    match Hashtbl.find_opt stats post_key with
+    | None -> Hashtbl.add stats post_key (1, c.created_at)
+    | Some (count, latest_ts) ->
+      Hashtbl.replace stats post_key (count + 1, Stdlib.Float.max latest_ts c.created_at)
   ) store.comments;
-  let total = Hashtbl.fold (fun _ (p : post) acc -> acc + p.reply_count) store.posts 0 in
-  Log.BoardLog.debug "recalculated reply_counts: %d total comments across posts" total
+  let changed = ref false in
+  let total = ref 0 in
+  Hashtbl.iter (fun key (p : post) ->
+    let new_count, new_updated_at =
+      match Hashtbl.find_opt stats key with
+      | None -> 0, p.updated_at
+      | Some (count, latest_ts) -> count, Stdlib.Float.max p.updated_at latest_ts
+    in
+    total := !total + new_count;
+    if p.reply_count <> new_count || not (Stdlib.Float.equal p.updated_at new_updated_at) then begin
+      changed := true;
+      Hashtbl.replace store.posts key
+        { p with reply_count = new_count; updated_at = new_updated_at }
+    end
+  ) store.posts;
+  if !changed then rebuild_hot_post_index store;
+  Log.BoardLog.debug "recalculated reply_counts: %d total comments across posts" !total
 
 let recalculate_vote_counts store =
-  Hashtbl.iter
-    (fun key (post : post) ->
-       Hashtbl.replace store.posts key { post with votes_up = 0; votes_down = 0 })
-    store.posts;
-  Hashtbl.iter
-    (fun key (comment : comment) ->
-       Hashtbl.replace store.comments key { comment with votes_up = 0; votes_down = 0 })
-    store.comments;
+  let post_votes = Hashtbl.create 256 in
+  let comment_votes = Hashtbl.create 256 in
   Hashtbl.iter
     (fun key (direction, ts) ->
        match Board_vote_key.of_string key with
        | None -> ()
        | Some vote ->
          let target_id = Board_vote_key.target_id vote in
+         let du, dd = match direction with Up -> 1, 0 | Down -> 0, 1 in
          (match Board_vote_key.target_kind vote with
           | Board_vote_key.Post ->
-            (match Hashtbl.find_opt store.posts target_id with
-             | None -> ()
-             | Some post ->
-               let votes_up, votes_down =
-                 match direction with
-                 | Up -> post.votes_up + 1, post.votes_down
-                 | Down -> post.votes_up, post.votes_down + 1
-               in
-               Hashtbl.replace
-                 store.posts
-                 target_id
-                 { post
-                   with
-                   votes_up
-                 ; votes_down
-                 ; updated_at = Float.max post.updated_at ts
-                 })
+            (match Hashtbl.find_opt post_votes target_id with
+             | None -> Hashtbl.add post_votes target_id (du, dd, ts)
+             | Some (u, d, max_ts) ->
+               Hashtbl.replace post_votes target_id (u + du, d + dd, Stdlib.Float.max max_ts ts))
           | Board_vote_key.Comment ->
-            (match Hashtbl.find_opt store.comments target_id with
-             | None -> ()
-             | Some comment ->
-               let votes_up, votes_down =
-                 match direction with
-                 | Up -> comment.votes_up + 1, comment.votes_down
-                 | Down -> comment.votes_up, comment.votes_down + 1
-               in
-               Hashtbl.replace
-                 store.comments
-                 target_id
-                 { comment with votes_up; votes_down })))
+            (match Hashtbl.find_opt comment_votes target_id with
+             | None -> Hashtbl.add comment_votes target_id (du, dd)
+             | Some (u, d) ->
+               Hashtbl.replace comment_votes target_id (u + du, d + dd))))
     store.vote_log;
-  rebuild_hot_post_index store;
+  let posts_changed = ref false in
+  Hashtbl.iter
+    (fun key (post : post) ->
+       let new_up, new_down, new_updated_at =
+         match Hashtbl.find_opt post_votes key with
+         | None -> 0, 0, post.updated_at
+         | Some (u, d, max_ts) -> u, d, Stdlib.Float.max post.updated_at max_ts
+       in
+       if post.votes_up <> new_up
+          || post.votes_down <> new_down
+          || not (Stdlib.Float.equal post.updated_at new_updated_at)
+       then begin
+         posts_changed := true;
+         Hashtbl.replace
+           store.posts
+           key
+           { post with votes_up = new_up; votes_down = new_down; updated_at = new_updated_at }
+       end)
+    store.posts;
+  Hashtbl.iter
+    (fun key (comment : comment) ->
+       let new_up, new_down =
+         match Hashtbl.find_opt comment_votes key with
+         | None -> 0, 0
+         | Some (u, d) -> u, d
+       in
+       if comment.votes_up <> new_up || comment.votes_down <> new_down then
+         Hashtbl.replace
+           store.comments
+           key
+           { comment with votes_up = new_up; votes_down = new_down })
+    store.comments;
+  if !posts_changed then rebuild_hot_post_index store;
   invalidate_post_caches store;
   invalidate_comment_caches store
 ;;
@@ -168,32 +182,35 @@ let load_persisted_reactions store =
    the file once under persistence, install a complete read as the posts model
    with counts re-derived as at startup, and publish it as the new observation. *)
 let reobserve_posts store =
-  with_persist_lock store (fun () ->
-    let path = Board_paths.persist_path store in
-    match Board_core_persist.require_model_reload_allowed store ~path with
-    | Error (_, exn) -> Error (Io_error (Printexc.to_string exn))
-    | Ok () ->
-      match Board_posts_source.reobserve store with
-      | Board_posts_source.Reobservation_not_due -> Ok ()
-      | Board_posts_source.Unsettled_write_pending ->
-        Error (Io_error (Printf.sprintf
-          "posts source %s has an earlier write whose outcome is unknown, so Board \
-           writes stay refused while listing keeps the loaded posts. Restart the \
-           server to reload the Board from the file." path))
-      | Board_posts_source.Reobserved outcome ->
-        let outcome =
-          try
-            with_lock store (fun () ->
-              (match outcome with
-               | Posts_complete { posts; _ } ->
-                 Board_votes_json.replace_loaded_posts store posts;
-                 recalculate_reply_counts store;
-                 recalculate_vote_counts store
-               | Posts_partial _ | Posts_unavailable _ -> ());
-              publish_posts_read store outcome);
-            outcome
-          with exception_ ->
-            fst (Board_posts_source.fail_read store outcome ~stage:Project_posts
-              exception_ (Printexc.get_raw_backtrace ())) in
-        finish_posts_read outcome;
-        require_posts_source_readable store)
+  match store.posts_source with
+  | Posts_unobserved | Posts_readable _ -> Ok ()
+  | Posts_refused _ | Posts_unsettled _ ->
+    with_persist_lock store (fun () ->
+      let path = Board_paths.persist_path store in
+      match Board_core_persist.require_model_reload_allowed store ~path with
+      | Error (_, exn) -> Error (Io_error (Printexc.to_string exn))
+      | Ok () ->
+        match Board_posts_source.reobserve store with
+        | Board_posts_source.Reobservation_not_due -> Ok ()
+        | Board_posts_source.Unsettled_write_pending ->
+          Error (Io_error (Printf.sprintf
+            "posts source %s has an earlier write whose outcome is unknown, so Board \
+             writes stay refused while listing keeps the loaded posts. Restart the \
+             server to reload the Board from the file." path))
+        | Board_posts_source.Reobserved outcome ->
+          let outcome =
+            try
+              with_lock store (fun () ->
+                (match outcome with
+                 | Posts_complete { posts; _ } ->
+                   Board_votes_json.replace_loaded_posts store posts;
+                   recalculate_reply_counts store;
+                   recalculate_vote_counts store
+                 | Posts_partial _ | Posts_unavailable _ -> ());
+                publish_posts_read store outcome);
+              outcome
+            with exception_ ->
+              fst (Board_posts_source.fail_read store outcome ~stage:Project_posts
+                exception_ (Printexc.get_raw_backtrace ())) in
+          finish_posts_read outcome;
+          require_posts_source_readable store)

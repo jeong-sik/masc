@@ -3673,6 +3673,44 @@ let test_keeper_dive_schedules_by_next_wake_with_times () =
   Alcotest.(check bool) "a wake being dispatched reads as running" true
     (contains_sub ~needle:"running now · every 15m" text)
 
+(* With a page left unread, the list says it speaks for the pages read. *)
+let test_keeper_dive_schedules_say_when_pages_are_left () =
+  let now_unix = 1_795_400_000.0 in
+  let keeper = "e-masc-the-leader" in
+  let base = make_populated_model ~cols:140 ~rows:40 ~lang:Say.Lang_en in
+  let draw rows cursor =
+    let m =
+      {
+        base with
+        tz_offset_sec = 0;
+        freshness = { base.freshness with last_wall_unix = now_unix };
+        work = Work_store.apply_schedules ~observed_at:now_mono (rows, cursor) base.work;
+      }
+    in
+    grid_all_text
+      (render_to_grid ~cols:140 ~rows:40
+         (Screen_keepers.render_dive ~name:keeper ~tab:Nav.Keeper_work_sandbox ~model:m))
+  in
+  let one =
+    cadence_schedules
+      (cadence_row ~id:"soon" ~keeper ~next_due:(Printf.sprintf "%.1f" (now_unix +. 600.0)))
+  in
+  let partial = draw one (Some "page-2") in
+  Alcotest.(check bool) "the count says more may follow" true
+    (contains_sub ~needle:"Schedules (1+)" partial);
+  Alcotest.(check bool) "the list says the next pages were not read" true
+    (contains_sub ~needle:"More pages not read" partial);
+  let empty_partial = draw [] (Some "page-2") in
+  Alcotest.(check bool) "no row read is not no schedule" true
+    (contains_sub ~needle:"None on the pages read" empty_partial
+     && not (contains_sub ~needle:"No scheduled jobs" empty_partial));
+  let whole = draw one None in
+  Alcotest.(check bool) "every page read: a plain count and no note" true
+    (contains_sub ~needle:"Schedules (1)" whole
+     && not (contains_sub ~needle:"More pages not read" whole));
+  Alcotest.(check bool) "every page read and none: no schedule" true
+    (contains_sub ~needle:"No scheduled jobs" (draw [] None))
+
 let test_wave2_keeper_context_tool_calls_and_schedules () =
   let m0 = make_populated_model ~cols:140 ~rows:40 ~lang:Say.Lang_en in
   let tr_json =
@@ -5183,6 +5221,8 @@ let () =
             test_keeper_cadence_by_next_due;
           Alcotest.test_case "keeper dive draws schedules by next wake with their times" `Quick
             test_keeper_dive_schedules_by_next_wake_with_times;
+          Alcotest.test_case "keeper dive schedules say when pages are left" `Quick
+            test_keeper_dive_schedules_say_when_pages_are_left;
           Alcotest.test_case "all 3 roster modes at 140x40 & 90x28 (KO/EN)"
             `Quick test_keepers_all_modes_viewports_langs;
           Alcotest.test_case "strict live SSOT vs historical 12h trail" `Quick

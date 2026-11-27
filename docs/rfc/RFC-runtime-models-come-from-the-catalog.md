@@ -3,7 +3,7 @@ rfc: "runtime-models-come-from-the-catalog"
 title: "runtime.toml 의 모델은 카탈로그에서 오고, 계정은 바꾼 값만 적는다"
 status: Draft
 created: 2026-11-26
-updated: 2026-11-26
+updated: 2026-11-27
 author: claude
 related: []
 ---
@@ -93,6 +93,7 @@ related: []
 - 운영자 자신의 endpoint(llama-server, 마법사가 만든 계정, OpenRouter 의 카탈로그 밖 모델)는 카탈로그가 답하지 못한다. 지금은 `[models.<id>]` 와 그 `.capabilities` 블록이 답한다(`lib/runtime/runtime_adapter.ml:608` `No_catalog_answer`).
 - 이 선언을 계정 묶음으로 옮긴다. `api-name`, `max-context`, `tools-support`, `[<계정>.<모델>.capabilities]` 를 그 자리에 적는다.
 - 카탈로그가 답하는 모델의 계정 묶음에 같은 선언을 적으면 읽기를 거절한다. 지금 `kind` 를 카탈로그 계정에 적으면 거절하는 것과 같은 규칙이다(`docs/RUNTIME-TOML-REFERENCE.md` §1).
+  - 지금은 거절하지 않고 버린다. 카탈로그가 아는 모델의 `[models.<id>.capabilities]` 키 24개 중 6개만 카탈로그 위에 얹히고 13개는 조용히 사라진다(#37435, `lib/runtime/runtime_adapter.ml` `Model_row`). 이 거절을 넣는 층이 #37435 를 닫는다.
 - 규모: 운영 workspace 모델 표 239개 중 8개가 카탈로그 밖으로 보인다. seed 는 129개 중 12개다.
   - 이 숫자는 어림이다. 카탈로그 `model_id` 가 `api-name` 마지막 조각의 앞부분과 맞는지로 셌다. 실제 매칭은 계정을 함께 보는 가장 긴 `id_prefix` 다.
 

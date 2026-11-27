@@ -50,7 +50,14 @@ let test_driver_profiles () =
        [ agy; kimi; vibe ]);
   check bool "muse writes its token counts to its session journal" true
     ((Runtime_acp_client.profile_of_driver Muse_code).usage_channel
-     = Runtime_acp_client.Usage_in_muse_session_journal)
+     = Runtime_acp_client.Usage_in_muse_session_journal);
+  check bool "agy, vibe and muse show a compaction in their usage" true
+    (List.for_all
+       (fun (profile : Runtime_acp_client.driver_profile) ->
+          profile.compaction_record = Runtime_acp_client.Compaction_in_usage)
+       [ agy; vibe; Runtime_acp_client.profile_of_driver Muse_code ]);
+  check bool "kimi records its compactions in its session record" true
+    (kimi.compaction_record = Runtime_acp_client.Compaction_in_kimi_session_record)
 ;;
 
 let find_env key arr =

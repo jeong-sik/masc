@@ -3259,7 +3259,22 @@ let run_without_lifecycle
         (match cur_used with
          | Some _ -> entry.last_context_used <- cur_used
          | None -> ());
-        let compacted = prompt_res.Acp.context_compacted in
+        (* A compaction masc could not rule out counts as one: the session may
+           hold the host's summary instead of what was sent, and sending the
+           whole World State again is what keeps the next turn whole. *)
+        let compacted =
+          match prompt_res.Acp.context_compaction with
+          | Acp.Not_compacted -> false
+          | Acp.Compacted -> true
+          | Acp.Compaction_unknown unknown ->
+            Log.Keeper.warn
+              ~keeper_name
+              "ACP session %s may have compacted; the next turn sends the whole World \
+               State again: %s"
+              prompt_res.Acp.session_id
+              (Acp.compaction_unknown_to_string unknown);
+            true
+        in
         let rollover =
           rollover_of_usage
             ~threshold:(Runtime.context_rollover_threshold_of_runtime_id runtime_id)
@@ -3670,10 +3685,11 @@ let run_without_lifecycle
             response
         in
         recovery_failure := Session_store.State_persistence_failed;
-        (* If context occupancy dropped sharply, clear held_context on settlement
-           so the next resume re-delivers current World State blocks cleanly. If a
-           planned resume fell back to a fresh ACP session, record the fresh start
-           held_context so the next resume diffs against what this session holds. *)
+        (* If the host compacted the session, or masc could not rule it out, clear
+           held_context on settlement so the next resume re-delivers current World
+           State blocks cleanly. If a planned resume fell back to a fresh ACP
+           session, record the fresh start held_context so the next resume diffs
+           against what this session holds. *)
         let* settled =
           (if compacted || Option.is_some rollover
            then

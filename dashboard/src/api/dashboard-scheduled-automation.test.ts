@@ -7,6 +7,7 @@ import { pruneSchedules } from './dashboard-schedule'
 import {
   decodeScheduledAutomationLookup,
   fetchDashboardScheduledAutomation,
+  fetchKeeperScheduledAutomation,
   normalizeScheduledAutomation,
 } from './dashboard-scheduled-automation'
 
@@ -348,6 +349,66 @@ describe('fetchDashboardScheduledAutomation', () => {
       const projection = await fetchDashboardScheduledAutomation({ activeOnly: true })
 
       expect(projection).toEqual({ state: 'unavailable', reason: 'corrupt ledger' })
+    })
+  })
+})
+
+describe('fetchKeeperScheduledAutomation', () => {
+  const page = (selector: Record<string, unknown>) => ({
+    status: 'ok',
+    schedule_store_known: true,
+    schedule_store_read_error: null,
+    request_count: 1,
+    request_limit: 20,
+    truncated: false,
+    counts: { scheduled: 1 },
+    fsm: { state: 'active', active_count: 1, terminal_count: 0, next_due_at: null },
+    requests: [{ schedule_id: 's1' }],
+    signals: [],
+    ...selector,
+  })
+  const answerWith = (body: unknown) => {
+    const fetchMock = vi.fn().mockImplementation(() =>
+      Promise.resolve(new Response(JSON.stringify(body), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })))
+    vi.stubGlobal('fetch', fetchMock)
+    return fetchMock
+  }
+
+  it('asks for the page narrowed to the keeper wake target', async () => {
+    const fetchMock = answerWith(page({ payload_target_selector: 'keeper:code-reviewer' }))
+
+    await fetchKeeperScheduledAutomation('code-reviewer')
+
+    const requested = fetchMock.mock.calls.map(call => String(call[0]))
+    expect(requested.some(url =>
+      url.includes('/api/v1/dashboard/scheduled-automation?payload_target=keeper%3Acode-reviewer'))).toBe(true)
+  })
+
+  it('takes the page the server narrowed to that Keeper', async () => {
+    answerWith(page({ payload_target_selector: 'keeper:code-reviewer' }))
+
+    const projection = await fetchKeeperScheduledAutomation('code-reviewer')
+
+    expect(projection.state).toBe('available')
+  })
+
+  // A server that ignores the selector sends the fleet page; another Keeper's
+  // page is not this one's either.
+  it.each([
+    ['no selector field', {}],
+    ['a fleet page', { payload_target_selector: null }],
+    ['another Keeper’s page', { payload_target_selector: 'keeper:code-reviewer-sister' }],
+  ])('does not take %s as the Keeper’s schedules', async (_name, selector) => {
+    answerWith(page(selector))
+
+    const projection = await fetchKeeperScheduledAutomation('code-reviewer')
+
+    expect(projection).toEqual({
+      state: 'unavailable',
+      reason: 'the server answered with another schedule page than the one asked for',
     })
   })
 })

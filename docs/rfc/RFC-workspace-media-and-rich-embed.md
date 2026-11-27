@@ -18,14 +18,14 @@ related: []
 
 MASC currently treats workspace images as an ad-hoc chat-only byproduct. Model-generated images land in `<base_path>/.masc/media/` without magic-byte verification, disappear after 24 hours regardless of references, fail to load inside Markdown and sandboxed HTML artifacts, and cannot be uploaded from the Dashboard or embedded across Wiki pages and Published Artifacts.
 
-This RFC establishes one unified contract across OCaml server, Wiki/Artifact domain logic, reference-aware GC, and the Preact Dashboard:
+This RFC establishes one unified contract across OCaml server, Wiki/Artifact domain logic, media retention safety, and the Preact Dashboard:
 
 1. **One canonical workspace media address**: `/api/v1/media/<sha256>`, where `<sha256>` is the 64-character lowercase hexadecimal SHA-256 digest of the raw payload bytes, stored atomically at `<base_path>/.masc/media/<sha256>.<ext>`.
 2. **Strict closed MIME types and magic-byte verification**: closed `raster_mime` (`Image_png | Image_jpeg | Image_gif | Image_webp`) and `media_mime` sum types with real magic-byte sniffing, zero `.bin`/`Other` silent fallback, pure OCaml image dimension parsing, and explicit rejection of `image/svg+xml` (`415 svg_not_allowed`).
 3. **Upload and immutable-cache HTTP API with multi-account parity**: raw-binary `POST /api/v1/media` (`CanAdmin` / `Admin_only` + CSRF) and hardened `GET /api/v1/media/<sha256>` (`CanReadState` / `Workspace_read`) moved out of `server_routes_http_routes_voice.ml` into a dedicated media route module plus `server_account_dashboard_bridge.ml`, serving `ETag`, `304 Not Modified`, `Cache-Control: private, max-age=31536000, immutable`, `X-Content-Type-Options: nosniff`, and `Content-Security-Policy: default-src 'none'; sandbox`.
-4. **Unified typed embed grammar**: Obsidian-style `![[media:<sha256>|caption]]`, `![[wiki:<slug>|label]]` (plus shorthand `![[<slug>|label]]`), `![[artifact:<id>|label]]`, and Markdown `![alt](/api/v1/media/<sha256>)`, parsed into closed sum types in `Wiki_link`, validated purely in `Wiki_lint`, projected in `GET /api/v1/wiki/:slug` and `GET /api/v1/published-artifacts/:id` without breaking strict TUI decoders, and supported in Keeper authoring tools without raw base64 payloads.
-5. **Reference-aware media GC (`no_wall_clock_death`)**: remove blind 24-hour `mtime` deletion from persist paths, classify `.masc/media` in `Server_tool_blob_scope.workspace` so `Tool_blob_sweep` never stalls as `unclassified`, and require any deletion sweeper to run two-pass fail-closed scanning across all durable workspace roots (Chat, Keeper WALs, Multi-account homes, Wiki, Published Artifact bodies, Board posts & comments, Tasks, and Goals).
-6. **High-performance Dashboard runtime and authoring UX**: replace per-mount `FileReader.readAsDataURL` with an epoch-fenced, byte-bounded LRU `URL.createObjectURL` cache (`workspace-media-cache.ts`), eliminate 401 image floods in `MarkdownContent`, hydrate `/api/v1/media/<sha256>` inside `<iframe sandbox="" srcDoc>` HTML artifacts via inert `DOMParser` without relaxing `sandbox=""`, and add paste/drop/button upload, split live preview, and a Quick Embed Picker to Wiki and `RichComposer`.
+4. **Unified typed embed grammar**: Obsidian-style `![[media:<sha256>|caption]]`, `![[wiki:<slug>|label]]` (plus shorthand `![[<slug>|label]]`), `![[artifact:<id>|label]]`, and Markdown `![alt](/api/v1/media/<sha256>)`, sharing a cycle-free leaf scanner (`Media_ref_scan`) across `Wiki_link` and `Published_artifact`, validated purely in `Wiki_lint`, projected in `GET /api/v1/wiki/:slug` and `GET /api/v1/published-artifacts/:id` without breaking strict TUI decoders, and supported in Keeper authoring tools without raw base64 payloads.
+5. **Wall-clock deletion removal and planned two-pass media GC (`no_wall_clock_death`)**: remove blind 24-hour `mtime` / 500 MiB FIFO deletion and retire its two env knobs (`MASC_KEEPER_GENERATED_MEDIA_RETENTION_SEC`, `MASC_KEEPER_GENERATED_MEDIA_DIR_MAX_BYTES`) in L2, and classify `.masc/media` in `Server_tool_blob_scope.workspace` so `Tool_blob_sweep` never stalls as `unclassified`. **No media GC sweeper ships in this 5-PR stack**: until a dedicated follow-up PR implements two-pass fail-closed scanning across every durable workspace root (Chat, Keeper WALs, Multi-account homes, Wiki, Published Artifact bodies, Board posts & comments, Tasks, and Goals), `.masc/media` grows append-only with no automatic reclamation.
+6. **High-performance Dashboard runtime and authoring UX**: replace per-mount `FileReader.readAsDataURL` with an epoch-fenced, byte-bounded LRU `URL.createObjectURL` cache (`workspace-media-cache.ts`), eliminate 401 image floods in `MarkdownContent`, hydrate `/api/v1/media/<sha256>` inside `<iframe sandbox="" srcDoc>` HTML artifacts in live `artifacts-tab.ts` via inert `DOMParser` without relaxing `sandbox=""`, and add paste/drop/button upload, split live preview, and a Quick Embed Picker to live Dashboard composers (`wiki-tab.ts`, `board-tab.ts`, and `tasks-tab.ts`).
 
 ## 1. Current State and Concrete Defects (`a8a00684072d1`)
 
@@ -48,7 +48,7 @@ Direct inspection of `origin/main` surfaces eight structural defects:
 |---|---|
 | `closed_sum_over_string` | `raster_mime`, `media_mime`, `upload_error`, `embed_kind`, `embed_target`, `embed_syntax`, and new `Wiki_lint.finding` constructors are closed OCaml variants; wire strings are mapped at the boundary only. |
 | `strict_parse_no_default` | MIME parsers, magic-byte sniffers, and embed parsers return `option`/`result` or explicit `Invalid_embed`/`Unsupported_embed`. Zero `.bin`, `Other`, or silent slug coercion fallbacks. |
-| `no_wall_clock_death` | Blind 24h `mtime` eviction is deleted from `persist_result`. Media retention is strictly reference-based via two-pass `Observe_only -> Delete_previous_candidates` GC. |
+| `no_wall_clock_death` | Blind 24h `mtime` / 500 MiB eviction and its two env knobs (`MASC_KEEPER_GENERATED_MEDIA_RETENTION_SEC`, `MASC_KEEPER_GENERATED_MEDIA_DIR_MAX_BYTES`) are deleted in L2. `.masc/media` is currently append-only (no automatic reclamation in this stack); two-pass `Observe_only -> Delete_previous_candidates` reference-based GC is planned as a dedicated follow-up PR once all durable roots are scanned. |
 | `legacy_residue` | Legacy composite `sha256(mime ^ "\000" ^ bytes)` hashing, `.bin`/`Other` fallback arms, and `GET /api/v1/media/` inside `server_routes_http_routes_voice.ml` are deleted rather than shimmed. |
 | `effects` | Magic-byte sniffing, dimension parsing, `Wiki_link.extract_embeds`, `Wiki_lint.run` (parameterized by pure `media_exists`/`artifact_exists` predicates), and `Published_artifact.extract_media_refs` are 100% pure. Filesystem and HTTP effects stay at the server/store edge. |
 | `hardcoded_path` | Media files live under `Filename.concat (Common.masc_dir_from_base_path ~base_path) media_subdir`; zero absolute paths. |
@@ -208,7 +208,7 @@ All embed forms are skipped inside fenced code blocks (backtick or tilde fences)
   - Media embed: `![[media:<sha256>]]` or `![[media:<sha256>|caption]]`
   - Wiki embed: `![[wiki:<slug>]]` or `![[wiki:<slug>|label]]`
   - Artifact embed: `![[artifact:<id>]]` or `![[artifact:<id>|label]]`
-- **Parser acceptance rules** (optional label splits on the first `|`, trimmed; empty label becomes `None`):
+- **Parser acceptance rules** (optional label splits on the first `|`, trimmed; empty label becomes `None`; both `scheme` and target `<raw>` are ASCII-trimmed identically in OCaml `Media_ref_scan.split_obsidian_inner` and Dashboard `parseObsidianEmbed`):
   1. `![[media:<raw>]]` -> `Media_embed sha256` if `Keeper_chat_media_store.valid_token raw`, else `Invalid_embed { kind = Embed_media; raw }`.
   2. `![[wiki:<raw>]]` or bare `![[<raw>]]` (no `:` in `<raw>`) -> `Wiki_embed slug` if `Wiki_page_name.validate_page_name raw = Ok slug`, else `Invalid_embed { kind = Embed_wiki; raw }`.
   3. `![[artifact:<raw>]]` -> `Artifact_embed id` if `Published_artifact.valid_id raw` (`^artifact-[0-9a-f]{32}$`), else `Invalid_embed { kind = Embed_artifact; raw }`.
@@ -253,13 +253,13 @@ val extract_embeds : string -> embed list
   - `Wiki_graph.incoming` counts both `Wiki_link.Page slug` links and `Wiki_link.Wiki_embed slug` embeds (deduplicated per referencing page, excluding self-references) so transcluded pages are not falsely flagged as `Orphan`.
 - **Pure `Wiki_lint`**:
   - Add closed finding constructors to `Wiki_lint.finding`:
-    - `Broken_media_embed of { page : string; line : int; sha256 : string; raw : string }` (`"broken_media_embed"`)
-    - `Broken_wiki_embed of { page : string; line : int; target : string; raw : string }` (`"broken_wiki_embed"`)
-    - `Broken_artifact_embed of { page : string; line : int; artifact_id : string; raw : string }` (`"broken_artifact_embed"`)
-    - `Invalid_embed of { page : string; line : int; kind : string; raw : string }` (`"invalid_embed"`)
-    - `Unsupported_embed of { page : string; line : int; scheme : string; raw : string }` (`"unsupported_embed"`)
-  - `Wiki_lint.run` stays 100% pure by accepting optional predicates `?media_exists:(string -> bool)` and `?artifact_exists:(string -> bool)`. Callers at the I/O edge (`Server_dashboard_http_wiki`, `Tool_wiki.handle_lint`) supply `fun token -> Option.is_some (Keeper_chat_media_store.file_path_of_token ~base_dir:base_path ~token)` and artifact store existence checks.
-  - **TUI lint wire compatibility (`lib/masc_tui/protocol/wire_knowledge.ml:803-828`)**: every new embed finding must emit non-blank `"subject"` (the page slug), `"page"`, `"line"`, and `"target"` (sha256, slug, artifact ID, or raw string) in **both** `Server_dashboard_http_wiki.finding_to_json` and `Wiki_lint_report.finding_to_json`.
+    - `Broken_media_embed of { page : string; line : int; target : string }` (`"broken_media_embed"`)
+    - `Broken_wiki_embed of { page : string; line : int; target : string }` (`"broken_wiki_embed"`)
+    - `Broken_artifact_embed of { page : string; line : int; target : string }` (`"broken_artifact_embed"`)
+    - `Invalid_embed of { page : string; line : int; embed_kind : Wiki_link.embed_kind; target : string }` (`"invalid_embed"`)
+    - `Unsupported_embed of { page : string; line : int; scheme : string; target : string }` (`"unsupported_embed"`)
+  - `Wiki_lint.run` stays 100% pure by accepting optional predicates `?media_exists:(string -> bool)` and `?artifact_exists:(string -> [ \`Exists | \`Missing | \`Unavailable of string ])` (or `(bool, string) result`), so store read errors are never misreported as `Broken_artifact_embed`. Callers at the I/O edge (`Server_dashboard_http_wiki`, `Tool_wiki.handle_lint`) supply `Keeper_chat_media_store.media_exists ~base_dir:base_path` and `Published_artifact_store.exists ~base_path`.
+  - **TUI lint wire compatibility (`lib/masc_tui/protocol/wire_knowledge.ml:803-828`)**: every new embed finding must emit non-blank `"subject"` (the page slug), `"page"`, `"line"`, and `"target"` (the raw embed string) in **both** `Server_dashboard_http_wiki.finding_to_json` and `Wiki_lint_report.finding_to_json`.
   - Update `lib/wiki_lint_report.ml` and `config/tools/masc_wiki_lint.toml` in lockstep with `Wiki_lint.all_kinds` so exhaustive pattern matches and `test_enum_mirror_sync` pass.
 
 ### 5.3 `GET /api/v1/wiki/:slug` Additive Wire Contract
@@ -289,14 +289,14 @@ Inside `V2Envelope.data`, keep all existing fields untouched and add:
 
 ### 5.4 Published Artifacts & Keeper Authoring Tools
 
-- **Pure extraction without breaking `Published_artifact.revision`**:
+- **Pure extraction via cycle-free leaf scanner (`Media_ref_scan`) without breaking `Published_artifact.revision`**:
+  - Because `Wiki_link` depends on `Published_artifact.valid_id`, `Published_artifact` cannot call `Wiki_link`. Shared Markdown fence/code-span blanking, Obsidian embed splitting, and `/api/v1/media/<64-hex>` Markdown/HTML URL scanning live in a zero-cycle leaf module `Media_ref_scan` (`lib/media_ref_scan.{ml,mli}`) shared by both `Wiki_link` and `Published_artifact`.
   - Keep the `Published_artifact.revision` record fields unchanged (preserving `test/masc_tui_v2/protocol_net/test_server_wire_roundtrip.ml:584` and avoiding disk metadata migration).
   - Add pure `Published_artifact.extract_media_refs : format -> string -> string list`:
-    - `Markdown`: extracts every validated 64-hex token from `Wiki_link.extract_embeds` (`Media_embed`).
-    - `Html`: scans HTML `src="..."` / `src='...'` attributes (outside `<script>`/`<style>`) for exact `/api/v1/media/<64-hex>` paths.
+    - `Markdown`: delegates to `Media_ref_scan` to extract every validated 64-hex token from Obsidian `![[media:<sha256>]]`, Markdown `![...](/api/v1/media/<sha256>)`, and inline HTML `<img>` references outside fenced code blocks and code spans.
+    - `Html`: strips HTML comments (`<!-- ... -->`) and `<script>` blocks, then scans HTML attributes (`src="..."`, `src='...'`) and CSS `url(/api/v1/media/<64-hex>)` references (including `<style>` blocks) for exact `/api/v1/media/<64-hex>` paths.
     - Returns a sorted, deduplicated list of lowercase 64-hex tokens.
   - `GET /api/v1/published-artifacts/:id` adds top-level `"media_refs": [...]` computed from `(selected.format, content)`.
-  - `Published_artifact_store.referenced_media_tokens : base_path:string -> (string list, error) result` scans every revision of every published artifact fail-closed (returning `Error` if any metadata file or revision blob is unreadable so GC never deletes live media).
   - `GET /api/v1/published-artifacts` authorization remains single-user `Token_permission CanAdmin` in this stack.
 - **Keeper tools (`Tool_wiki`, `Tool_schemas_wiki`, `Keeper_artifact_publish`, `config/tools/*.toml`)**:
   - Keepers reference workspace media exclusively by canonical `/api/v1/media/<sha256>` or `![[media:<sha256>|caption]]` (never raw base64 inside tool arguments or document bodies).
@@ -310,19 +310,24 @@ Inside `V2Envelope.data`, keep all existing fields untouched and add:
 - **No phantom exclusions (`legacy_residue`)**: do **not** add a `.masc/media_sweep` entry to `Server_tool_blob_scope.workspace` unless a real sweeper module that creates and owns `.masc/media_sweep` lands in the same change.
 - Keep `Config_dir_resolver.wiki_dirname` as `no_reference` for `Tool_blob_store`, because wiki `.md` files reference `/api/v1/media/<sha256>`, not `[masc:blob ...]` markers; `Tool_blob_maintenance` only parses JSON/JSONL/blob markers and would fail on raw Markdown if `wiki` were marked `Tree`.
 
-### 6.2 Eliminating Wall-Clock Media Death
+### 6.2 Eliminating Wall-Clock Media Death & Planned Two-Pass GC (Follow-Up)
 
-- Delete `cleanup_old_files_in_dir` from `Keeper_chat_media_store.persist_result`. Persisting a new image must never evict existing media by `mtime` or directory-size FIFO.
-- `Env_config_keeper.KeeperGeneratedMedia.max_bytes ()` remains the authoritative per-file upload and serve ceiling. Because `lib/config/env_config_keeper.{ml,mli}` and `lib/config/keeper_runtime_setting_registry.ml` sit outside Layer 2's strict file boundary, retiring the now-unused `MASC_KEEPER_GENERATED_MEDIA_RETENTION_SEC` and `MASC_KEEPER_GENERATED_MEDIA_DIR_MAX_BYTES` definitions (and their config/registry tests) is tracked as a dedicated follow-up cleanup PR per `legacy_residue` and `env_var_sprawl`.
-- Any future or integrated two-pass reference-aware media sweeper (`Observe_only | Delete_previous_candidates`, mirroring `Tool_blob_maintenance`) **must** satisfy both invariants before enabling `Delete_previous_candidates`:
+- **Shipped in Layer 2**:
+  - Delete `cleanup_old_files_in_dir` from `Keeper_chat_media_store.persist_result`. Persisting a new image never evicts existing media by `mtime` or directory-size FIFO.
+  - Keep `Env_config_keeper.KeeperGeneratedMedia.max_bytes ()` (`MASC_KEEPER_GENERATED_MEDIA_MAX_BYTES`) as the authoritative per-file upload and serve ceiling.
+  - Delete the now-ineffective `MASC_KEEPER_GENERATED_MEDIA_RETENTION_SEC` and `MASC_KEEPER_GENERATED_MEDIA_DIR_MAX_BYTES` env knobs from `lib/config/env_config_keeper.{ml,mli}` and `lib/config/keeper_runtime_setting_registry.ml` in Layer 2 so operators are never shown active-looking settings that no longer run (`legacy_residue`, `env_var_sprawl`).
+- **Operational trade-off until the follow-up GC PR lands**:
+  - **No media GC sweeper ships in this 5-PR stack.** Until the dedicated follow-up GC PR lands, `<base_path>/.masc/media/` is append-only (content-deduplicated by raw SHA-256) and grows without automatic disk reclamation.
+  - No uncalled partial GC collectors (`referenced_media_tokens` / `all_media_refs`) are left in production code in Layer 3; reference collectors ship together with the two-pass sweeper once every durable root below is audited.
+- **Planned follow-up contract** — the follow-up two-pass reference-aware media sweeper (`Observe_only | Delete_previous_candidates`, mirroring `Tool_blob_maintenance`) **must** satisfy both invariants before enabling `Delete_previous_candidates`:
   1. **Complete Durable Reference Roots** (every root must be read completely; any unreadable or undecodable root aborts deletion fail-closed and deletes nothing):
      - **Keeper Chat & Runtime Stores**: `<base_path>/.masc/chat/`, `<base_path>/.masc/keepers/`, and `<base_path>/.masc/messages/`.
      - **Keeper Config SQLite WALs**: `<config_keepers>/*` compaction and canonical turn databases (`lib/server/server_tool_blob_scope.ml:268-283`).
      - **Multi-Account Homes**: `<base_path>/.masc/accounts/` (`Runtime_account_home_layout.accounts_dir`).
-     - **Wiki Pages**: `<base_path>/.masc/wiki/*.md` via `Wiki_link.extract_embeds` (`Media_embed`).
-     - **Published Artifacts**: `<base_path>/.masc/published_artifacts/*.json` with every revision body resolved from `Tool_blob_store` via `Published_artifact_store.referenced_media_tokens` (metadata JSON alone carries only `Tool_output.artifact_ref`, not body text).
+     - **Wiki Pages**: `<base_path>/.masc/wiki/*.md` via `Wiki_link.extract_embeds` + `Published_artifact.extract_media_refs Markdown`.
+     - **Published Artifacts**: `<base_path>/.masc/published_artifacts/*.json` with every revision body resolved from `Tool_blob_store` (metadata JSON alone carries only `Tool_output.artifact_ref`, not body text).
      - **Board Posts & Comments**: `<base_path>/.masc/board_posts.jsonl` and `<base_path>/.masc/board_comments.jsonl` (`lib/board/board_paths.ml:25-26`).
-     - **Tasks & Goals**: `<base_path>/.masc/tasks/` (`lib/workspace/workspace_utils_paths_backend.ml:46`, written by `RichComposer` via `task-create-form.ts`) and `<base_path>/.masc/goals.json` (`Goal_store.goals_filename`).
+     - **Tasks & Goals**: `<base_path>/.masc/tasks/` (`lib/workspace/workspace_utils_paths_backend.ml:46`) and `<base_path>/.masc/goals.json` (`Goal_store.goals_filename`).
   2. **Two-Pass Reclamation**:
      - `Observe_only` writes the set of currently unreferenced `<sha256>` tokens to `<base_path>/.masc/media_sweep/candidates.json` (adding `"media_sweep"` to `Server_tool_blob_scope.workspace` as `Sweep_record` in the same PR that implements the sweeper) and deletes nothing.
      - `Delete_previous_candidates` deletes only tokens present in the previous candidate snapshot that remain unreferenced in the fresh complete scan, preventing TOCTOU deletion of an image uploaded just before its Wiki page, Artifact, Comment, or Task save commits.
@@ -361,7 +366,7 @@ Inside `V2Envelope.data`, keep all existing fields untouched and add:
 
 ### 7.3 Safe `sandbox=""` HTML Artifact Hydration
 
-- **Invariant**: `<iframe sandbox="" srcDoc={hydratedHtml}>` in `artifacts-tab.ts` (and upgraded `artifacts-surface.ts`) must never add `allow-scripts`, `allow-same-origin`, `allow-forms`, or `allow-popups`.
+- **Invariant**: `<iframe sandbox="" srcDoc={hydratedHtml}>` in live `artifacts-tab.ts` must never add `allow-scripts`, `allow-same-origin`, `allow-forms`, or `allow-popups`.
 - **Hydration flow**:
   1. Whenever `doc.content` references `/api/v1/media/`, **gate `<iframe sandbox="" srcDoc={...}>` rendering** (display a loading placeholder instead of mounting raw `doc.content`) until async hydration resolves, preventing an immediate opaque-origin 401 flash on first mount.
   2. Parse `doc.content` using `new DOMParser().parseFromString(html, 'text/html')` (inert document: scripts never execute, external resources never fetch).
@@ -369,20 +374,22 @@ Inside `V2Envelope.data`, keep all existing fields untouched and add:
   4. Resolve each unique path via `workspace-media-cache.ts` `acquireDataUrl(path, { epoch, signal })` under a per-selection `AbortController` + `sessionEpoch` fence.
   5. Rewrite matched `img` `src` attributes to verified raster `data:` URIs. On failed or over-budget media `img` elements, **strip the `src` attribute** (`removeAttribute('src')`, preserving or setting descriptive fallback `alt` text and a `data-masc-media-unhydrated` marker) before serializing `srcDoc` so the iframe never fires unauthenticated opaque-origin requests.
   6. Preserve `<!DOCTYPE html>` explicitly when serializing `DOMParser` output (`<!DOCTYPE html>\n${parsed.documentElement.outerHTML}`) so HTML5 artifacts stay in standards mode rather than quirks mode.
-- **`artifacts-surface.ts` disposition**: `components/work.ts:43` still dynamically imports `artifacts-surface.ts` (referenced by `work.test.ts` and `section-nav-reachability.test.ts`), and `components/work.ts` sits outside this stack's file boundary. Therefore Layer 4 upgrades `artifacts-surface.ts` to strict `sandbox=""` + shared hydration rather than breaking `tsc`; retiring dead `components/work.ts` + `artifacts-surface.ts` is deferred to a dedicated cleanup PR.
+- **Reachability boundary**: Legacy `components/published-artifacts/artifacts-surface.ts` is unreachable from `dashboard/src/main.ts` and is left untouched by this stack.
 
-### 7.4 Authoring Productivity UX (`workspace-media-upload.ts`, `wiki-tab.ts`, `rich-composer.ts`)
+### 7.4 Authoring Productivity UX (`workspace-media-upload.ts`, `use-workspace-media-composer.ts`, `wiki-tab.ts`, `board-tab.ts`, `tasks-tab.ts`)
 
 - **`dashboard/src/lib/workspace-media-upload.ts`**:
-  - Typed client for raw-binary `POST /api/v1/media` returning `Result<UploadedWorkspaceMedia, MediaUploadError>`.
+  - Typed client for raw-binary `POST /api/v1/media` returning `Result<UploadedWorkspaceMedia, MediaUploadError>`, importing `WORKSPACE_RASTER_MIMES`, `WORKSPACE_MEDIA_MAX_BYTES`, and `parseWorkspaceRasterMime` from `keeper-media.ts` SSOT.
   - Pre-checks file bytes (first 12 bytes magic-byte sniff + MIME check, explicitly rejecting SVG before network send, soft <= 50 MiB guard while honoring server `413` `max_bytes`).
   - Uses `resolveWorkspaceUrl`, `sessionEpoch` fence, `AbortSignal`, single-user `Authorization: Bearer` + `same-origin`, and multi-account `credentials: 'same-origin'` + `x-masc-csrf-token` (with one 403 CSRF refresh retry).
-- **Wiki Editor (`dashboard/src/workspaces/knowledge/wiki-tab.ts` + `wiki-embed-picker.ts` + `wiki-editor.css`)**:
-  - Clipboard image paste (`onPaste`), drag-and-drop overlay (`onDragOver`/`onDrop`), and toolbar **이미지 첨부** button upload via `workspace-media-upload.ts` and insert `![caption](/api/v1/media/<sha256>)` at cursor position with progress indicator and error toast.
-  - Split / Toggle Live Preview using `<MarkdownContent text={editBody} document />`.
-  - Quick Embed Picker (`위키·아티팩트 삽입` popover) inserting `![[wiki:<slug>]]` from loaded `wikiIndex.pages` and `![[artifact:<id>]]` from `/api/v1/published-artifacts` (Artifacts tab shown when `canUseSingleUserTokenAdmin(session)` is true).
-- **`RichComposer` (`dashboard/src/components/common/rich-composer.ts`)**:
-  - Wires paste/drop + attach button through `workspace-media-upload.ts` via wrapper handlers and `inputRef` (without modifying `components/common/input.ts` or breaking the 2 `.rich-composer-tab` buttons pinned by `rich-composer.test.ts:22`).
+- **Shared Composer Hook (`dashboard/src/lib/use-workspace-media-composer.ts`)**:
+  - Owns clipboard image paste, drag-and-drop, file-picker upload, cursor insertion, progress/error state, and draft-identity (`draftKey`) abort fencing so switching targets or submitting a draft never inserts a late upload into a new draft.
+- **Live Wiki Editor (`dashboard/src/workspaces/knowledge/wiki-tab.ts` + `wiki-embed-picker.ts` + `wiki-editor.css`)**:
+  - Uses `useWorkspaceMediaComposer` keyed by page slug / create mode; blocks Save (`Cmd+S` / `Cmd+Enter` / button) while uploads are in flight so unsent images are never dropped silently.
+  - Split / Toggle Live Preview using debounced `<MarkdownContent text={debouncedEditBody} document />`.
+  - Quick Embed Picker (`위키·아티팩트 삽입`) using unfiltered Wiki index pages (with overflow indicator beyond 40 items) and a shared `kn:artifacts:list` fetcher with `artifacts-tab.ts`.
+- **Live Board & Task Composers (`dashboard/src/workspaces/knowledge/board-tab.ts`, `dashboard/src/workspaces/work/tasks-tab.ts`)**:
+  - Wire the same `useWorkspaceMediaComposer` hook into live Board post/reply textareas and live Task description textarea (aborted on post switch, modal close, or submit). Unreachable legacy `components/common/rich-composer.ts` is left untouched.
 
 ## 8. Native GitHub Stack Plan & Verification
 
@@ -391,10 +398,11 @@ All changes land as one linear 5-layer Native GitHub Stack off `main` (`gh stack
 | Layer | Branch | Owner | Owned Files | Verification Gate |
 |---|---|---|---|---|
 | L1 | `rfc/workspace-media-and-rich-embed` | `@masc-media-arch` | `docs/rfc/RFC-workspace-media-and-rich-embed.md` | `python3 scripts/rfc-generate-index.py --check`, adversarial RFC audit |
-| L2 | `feat/workspace-media-core` | `@masc-media-server` | `lib/keeper/keeper_chat_media_store.{ml,mli}`, callers (`keeper_chat_agent_core_stream_bridge.ml`, `keeper_stream_media_accum.ml`), `lib/server/server_routes_http_routes_media.{ml,mli}`, `lib/server/server_routes_http_routes_voice.ml`, `lib/server/server_routes_http.ml`, `lib/server/server_account_dashboard_bridge.ml`, media unit/endpoint tests (including updating `test/test_artifacts_endpoint.ml:328,333,369,377,389` for new router, valid RIFF/WAVE bytes, and merged `Vary`) | PR `changes` + `type-check` (`dune build @check`), consumer trace, `@masc-verifier` audit |
-| L3 | `feat/wiki-artifact-embed-core` | `@masc-wiki-core` | `lib/wiki_link.{ml,mli}`, `lib/wiki_graph.{ml,mli}`, `lib/wiki_lint.{ml,mli}`, `lib/wiki_lint_report.ml`, `lib/server/server_dashboard_http_wiki.{ml,mli}`, `lib/published_artifact.{ml,mli}`, `lib/published_artifact_store.{ml,mli}`, `lib/server/server_routes_http_routes_published_artifacts.{ml,mli}`, `lib/server/server_tool_blob_scope.ml`, workspace media GC module, `lib/tool_wiki.{ml,mli}`, `lib/tool_schemas/tool_schemas_wiki.ml`, `lib/keeper/keeper_artifact_publish.{ml,mli}`, `config/tools/masc_wiki_*.toml`, `config/tools/keeper_artifact_publish.toml`, focused OCaml tests | PR `changes` + `type-check`, `test_enum_mirror_sync` consistency, consumer trace, `@masc-verifier` audit |
-| L4 | `feat/dashboard-rich-embed-runtime` | `@masc-embed-ui` | `dashboard/src/lib/workspace-media-cache.ts` (+ tests), `dashboard/src/lib/keeper-media.ts`, `dashboard/src/components/chat/workspace-image.ts` (+ tests), `dashboard/src/components/common/markdown-renderer.ts` (+ tests + `markdown-embeds.css`), `dashboard/src/components/common/rich-code-preview.ts`, `dashboard/src/workspaces/knowledge/artifacts-tab.ts` (+ tests), `dashboard/src/components/published-artifacts/artifacts-surface.ts` | `pnpm --dir dashboard typecheck`, focused `vitest run`, memory/revoke/sandbox audit |
-| L5 | `feat/dashboard-wiki-media-ux` | `@masc-editor-ux` | `dashboard/src/lib/workspace-media-upload.ts` (+ tests), `dashboard/src/workspaces/knowledge/wiki-tab.ts` (+ tests), `dashboard/src/workspaces/knowledge/wiki-embed-picker.ts`, `dashboard/src/workspaces/knowledge/wiki-editor.css`, `dashboard/src/components/common/rich-composer.ts` (+ tests) | `pnpm --dir dashboard typecheck`, focused `vitest run`, `@masc-verifier` audit |
+| L2 | `feat/workspace-media-core` | `@masc-media-server` | `lib/keeper/keeper_chat_media_store.{ml,mli}`, `lib/config/env_config_keeper.{ml,mli}`, `lib/config/keeper_runtime_setting_registry.ml`, callers (`keeper_chat_agent_core_stream_bridge.ml`, `keeper_stream_media_accum.ml`), `lib/server/server_routes_http_routes_media.{ml,mli}`, `lib/server/server_routes_http_routes_voice.ml`, `lib/server/server_routes_http.ml`, `lib/server/server_account_dashboard_bridge.ml`, media unit/endpoint tests | PR `changes` + `type-check` (`dune build @check`), consumer trace |
+| L3 | `feat/wiki-artifact-embed-core` | `@masc-wiki-core` | `lib/media_ref_scan.{ml,mli}`, `lib/wiki_link.{ml,mli}`, `lib/wiki_graph.{ml,mli}`, `lib/wiki_lint.{ml,mli}`, `lib/wiki_lint_report.ml`, `lib/server/server_dashboard_http_wiki.{ml,mli}`, `lib/published_artifact.{ml,mli}`, `lib/published_artifact_store.{ml,mli}`, `lib/server/server_routes_http_routes_published_artifacts.{ml,mli}`, `lib/server/server_tool_blob_scope.ml`, `lib/tool_wiki.{ml,mli}`, `lib/keeper/keeper_artifact_publish.{ml,mli}`, `config/tools/masc_wiki_*.toml`, `config/tools/keeper_artifact_publish.toml`, focused OCaml tests | PR `changes` + `type-check`, `test_enum_mirror_sync` consistency |
+| L4 | `feat/dashboard-rich-embed-runtime` | `@masc-embed-ui` | `dashboard/src/lib/workspace-media-cache.ts` (+ tests), `dashboard/src/lib/keeper-media.ts`, `dashboard/src/components/chat/workspace-image.ts` (+ tests), `dashboard/src/components/common/markdown-renderer.ts` + `markdown-embed-runtime.ts` (+ tests + `markdown-embeds.css`), `dashboard/src/components/common/rich-code-preview.ts`, `dashboard/src/workspaces/knowledge/artifacts-tab.ts` (+ tests) | `pnpm --dir dashboard typecheck`, focused `vitest run`, memory/revoke/sandbox audit |
+| L5 | `feat/dashboard-wiki-media-ux` | `@masc-editor-ux` | `dashboard/src/lib/workspace-media-upload.ts` (+ tests), `dashboard/src/lib/use-workspace-media-composer.ts` (+ tests), `dashboard/src/workspaces/knowledge/wiki-tab.ts` (+ tests), `dashboard/src/workspaces/knowledge/wiki-embed-picker.ts` (+ tests), `dashboard/src/workspaces/knowledge/wiki-editor.css`, `dashboard/src/workspaces/knowledge/board-tab.ts`, `dashboard/src/workspaces/work/tasks-tab.ts` | `pnpm --dir dashboard typecheck`, focused `vitest run` |
+| Follow-up (planned, outside this stack) | TBD | TBD | Two-pass workspace media GC sweeper (`Observe_only \| Delete_previous_candidates`) + all-root reference collectors (Chat, Keeper WALs, Multi-account homes, Wiki, Published Artifacts, Board, Tasks, Goals) + `.masc/media_sweep` classification | Full root scan fail-closed tests + soak |
 
 Cross-layer symbol stability guarantees:
 - Layer 2 preserves `Keeper_chat_media_store.valid_token` and `Keeper_chat_media_store.file_path_of_token` signatures and exposes `val media_subdir : string` (`"media"`). Because `media_subdir` is not exposed in `.mli` on `origin/main` yet, Layer 3 uses a local `media_subdir = "media"` binding in `Server_tool_blob_scope.ml` while branched off `origin/main` (switching to `Keeper_chat_media_store.media_subdir` once stacked atop Layer 2) so both standalone and stacked builds pass `dune build @check`.

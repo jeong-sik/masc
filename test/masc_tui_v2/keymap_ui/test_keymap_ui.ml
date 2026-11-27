@@ -938,6 +938,11 @@ let test_markdown_embeds () =
     "a Markdown media image alone in a paragraph asks for the same PNG"
     [ (path, 3); (path, 3); (path, 3) ]
     (retained [ image path ] markdown);
+  let attachment_url = "/api/v1/attachments/att_" ^ String.make 64 'a' in
+  Alcotest.(check (list (pair string int)))
+    "a Markdown image written with an attachment URL asks for its media PNG"
+    [ (path, 3); (path, 3); (path, 3) ]
+    (retained [ image attachment_url ] ("![Chart](" ^ attachment_url ^ ")"));
   Alcotest.(check (list (pair string int))) "an image embed inside text asks for nothing" []
     (retained [ image obsidian ] ("before " ^ obsidian ^ " after"));
   Alcotest.(check (list (pair string int)))

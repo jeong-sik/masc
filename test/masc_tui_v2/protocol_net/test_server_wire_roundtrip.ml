@@ -769,6 +769,7 @@ let test_wiki_page_embeds_roundtrip () =
             "![[wiki:missing-page]]";
             "![[media:" ^ sha ^ "|Chart]]";
             "![Chart](/api/v1/media/" ^ sha ^ ")";
+            "![Att](/api/v1/attachments/att_" ^ sha ^ ")";
             "![[artifact:" ^ artifact ^ "]]";
             "![[nope:x]]";
             "![[media:not-a-token]]";
@@ -837,6 +838,9 @@ let test_wiki_page_embeds_roundtrip () =
                  (* A Markdown image's raw is its URL, not the whole image. *)
                  ("/api/v1/media/" ^ sha,
                   ("markdown", "media " ^ sha ^ " false", Some "Chart"));
+                 (* An attachment URL names the same SHA-256 media. *)
+                 ("/api/v1/attachments/att_" ^ sha,
+                  ("markdown", "media " ^ sha ^ " false", Some "Att"));
                  ("![[artifact:" ^ artifact ^ "]]",
                   ("obsidian", "artifact " ^ artifact, None));
                  ("![[nope:x]]", ("obsidian", "unsupported", None));

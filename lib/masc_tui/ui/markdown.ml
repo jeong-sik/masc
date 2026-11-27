@@ -756,7 +756,7 @@ let render_document ~(theme : Theme.t) ~width ~osc8 ~embeds ~(base_style : Style
           when image.rows > 0 && String.equal (String.trim text) embed.raw ->
             Some image
         | Embed_image image, Inline.Image (node, _)
-          when image.rows > 0 && Option.equal String.equal (image_path node) (Some image.path) ->
+          when image.rows > 0 && Option.equal String.equal (image_path node) (Some embed.raw) ->
             Some image
         | (Embed_image _ | Embed_link _ | Embed_note _), _ -> None)
       embeds

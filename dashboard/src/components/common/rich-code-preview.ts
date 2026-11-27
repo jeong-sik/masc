@@ -49,6 +49,7 @@ async function renderDiagram(host: HTMLElement, source: string, label: string, s
   // Load SVG as an image so Mermaid author content stays outside the document DOM.
   const image = host.ownerDocument.createElement('img')
   image.alt = label
+  image.setAttribute('decoding', 'async')
   image.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(new XMLSerializer().serializeToString(doc))}`
   await image.decode()
   signal.throwIfAborted()

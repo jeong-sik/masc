@@ -2,7 +2,8 @@
  * `3 Knowledge > Lean Artifacts` Tab (`artifacts-tab.ts`)
  *
  * - `MasterDetail` + `VirtualList`: Published HTML / Markdown artifact list (`GET /api/v1/published-artifacts`).
- * - Safe sandboxed HTML iframe preview (`sandbox=""`) OR DOMPurify-sanitized Markdown render.
+ * - Safe sandboxed HTML iframe preview (`sandbox=""`) with authenticated `/api/v1/media/<sha256>`
+ *   data-URI hydration (bounded & aborted cleanly) OR DOMPurify-sanitized Markdown render.
  * - Copy content, Copy SHA-256, Download `.html`/`.md`, revision switching — ZERO Office/HWP/PDF/Yjs bloat!
  */
 
@@ -14,7 +15,13 @@ import { authSession, canUseSingleUserTokenAdmin, currentSessionEpoch, isEpochCu
 import { markViewSnapshot } from '../../core/observer'
 import { resourceCache } from '../../core/resource-cache'
 import { apiGet } from '../../core/transport'
+import { WORKSPACE_MEDIA_PREFIX } from '../../lib/keeper-media'
 import { ok } from '../../lib/result'
+import {
+  hydrateSandboxedHtmlMedia,
+  SANDBOX_HTML_MAX_MEDIA_ITEMS,
+  type SandboxedHtmlMediaHydrationResult,
+} from '../../lib/workspace-media-cache'
 import { KeeperBadge } from '../../components/keeper-badge'
 import { MasterDetail } from '../../components/primitives/master-detail'
 import { PopoverMenu } from '../../components/primitives/popover-menu'
@@ -39,6 +46,10 @@ interface ArtifactListBundle {
   readonly diagnostics: readonly { readonly id: string; readonly error: string }[]
 }
 
+type HtmlHydrationState =
+  | { readonly key: string; readonly kind: 'ready'; readonly result: SandboxedHtmlMediaHydrationResult }
+  | { readonly key: string; readonly kind: 'error'; readonly message: string }
+
 export function ArtifactsTab(props: WorkspaceViewProps) {
   const session = authSession.value
   const epoch = sessionEpoch.value
@@ -54,6 +65,7 @@ export function ArtifactsTab(props: WorkspaceViewProps) {
   const [selectedRevision, setSelectedRevision] = useState<number | null>(null)
   const [doc, setDoc] = useState<ArtifactDocumentData | null>(null)
   const [docError, setDocError] = useState<string | null>(null)
+  const [htmlHydration, setHtmlHydration] = useState<HtmlHydrationState | null>(null)
   // A selected artifact with no document and no error is one being read: from
   // the first render, before the effect that reads it has run.
   const docLoading = selectedId !== null && doc === null && docError === null
@@ -176,6 +188,7 @@ export function ArtifactsTab(props: WorkspaceViewProps) {
   useEffect(() => {
     docAbortRef.current?.abort()
     setDoc(null)
+    setHtmlHydration(null)
     if (!selectedId) return
     const ctrl = new AbortController()
     docAbortRef.current = ctrl
@@ -183,7 +196,40 @@ export function ArtifactsTab(props: WorkspaceViewProps) {
     return () => {
       ctrl.abort()
     }
-  }, [selectedId, selectedRevision, loadDocument])
+  }, [selectedId, selectedRevision, epoch, loadDocument])
+
+  const htmlDocKey = doc && doc.artifact.format === 'html'
+    ? `${epoch}:${doc.artifact.id}:${doc.artifact.revision}:${doc.artifact.sha256}:${doc.content.length}`
+    : null
+  const needsHtmlMediaHydration = doc !== null
+    && doc.artifact.format === 'html'
+    && doc.content.includes(WORKSPACE_MEDIA_PREFIX)
+
+  useEffect(() => {
+    if (!doc || !htmlDocKey || !needsHtmlMediaHydration) {
+      setHtmlHydration(null)
+      return undefined
+    }
+    const controller = new AbortController()
+    void hydrateSandboxedHtmlMedia(doc.content, {
+      epoch,
+      signal: controller.signal,
+    }).then((res) => {
+      if (controller.signal.aborted || !mountedRef.current || !isEpochCurrent(epoch)) return
+      if (res.ok) {
+        setHtmlHydration({ key: htmlDocKey, kind: 'ready', result: res.value })
+      } else if (res.error.kind !== 'aborted') {
+        setHtmlHydration({
+          key: htmlDocKey,
+          kind: 'error',
+          message: '아티팩트 내부 이미지를 인라인으로 불러오지 못했습니다.',
+        })
+      }
+    })
+    return () => {
+      controller.abort()
+    }
+  }, [doc, epoch, htmlDocKey, needsHtmlMediaHydration])
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -217,6 +263,45 @@ export function ArtifactsTab(props: WorkspaceViewProps) {
     a.download = `${current.artifact.id}-r${current.artifact.revision}.${ext}`
     a.click()
     URL.revokeObjectURL(url)
+  }
+
+  const activeHtmlHydration = htmlDocKey && htmlHydration?.key === htmlDocKey ? htmlHydration : null
+
+  const renderHtmlPreview = (current: ArtifactDocumentData) => {
+    if (needsHtmlMediaHydration && activeHtmlHydration === null) {
+      return html`
+        <div class="kn-notice kn-notice--info" role="status" data-testid="artifact-media-hydrating">
+          아티팩트 이미지 불러오는 중…
+        </div>
+      `
+    }
+    const srcDoc = activeHtmlHydration?.kind === 'ready'
+      ? activeHtmlHydration.result.html
+      : current.content
+    const warningParts: string[] = []
+    if (activeHtmlHydration?.kind === 'ready') {
+      if (activeHtmlHydration.result.failedCount > 0) {
+        warningParts.push(`이미지 ${activeHtmlHydration.result.failedCount}건을 불러오지 못했습니다.`)
+      }
+      if (activeHtmlHydration.result.skippedCount > 0) {
+        warningParts.push(`인라인 한도(최대 ${SANDBOX_HTML_MAX_MEDIA_ITEMS}건 / 32 MiB)로 ${activeHtmlHydration.result.skippedCount}건 생략됨.`)
+      }
+    } else if (activeHtmlHydration?.kind === 'error') {
+      warningParts.push(activeHtmlHydration.message)
+    }
+    return html`
+      ${warningParts.length > 0 && html`
+        <div class="kn-notice kn-notice--warn" role="status" data-testid="artifact-media-warning">
+          ${warningParts.join(' ')}
+        </div>
+      `}
+      <iframe
+        class="kn-artifact-frame"
+        sandbox=""
+        srcDoc=${srcDoc}
+        title=${`Sandboxed HTML Artifact: ${current.artifact.title}`}
+      />
+    `
   }
 
   const masterPane = html`
@@ -319,7 +404,7 @@ export function ArtifactsTab(props: WorkspaceViewProps) {
               </div>
               <h2 class="kn-heading">${doc.artifact.title}</h2>
               ${doc.artifact.summary && html`
-                <${MarkdownContent} class="kn-subcopy" text=${doc.artifact.summary} />
+                <${MarkdownContent} class="kn-subcopy" text=${doc.artifact.summary} onNavigate=${props.onNavigate} />
               `}
             </div>
             <div class="kn-actions">
@@ -387,17 +472,10 @@ export function ArtifactsTab(props: WorkspaceViewProps) {
           </div>
 
           ${doc.artifact.format === 'html'
-            ? html`
-                <iframe
-                  class="kn-artifact-frame"
-                  sandbox=""
-                  srcDoc=${doc.content}
-                  title=${`Sandboxed HTML Artifact: ${doc.artifact.title}`}
-                />
-              `
+            ? renderHtmlPreview(doc)
             : html`
                 <article class="kn-md-panel">
-                  <${MarkdownContent} text=${doc.content} document />
+                  <${MarkdownContent} text=${doc.content} document onNavigate=${props.onNavigate} />
                 </article>
               `}
         </div>

@@ -3,12 +3,26 @@ open Masc_tui_term
 open Masc_tui_net
 open Masc_tui_protocol
 
-type mermaid_request = {
+type pele_request = {
+  format : Pele.format;
   source : string;
   colors : string * string;
   pixel_width : int;
   pixel_height : int;
 }
+
+let equal_pele_format a b =
+  match a, b with
+  | Pele.Mermaid, Pele.Mermaid
+  | Pele.Svg, Pele.Svg
+  | Pele.Graph, Pele.Graph
+  | Pele.Chart, Pele.Chart ->
+      true
+  | Pele.Mermaid, (Pele.Svg | Pele.Graph | Pele.Chart)
+  | Pele.Svg, (Pele.Mermaid | Pele.Graph | Pele.Chart)
+  | Pele.Graph, (Pele.Mermaid | Pele.Svg | Pele.Chart)
+  | Pele.Chart, (Pele.Mermaid | Pele.Svg | Pele.Graph) ->
+      false
 
 type render_mode =
   | Mode_kitty
@@ -27,7 +41,7 @@ let equal_render_mode a b =
       false
 
 type request =
-  | Mermaid of mermaid_request * render_mode
+  | Pele of pele_request * render_mode
   | Embedded of Graphics.embedded_png * render_mode
   | Retained of {
       endpoint : Http_client.endpoint;
@@ -87,8 +101,9 @@ let take_dirty t ~now =
 
 let same_request a b =
   match a, b with
-  | Mermaid (a, ma), Mermaid (b, mb) ->
+  | Pele (a, ma), Pele (b, mb) ->
       equal_render_mode ma mb
+      && equal_pele_format a.format b.format
       && String.equal a.source b.source
       && a.pixel_width = b.pixel_width
       && a.pixel_height = b.pixel_height
@@ -98,7 +113,7 @@ let same_request a b =
   | ( Retained { endpoint = ea; fetch_path = pa; mode = ma }
     , Retained { endpoint = eb; fetch_path = pb; mode = mb } ) ->
       equal_render_mode ma mb && ea = eb && String.equal pa pb
-  | (Mermaid _ | Embedded _ | Retained _), _ -> false
+  | (Pele _ | Embedded _ | Retained _), _ -> false
 
 let same_placement a b =
   a.image_id = b.image_id
@@ -135,7 +150,7 @@ let cancel_pending t =
   t.retry_deadline <- None;
   Option.iter (fun (_, _, cancel) -> cancel ()) t.pending
 
-let halfblock_max_px = 160
+let halfblock_max_px = 240
 let halfblock_max_pixels = 512 * 512
 
 let within_document_pixel_budget (w, h) =
@@ -151,26 +166,39 @@ let request_preview t ~sw ~base_path ~fetch_retained ~pixels_left ~bytes_left
     if not (Atomic.exchange cancelled true) then Eio.Promise.resolve cancel_u ()
   in
   t.pending <- Some (token, request, cancel);
-  let raster_mermaid req mode =
+  let raster_pele req mode =
     let max_width = Int.max 320 req.pixel_width in
     let scene =
-      Pele.scene ~format:Pele.Mermaid ~max_width ~font_size:15
+      Pele.scene ~format:req.format ~max_width ~font_size:15
         ~now_ms:(Int64.of_float (Unix.gettimeofday () *. 1000.))
         ~colors:(Some req.colors) req.source
     in
     let raster : Pele.raster =
-      { width = req.pixel_width; height = req.pixel_height; crop = None }
+      match mode with
+      | Mode_halfblock ->
+          let w = Int.min halfblock_max_px (Int.max 64 req.pixel_width) in
+          let h = Int.min halfblock_max_px (Int.max 48 req.pixel_height) in
+          { width = w; height = h; crop = None }
+      | Mode_kitty | Mode_iterm2 ->
+          { width = req.pixel_width; height = req.pixel_height; crop = None }
     in
     match
       Pele.render ~cache_dir:(Pele.cache_dir ~base_path) ~raster
         ~cancelled:(fun () -> Atomic.get cancelled) scene
     with
     | Ok png -> (
-        match Graphics.png_dimensions png with
-        | Some ((width, height) as pixels)
-          when width <= req.pixel_width && height <= req.pixel_height ->
-            Some (Raw_raster { bytes = png; pixels; mode })
-        | _ -> None)
+        match mode with
+        | Mode_halfblock -> (
+            match Png_decode.decode_rgba ~max_pixels:halfblock_max_pixels png with
+            | Ok rgba ->
+                Some (Halfblock_raster { rgba; raw_bytes = String.length png })
+            | Error _ -> None)
+        | Mode_kitty | Mode_iterm2 -> (
+            match Graphics.png_dimensions png with
+            | Some ((width, height) as pixels)
+              when width <= req.pixel_width && height <= req.pixel_height ->
+                Some (Raw_raster { bytes = png; pixels; mode })
+            | _ -> None))
     | Error _ -> None
     | exception (Sys_error _ | Unix.Unix_error _) -> None
   in
@@ -204,9 +232,9 @@ let request_preview t ~sw ~base_path ~fetch_retained ~pixels_left ~bytes_left
   in
   let work () =
     match request with
-    | Mermaid (req, mode) ->
+    | Pele (req, mode) ->
         Eio_unix.run_in_systhread (fun () ->
-            preview_of_raster (raster_mermaid req mode))
+            preview_of_raster (raster_pele req mode))
     | Embedded (image, mode) ->
         Eio_unix.run_in_systhread (fun () ->
             match Graphics.decode_embedded_png image with
@@ -295,7 +323,7 @@ let with_pixel_budget ~cached visible =
       (fun (pixels, accepted) ((_, _, request) as item) ->
         let pixel_cost =
           match request with
-          | Mermaid (req, _) -> req.pixel_width * req.pixel_height
+          | Pele (req, _) -> req.pixel_width * req.pixel_height
           | Embedded (image, _) -> image.width * image.height
           | Retained _ -> (
               match cached request with
@@ -352,6 +380,12 @@ let prepare t ~sw ~now ~base_path ~endpoint ~fetch_retained ~on_ready
     Pele.colors_of_palette palette
   in
   let pixels cols size = Int.min 1240 (Int.max 1 (cols * size)) in
+  let pele_format_of_grid = function
+    | Cell_grid.Pele_mermaid -> Pele.Mermaid
+    | Cell_grid.Pele_chart -> Pele.Chart
+    | Cell_grid.Pele_svg -> Pele.Svg
+    | Cell_grid.Pele_graph -> Pele.Graph
+  in
   let visible =
     Cell_grid.document_placements grid
     |> List.filter_map (fun ({ image; rect } : Cell_grid.document_placement) ->
@@ -362,8 +396,21 @@ let prepare t ~sw ~now ~base_path ~endpoint ~fetch_retained ~on_ready
            | Mermaid source, (Mode_kitty | Mode_iterm2) ->
                Some
                  ( rect
-                 , Mermaid
+                 , Pele
                      ( {
+                         format = Pele.Mermaid;
+                         source;
+                         pixel_width = pixels rect.w cell_width;
+                         pixel_height = pixels rect.h cell_height;
+                         colors;
+                       }
+                     , mode ) )
+           | Pele_scene { format; source }, _ ->
+               Some
+                 ( rect
+                 , Pele
+                     ( {
+                         format = pele_format_of_grid format;
                          source;
                          pixel_width = pixels rect.w cell_width;
                          pixel_height = pixels rect.h cell_height;
@@ -445,8 +492,8 @@ let prepare t ~sw ~now ~base_path ~endpoint ~fetch_retained ~on_ready
               && (pixels_left > pixel_budget || bytes_left > byte_budget)
           | Retained _, Some { result = Retry_at retry_at; _ } ->
               retained_fits && Clock.Mono.compare now retry_at >= 0
-          | (Mermaid _ | Embedded _), None -> true
-          | (Mermaid _ | Embedded _), Some _
+          | (Pele _ | Embedded _), None -> true
+          | (Pele _ | Embedded _), Some _
           | Retained _, Some { result = (Preview_ready _ | Unavailable); _ } ->
               false
         in

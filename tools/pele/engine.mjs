@@ -2,6 +2,7 @@ import { render } from 'pele';
 import { DOMParser, XMLSerializer } from '@xmldom/xmldom';
 import { Resvg } from '@resvg/resvg-js';
 import { renderGraphSvg } from './graph.mjs';
+import { renderChartSvg } from './chart.mjs';
 
 const logicalFontSize = 16;
 
@@ -93,6 +94,25 @@ function contrast(first, second) {
   return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
 }
 
+function ensureContrast(colorHex, surfaces, fallback, minimum) {
+  if (surfaces.every(bg => contrast(colorHex, bg) >= minimum)) return colorHex;
+  for (let step = 1; step <= 10; step++) {
+    const mixed = mix(colorHex, fallback, step / 10);
+    if (surfaces.every(bg => contrast(mixed, bg) >= minimum)) return mixed;
+  }
+  return fallback;
+}
+
+const DARK_SERIES_PALETTE = [
+  '#60a5fa', '#34d399', '#fbbf24', '#f472b6',
+  '#a78bfa', '#22d3ee', '#fb923c', '#f87171',
+];
+
+const LIGHT_SERIES_PALETTE = [
+  '#2563eb', '#059669', '#d97706', '#db2777',
+  '#7c3aed', '#0891b2', '#ea580c', '#dc2626',
+];
+
 function terminalTheme(foreground, background) {
   // Neutral tints follow the observed terminal palette in either light or dark
   // mode. Recede only while retaining WCAG text (4.5) / boundary (3) contrast.
@@ -109,6 +129,9 @@ function terminalTheme(foreground, background) {
     return [background, node, group].every(bg => contrast(tinted, bg) >= minimum)
       ? tinted : foreground;
   };
+  const isDark = luminance(background) < 0.25;
+  const rawSeries = isDark ? DARK_SERIES_PALETTE : LIGHT_SERIES_PALETTE;
+  const series = rawSeries.map(hex => ensureContrast(hex, [background, node], foreground, 3.0));
   return new Map(Object.entries({
     '--pele-fg': foreground,
     '--pele-bg': background,
@@ -117,6 +140,15 @@ function terminalTheme(foreground, background) {
     '--pele-border': readable(0.55, 3),
     '--pele-surface': node,
     '--pele-surface-alt': group,
+    '--pele-accent': series[0],
+    '--pele-series-1': series[0],
+    '--pele-series-2': series[1],
+    '--pele-series-3': series[2],
+    '--pele-series-4': series[3],
+    '--pele-series-5': series[4],
+    '--pele-series-6': series[5],
+    '--pele-series-7': series[6],
+    '--pele-series-8': series[7],
   }));
 }
 
@@ -276,8 +308,17 @@ export function renderDocument(request) {
       });
       break;
     }
+    case 'chart': {
+      svg = retainedSvg(renderChartSvg(request.source, { colors: request.colors, maxWidth: request.maxWidth }));
+      const original = new Resvg(svg, { background });
+      result = { width: original.width, height: original.height };
+      renderer = raster !== undefined || original.width <= request.maxWidth ? original : new Resvg(svg, {
+        background, fitTo: { mode: 'width', value: request.maxWidth },
+      });
+      break;
+    }
     default:
-      throw new TypeError('format must be mermaid, svg, or graph');
+      throw new TypeError('format must be mermaid, svg, graph, or chart');
   }
   if (raster !== undefined) {
     if (renderer.imagesToResolve().length) throw new Error('Diagram contains unresolved images');

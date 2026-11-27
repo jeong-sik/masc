@@ -437,6 +437,7 @@ let route_access_of_slash_command_id : Slash.command_id -> Rbac.route_access =
   | Slash.Cmd_jump
   | Slash.Cmd_queue
   | Slash.Cmd_context
+  | Slash.Cmd_play
   | Slash.Cmd_addon ->
       Rbac.Single_user_read
   | Slash.Cmd_btw | Slash.Cmd_attach | Slash.Cmd_detach | Slash.Cmd_paste_image
@@ -468,6 +469,7 @@ let route_access_of_slash_command_id : Slash.command_id -> Rbac.route_access =
   | Slash.Cmd_theme
   | Slash.Cmd_lang
   | Slash.Cmd_help
+  | Slash.Cmd_stop
   | Slash.Cmd_restart
   | Slash.Cmd_quit ->
       Rbac.Always_public
@@ -489,6 +491,8 @@ let route_access_of_slash_parsed : Slash.parsed -> Rbac.route_access = function
   | Slash.Attach _ -> route_access_of_slash_command_id Slash.Cmd_attach
   | Slash.Detach _ -> route_access_of_slash_command_id Slash.Cmd_detach
   | Slash.Paste_image -> route_access_of_slash_command_id Slash.Cmd_paste_image
+  | Slash.Play _ -> route_access_of_slash_command_id Slash.Cmd_play
+  | Slash.Stop -> route_access_of_slash_command_id Slash.Cmd_stop
   | Slash.Btw _ -> route_access_of_slash_command_id Slash.Cmd_btw
   | Slash.Discord_reply ->
       route_access_of_slash_command_id Slash.Cmd_discord_reply
@@ -1397,6 +1401,8 @@ let decide_slash_command_id session id =
   | Slash.Cmd_theme
   | Slash.Cmd_lang
   | Slash.Cmd_help
+  | Slash.Cmd_play
+  | Slash.Cmd_stop
   | Slash.Cmd_restart
   | Slash.Cmd_quit ->
       Rbac.decide session (route_access_of_slash_command_id id)
@@ -1445,7 +1451,9 @@ let decide_slash_parsed session parsed =
   | Slash.Restart
   | Slash.Quit
   | Slash.Music _
-  | Slash.Score _ ->
+  | Slash.Score _
+  | Slash.Play _
+  | Slash.Stop ->
       Rbac.decide session (route_access_of_slash_parsed parsed)
 
 let allowed_of = function Rbac.Allowed -> true | Rbac.Denied _ -> false
@@ -1477,7 +1485,8 @@ let rec is_cmd_allowed session = function
   | Cmd.Fetch_artifact_and_copy _
   | Cmd.Export_artifact _
   | Cmd.Fetch_inspector_image _
-  | Cmd.Export_attachment _ ->
+  | Cmd.Export_attachment _
+  | Cmd.Play_media _ ->
       Rbac.is_allowed session Rbac.Single_user_read
   | Cmd.Upload_attachment_file _
   | Cmd.Paste_clipboard_image _ ->
@@ -1496,6 +1505,7 @@ let rec is_cmd_allowed session = function
   | Cmd.Cancel_memory_diagram
   | Cmd.Open_external_url _
   | Cmd.Open_terminal_program _
+  | Cmd.Stop_media_playback
   | Cmd.Start_local_server
   | Cmd.Restart_tui
   | Cmd.Quit _ ->
@@ -1523,6 +1533,8 @@ let rec filter_cmd session = function
     | Cmd.Paste_clipboard_image _
     | Cmd.Fetch_inspector_image _
     | Cmd.Export_attachment _
+    | Cmd.Play_media _
+    | Cmd.Stop_media_playback
     | Cmd.Open_dos_screen _
     | Cmd.Voice_cmd _
     | Cmd.Set_bearer_token _

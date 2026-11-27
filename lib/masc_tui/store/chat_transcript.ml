@@ -754,7 +754,23 @@ let is_inline_retained_image (img : Wire_fleet.retained_image) =
   match img.kind, img.mime_type with
   | Wire_attachment.Kind_image, None -> true
   | Wire_attachment.Kind_image, Some m -> Wire_attachment.is_raster_image_mime m
-  | (Wire_attachment.Kind_audio | Wire_attachment.Kind_document), _ -> false
+  | (Wire_attachment.Kind_audio | Wire_attachment.Kind_video | Wire_attachment.Kind_document), _ ->
+      false
+
+let is_video_retained (img : Wire_fleet.retained_image) =
+  match img.kind, img.mime_type with
+  | Wire_attachment.Kind_video, _ -> true
+  | (Wire_attachment.Kind_image | Wire_attachment.Kind_audio | Wire_attachment.Kind_document), Some m ->
+      Wire_attachment.is_video_mime m
+  | (Wire_attachment.Kind_image | Wire_attachment.Kind_audio | Wire_attachment.Kind_document), None ->
+      false
+
+let is_playable_retained (img : Wire_fleet.retained_image) =
+  match img.kind, img.mime_type with
+  | (Wire_attachment.Kind_audio | Wire_attachment.Kind_video), _ -> true
+  | (Wire_attachment.Kind_image | Wire_attachment.Kind_document), Some m ->
+      Wire_attachment.is_playable_media_mime m
+  | (Wire_attachment.Kind_image | Wire_attachment.Kind_document), None -> false
 
 let format_retained_bytes = function
   | Some n when n > 0 ->
@@ -772,6 +788,8 @@ let retained_image_rows ~(theme : Theme.t) ~lang ~width ~height images =
             Say.resolve lang (Say.make ~ko:"이미지" ~en:"Image")
         | Wire_attachment.Kind_audio ->
             Say.resolve lang (Say.make ~ko:"오디오" ~en:"Audio")
+        | Wire_attachment.Kind_video ->
+            Say.resolve lang (Say.make ~ko:"비디오" ~en:"Video")
         | Wire_attachment.Kind_document ->
             Say.resolve lang (Say.make ~ko:"문서" ~en:"Document")
       in
@@ -823,10 +841,54 @@ let retained_image_rows ~(theme : Theme.t) ~lang ~width ~height images =
                    Markdown.spans = [];
                    image_part = Some { rows; index; left_inset = 0 };
                  })
+      else if is_video_retained img then
+        let meta_parts =
+          List.filter_map Fun.id
+            [
+              size_part;
+              Some (Say.resolve lang (Say.make ~ko:"/play 재생" ~en:"/play"));
+            ]
+        in
+        let caption_line =
+          Printf.sprintf "[VIDEO] %s · %s" base_name
+            (String.concat " · " meta_parts)
+        in
+        let text =
+          Grapheme.truncate_to_width ~max_width:(Int.max 1 (width - 4)) caption_line
+        in
+        let spans =
+          [ { Markdown.text; style = Typography.whisper theme; hyperlink = None } ]
+        in
+        let count = Int.max 0 (height - 1) in
+        if count = 0 || not (Wire_attachment.is_attachment_path img.media_path) then
+          [ { Markdown.spans; image_part = None } ]
+        else
+          let poster_path =
+            Wire_attachment.attachment_render_path ~max_px:640 ~format:"png"
+              img.media_path
+          in
+          let rows : Cell_grid.document_image_rows =
+            {
+              source =
+                Cell_grid.Retained_image
+                  { path = poster_path; mime_type = Some "image/png" };
+              count;
+            }
+          in
+          { Markdown.spans; image_part = None }
+          :: List.init count (fun index ->
+                 {
+                   Markdown.spans = [];
+                   image_part = Some { rows; index; left_inset = 0 };
+                 })
       else
         let tag =
           match img.kind, img.mime_type with
-          | Wire_attachment.Kind_audio, _ -> "audio"
+          | Wire_attachment.Kind_audio, Some m
+            when String.equal (Wire_attachment.normalize_mime m) "audio/midi" ->
+              "MIDI"
+          | Wire_attachment.Kind_audio, _ -> "AUDIO"
+          | Wire_attachment.Kind_video, _ -> "VIDEO"
           | Wire_attachment.Kind_document, Some m
             when String.equal (String.lowercase_ascii m) "application/pdf" ->
               "pdf"
@@ -834,8 +896,13 @@ let retained_image_rows ~(theme : Theme.t) ~lang ~width ~height images =
           | Wire_attachment.Kind_image, Some m -> m
           | Wire_attachment.Kind_image, None -> "img"
         in
+        let play_hint =
+          if is_playable_retained img then
+            Some (Say.resolve lang (Say.make ~ko:"/play 재생" ~en:"/play"))
+          else None
+        in
         let meta =
-          List.filter_map Fun.id [ size_part; Some img.media_path ]
+          List.filter_map Fun.id [ size_part; play_hint; Some img.media_path ]
         in
         let label =
           Printf.sprintf "[%s] %s · %s" tag base_name (String.concat " · " meta)
@@ -849,11 +916,11 @@ let retained_image_rows ~(theme : Theme.t) ~lang ~width ~height images =
         [ { Markdown.spans; image_part = None } ])
     images
 
-let collect_chat_images ~(model : Model.t) ~keeper =
+let collect_chat_media_matching ~predicate ~(model : Model.t) ~keeper =
   let seen = Hashtbl.create 16 in
   let rev_acc = ref [] in
   let add (img : Wire_fleet.retained_image) =
-    if is_inline_retained_image img then
+    if predicate img then
       let key =
         match img.attachment_id with
         | Some id when not (String.equal id "") -> "id:" ^ id
@@ -883,6 +950,12 @@ let collect_chat_images ~(model : Model.t) ~keeper =
    | Some buf -> List.iter add buf.attachments
    | None -> ());
   List.rev !rev_acc
+
+let collect_chat_images ~(model : Model.t) ~keeper =
+  collect_chat_media_matching ~predicate:is_inline_retained_image ~model ~keeper
+
+let collect_chat_playable_media ~(model : Model.t) ~keeper =
+  collect_chat_media_matching ~predicate:is_playable_retained ~model ~keeper
 
 let stream_reply_already_persisted (hist_msgs : Wire_fleet.chat_message list)
     (buf : Fleet_store.chat_stream_buffer) =

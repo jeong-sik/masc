@@ -195,8 +195,15 @@ module Hit_map = struct
   let entries map = List.rev map
 end
 
+type pele_format =
+  | Pele_mermaid
+  | Pele_chart
+  | Pele_svg
+  | Pele_graph
+
 type document_image =
   | Mermaid of string
+  | Pele_scene of { format : pele_format; source : string }
   | Embedded_png of Graphics.embedded_png
   | Retained_png of string
   | Retained_image of { path : string; mime_type : string option }

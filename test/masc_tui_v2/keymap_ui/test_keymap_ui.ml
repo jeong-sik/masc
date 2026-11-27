@@ -323,7 +323,7 @@ let test_keymap_footer_width_budget () =
 (* --- 2. Slash Commands Tests --- *)
 
 let test_slash_37_commands () =
-  Alcotest.(check int) "exactly 41 slash commands" 41 (List.length Slash.all);
+  Alcotest.(check int) "exactly 43 slash commands" 43 (List.length Slash.all);
   let cases =
     [
       ("/account", Slash.Account);
@@ -339,6 +339,9 @@ let test_slash_37_commands () =
       ("/incidents", Slash.Incidents);
       ("/jump", Slash.Jump);
       ("/voice", Slash.Voice);
+      ("/play", Slash.Play None);
+      ("/play 2", Slash.Play (Some "2"));
+      ("/stop", Slash.Stop);
       ("/btw what failed?", Slash.Btw "what failed?");
       ("/discord-reply", Slash.Discord_reply);
       ("/wake", Slash.Wake None);
@@ -519,8 +522,8 @@ let test_slash_37_commands () =
     cases;
   (* Strict errors: unknown command, invalid enum, missing /btw question *)
   Alcotest.(check bool) "unknown command rejected" true
-    (match Slash.parse "/play" with
-     | Error (Slash.Unknown_command "/play") -> true
+    (match Slash.parse "/nonexistent_cmd" with
+     | Error (Slash.Unknown_command "/nonexistent_cmd") -> true
      | Ok _
      | Error
          ( Slash.Not_a_slash_command
@@ -2490,21 +2493,21 @@ let test_markdown_inline_mermaid_blocks () =
   Alcotest.(check bool) "unsupported mermaid keeps raw source fallback" true
     (has_sub joined_unsup "pie title Tasks");
 
-  (* 3. Oversized > 80 lines and > 8192 bytes blocks skip Mermaid layout and fall back safely *)
+  (* 3. Oversized > 200 lines and > 32768 bytes blocks skip Mermaid layout and fall back safely *)
   let many_lines =
     "```mermaid\nflowchart TD\n"
-    ^ String.concat "\n" (List.init 85 (fun i -> Printf.sprintf "N%d --> N%d" i (i + 1)))
+    ^ String.concat "\n" (List.init 205 (fun i -> Printf.sprintf "N%d --> N%d" i (i + 1)))
     ^ "\n```"
   in
   let lines_many = check_parity ~width:60 many_lines in
-  Alcotest.(check bool) "over-80-line mermaid falls back to source lines" true
+  Alcotest.(check bool) "over-200-line mermaid falls back to source lines" true
     (has_sub (String.concat "\n" (List.map line_text lines_many)) "N0 --> N1");
 
   let huge_bytes =
-    "```mermaid\nflowchart TD\nA[\"" ^ String.make 8300 'x' ^ "\"] --> B[end]\n```"
+    "```mermaid\nflowchart TD\nA[\"" ^ String.make 33000 'x' ^ "\"] --> B[end]\n```"
   in
   let lines_huge = check_parity ~width:60 huge_bytes in
-  Alcotest.(check bool) "over-8192-byte mermaid falls back safely" true
+  Alcotest.(check bool) "over-32768-byte mermaid falls back safely" true
     (List.length lines_huge > 10);
 
   (* 4. An empty rect draws nothing; tiny width = 4 falls back with parity *)

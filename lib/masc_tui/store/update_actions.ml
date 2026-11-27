@@ -2087,6 +2087,8 @@ let rec execute_slash ~now (m : Model.t) cmd =
     | Slash.Attach _
     | Slash.Detach _
     | Slash.Paste_image
+    | Slash.Play _
+    | Slash.Stop
     | Slash.Btw _
     | Slash.Discord_reply
     | Slash.Wake _
@@ -2271,6 +2273,136 @@ let rec execute_slash ~now (m : Model.t) cmd =
           Cmd.Paste_clipboard_image
             { epoch = m.epoch; target = Cmd.Upload_for_keeper keeper };
         ] )
+  | Slash.Play arg_opt -> (
+      let dispatch_remote (img : Wire_fleet.retained_image) =
+        let label =
+          match img.filename with
+          | Some f when not (String.equal (String.trim f) "") -> String.trim f
+          | Some _ | None -> (
+              match img.attachment_id with
+              | Some id when not (String.equal (String.trim id) "") ->
+                  String.trim id
+              | Some _ | None -> Filename.basename img.media_path)
+        in
+        ( Model.with_toast ~now ~level:Model.Toast_info
+            (Say.make
+               ~ko:(Printf.sprintf "미디어 준비 중: %s…" label)
+               ~en:(Printf.sprintf "Preparing media: %s…" label))
+            m
+        , [
+            Cmd.Play_media
+              {
+                epoch = m.epoch;
+                source = `Remote (img.media_path, label);
+                mime_type = img.mime_type;
+                label;
+              };
+          ] )
+      in
+      let find_in_chat () =
+        match
+          match viewed_keeper_name m with
+          | Some k -> Some k
+          | None -> Update_nav.resolve_target_keeper m
+        with
+        | None -> []
+        | Some keeper ->
+            List.rev (Chat_transcript.collect_chat_playable_media ~model:m ~keeper)
+      in
+      match arg_opt with
+      | None -> (
+          match find_in_chat () with
+          | latest :: _ -> dispatch_remote latest
+          | [] ->
+              ( Model.with_toast ~now ~level:Model.Toast_warning
+                  (Say.make
+                     ~ko:"이 대화에 재생할 오디오·MIDI·비디오 첨부가 없습니다"
+                     ~en:"No playable audio, MIDI, or video attachments in this chat")
+                  m
+              , [] ))
+      | Some raw -> (
+          let trimmed = String.trim raw in
+          let local_playable =
+            match Wire_attachment.resolve_local_media_file trimmed with
+            | None -> None
+            | Some local_path -> (
+                let head =
+                  try
+                    In_channel.with_open_bin local_path (fun ic ->
+                        let buf = Bytes.create 512 in
+                        let n = In_channel.input ic buf 0 512 in
+                        Bytes.sub_string buf 0 n)
+                  with Sys_error _ | Unix.Unix_error _ -> ""
+                in
+                match
+                  Wire_attachment.sniff_mime
+                    ~filename:(Filename.basename local_path)
+                    head
+                with
+                | Some mime when Wire_attachment.is_playable_media_mime mime ->
+                    Some (local_path, mime)
+                | Some _ | None -> None)
+          in
+          match local_playable with
+          | Some (local_path, mime) ->
+              let label = Filename.basename local_path in
+              ( Model.with_toast ~now ~level:Model.Toast_info
+                  (Say.make
+                     ~ko:(Printf.sprintf "로컬 미디어 재생 중: %s…" label)
+                     ~en:(Printf.sprintf "Playing local media: %s…" label))
+                  m
+              , [
+                  Cmd.Play_media
+                    {
+                      epoch = m.epoch;
+                      source = `Local local_path;
+                      mime_type = Some mime;
+                      label;
+                    };
+                ] )
+          | None -> (
+              let media = find_in_chat () in
+              let needle_lc = String.lowercase_ascii trimmed in
+              let contains_ci s =
+                let hay = String.lowercase_ascii s in
+                let nlen = String.length needle_lc in
+                let hlen = String.length hay in
+                if nlen = 0 || nlen > hlen then false
+                else
+                  let rec scan i =
+                    if i + nlen > hlen then false
+                    else if String.sub hay i nlen = needle_lc then true
+                    else scan (i + 1)
+                  in
+                  scan 0
+              in
+              let matched =
+                match int_of_string_opt trimmed with
+                | Some idx when idx >= 1 -> List.nth_opt media (idx - 1)
+                | Some _ | None ->
+                    List.find_opt
+                      (fun (img : Wire_fleet.retained_image) ->
+                        (match img.attachment_id with
+                        | Some id ->
+                            String.equal (String.lowercase_ascii id) needle_lc
+                            || contains_ci id
+                        | None -> false)
+                        || (match img.filename with
+                           | Some f -> contains_ci f
+                           | None -> false)
+                        || contains_ci img.media_path)
+                      media
+              in
+              match matched with
+              | Some img -> dispatch_remote img
+              | None ->
+                  ( Model.with_toast ~now ~level:Model.Toast_warning
+                      (Say.make
+                         ~ko:(Printf.sprintf "재생할 미디어를 찾지 못했습니다: %s" trimmed)
+                         ~en:(Printf.sprintf "No matching playable media found: %s" trimmed))
+                      m
+                  , [] ))))
+  | Slash.Stop -> (m, [ Cmd.Stop_media_playback ])
   | Slash.Btw prompt -> Update_nav.start_btw_query ~now ~prompt m
   | Slash.Wake arg -> (
       match resolve_slash_lifecycle_keeper m arg with
@@ -3073,6 +3205,8 @@ let rec execute_slash ~now (m : Model.t) cmd =
                 | Cmd.Paste_clipboard_image _
                 | Cmd.Fetch_inspector_image _
                 | Cmd.Export_attachment _
+                | Cmd.Play_media _
+                | Cmd.Stop_media_playback
                 | Cmd.Open_dos_screen _
                 | Cmd.Open_external_url _
                 | Cmd.Open_editor_escape_hatch _
@@ -3982,6 +4116,8 @@ and submit_composer ~now ~mode (m : Model.t) =
             | Slash.Cmd_attach
             | Slash.Cmd_detach
             | Slash.Cmd_paste_image
+            | Slash.Cmd_play
+            | Slash.Cmd_stop
             | Slash.Cmd_btw
             | Slash.Cmd_discord_reply
             | Slash.Cmd_queue
@@ -6136,6 +6272,8 @@ and execute_action ~now (m : Model.t) action =
                   | Cmd.Paste_clipboard_image _
                   | Cmd.Fetch_inspector_image _
                   | Cmd.Export_attachment _
+                  | Cmd.Play_media _
+                  | Cmd.Stop_media_playback
                   | Cmd.Open_dos_screen _
                   | Cmd.Open_external_url _
                   | Cmd.Open_editor_escape_hatch _

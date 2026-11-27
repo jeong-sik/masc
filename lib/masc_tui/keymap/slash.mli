@@ -24,6 +24,8 @@ type command_id =
   | Cmd_attach
   | Cmd_detach
   | Cmd_paste_image
+  | Cmd_play
+  | Cmd_stop
   | Cmd_btw
   | Cmd_discord_reply
   | Cmd_wake
@@ -201,6 +203,8 @@ type parsed =
   | Attach of string
   | Detach of [ `Last | `All | `Index of int ]
   | Paste_image
+  | Play of string option
+  | Stop
   | Btw of string
   | Discord_reply
   | Wake of string option

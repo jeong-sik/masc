@@ -26,5 +26,6 @@
   eio.unix
   eio_main
   unix
+  threads.posix
   yojson
   otoml))

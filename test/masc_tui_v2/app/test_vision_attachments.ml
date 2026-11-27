@@ -112,21 +112,43 @@ let test_wire_attachment_sniff_and_paths () =
   let audio_webm = "\x1a\x45\xdf\xa3\x9f\x42\x82\x84webm\x00\x00\x00\x00" in
   check (option string) "sniff audio/webm (EBML) magic" (Some "audio/webm")
     (Wire_attachment.sniff_mime audio_webm);
-  (* Reject video containers even when given audio filenames *)
+  (* Distinguish video containers from audio-only containers *)
   let video_m4v = "\000\000\000\020ftypM4V \000\000\000\000isom" in
-  check (option string) "reject video MP4 M4V brand" None
+  check (option string) "sniff video/mp4 M4V brand" (Some "video/mp4")
     (Wire_attachment.sniff_mime ~filename:"fake.m4a" video_m4v);
   let video_mp4_hdlr =
     "\000\000\000\020ftypisom\000\000\000\000mp42" ^ "hdlr\000\000\000\000\000\000\000\000vide"
   in
-  check (option string) "reject MP4 with hdlr vide track" None
+  check (option string) "sniff video/mp4 with hdlr vide track" (Some "video/mp4")
     (Wire_attachment.sniff_mime ~filename:"fake.m4a" video_mp4_hdlr);
+  let video_mov = "\000\000\000\020ftypqt  \000\000\000\000qt  " in
+  check (option string) "sniff video/quicktime (qt  )" (Some "video/quicktime")
+    (Wire_attachment.sniff_mime video_mov);
   let video_webm_vp9 = audio_webm ^ "V_VP9\x00\x00" in
-  check (option string) "reject video WebM (V_VP9)" None
+  check (option string) "sniff video/webm (V_VP9)" (Some "video/webm")
     (Wire_attachment.sniff_mime ~filename:"fake.webm" video_webm_vp9);
   let video_webm_track = audio_webm ^ "\x83\x81\x01\x00" in
-  check (option string) "reject video WebM (TrackType=video)" None
+  check (option string) "sniff video/webm (TrackType=video)" (Some "video/webm")
     (Wire_attachment.sniff_mime ~filename:"fake.webm" video_webm_track);
+  (* MIME alias normalization and per-kind upload caps *)
+  check string "normalize audio/x-midi" "audio/midi"
+    (Wire_attachment.normalize_mime "audio/x-midi");
+  check string "normalize audio/x-wav" "audio/wav"
+    (Wire_attachment.normalize_mime "audio/x-wav");
+  check string "normalize video/x-m4v" "video/mp4"
+    (Wire_attachment.normalize_mime "video/x-m4v");
+  check string "normalize audio/x-m4a" "audio/mp4"
+    (Wire_attachment.normalize_mime "audio/x-m4a");
+  check string "normalize image/jpg" "image/jpeg"
+    (Wire_attachment.normalize_mime "image/jpg");
+  check int "video upload cap is 50 MiB" (50 * 1024 * 1024)
+    (Wire_attachment.max_upload_bytes_for_mime "video/mp4");
+  check int "non-video upload cap is 20 MiB" (20 * 1024 * 1024)
+    (Wire_attachment.max_upload_bytes_for_mime "audio/midi");
+  check string "attachment_render_path replaces existing query cleanly"
+    ("/api/v1/attachments/" ^ sample_att_id ^ "?format=png&max_px=240")
+    (Wire_attachment.attachment_render_path ~format:"png" ~max_px:240
+       ("/api/v1/attachments/" ^ sample_att_id ^ "?max_px=640&format=png"));
   check (option string) "reject SVG extension" None
     (Wire_attachment.sniff_mime ~filename:"evil.svg" "<svg></svg>");
   check (option string) "reject HTML extension" None
@@ -704,7 +726,7 @@ let test_document_graphics_all_protocols () =
   check string "iTerm2 removed placement emits no Kitty delete bytes" ""
     it2_rm_eff.escape_bytes;
 
-  (* 7c. Standard/non-graphics terminal requests ?format=png&max_px=160 and paints half-blocks *)
+  (* 7c. Standard/non-graphics terminal requests ?format=png&max_px=240 and paints half-blocks *)
   let hb_doc = Document_graphics.create () in
   let hb_paths = ref [] in
   let g_hb = make_grid () in
@@ -718,8 +740,8 @@ let test_document_graphics_all_protocols () =
        ~term_program:None ~in_tmux:true ~probe:Probe.empty_observation
        ~theme:Theme.default g_hb);
   Eio.Time.with_timeout_exn env#clock 1.0 (fun () -> Eio.Promise.await ready_h);
-  check (list string) "Halfblock requests ?format=png&max_px=160"
-    [ jpg_path ^ "?format=png&max_px=160" ] !hb_paths;
+  check (list string) "Halfblock requests ?format=png&max_px=240"
+    [ jpg_path ^ "?format=png&max_px=240" ] !hb_paths;
   let hb_pl =
     Document_graphics.prepare hb_doc ~sw ~now:t0 ~base_path:"" ~endpoint
       ~fetch_retained:(fun _ ~path:_ ~max_body_bytes:_ -> Ok png)
@@ -1702,6 +1724,319 @@ let test_png_decode_sub_byte_and_inflate_cap () =
       check rgba_t "idx4 (1,1) blue alpha=64" (0, 0, 255, 64) (px_at img ~x:1 ~y:1);
       check rgba_t "idx4 (2,1) green" (0, 255, 0, 255) (px_at img ~x:2 ~y:1)
 
+(* --- 14. Rich Media: Pele Charts/SVG/Graph, AlphaTex, Video Posters, /play & /stop --- *)
+
+let test_rich_media_pele_alphatex_and_playback () =
+  (* 14a. All Pele chart families + structured chart/svg/graph attach Pele_scene >= 8 rows *)
+  let pele_fences =
+    [
+      ("xychart-beta", Cell_grid.Pele_mermaid,
+       "xychart-beta\n  title \"Throughput\"\n  x-axis [a, b, c]\n  bar [10, 20, 30]");
+      ("pie", Cell_grid.Pele_mermaid,
+       "pie title Share\n  \"A\" : 60\n  \"B\" : 40");
+      ("quadrantChart", Cell_grid.Pele_mermaid,
+       "quadrantChart\n  x-axis Low --> High\n  y-axis Low --> High\n  Item A: [0.3, 0.7]");
+      ("radar-beta", Cell_grid.Pele_mermaid,
+       "radar-beta\n  axis a, b, c\n  curve s1{1, 2, 3}");
+      ("sankey-beta", Cell_grid.Pele_mermaid,
+       "sankey-beta\nA,B,10\nB,C,5");
+      ("treemap-beta", Cell_grid.Pele_mermaid,
+       "treemap-beta\n\"Root\"\n  \"Leaf\": 10");
+      ("gantt", Cell_grid.Pele_mermaid,
+       "gantt\n  title Plan\n  section S\n  Task A :a1, 2026-01-01, 2d");
+      ("timeline", Cell_grid.Pele_mermaid,
+       "timeline\n  title History\n  2025 : Start\n  2026 : Scale");
+      ("venn-beta", Cell_grid.Pele_mermaid,
+       "venn-beta\n  set A\n  set B");
+      ("chart", Cell_grid.Pele_chart,
+       {|{"type":"bar","title":"Scores","labels":["Q1","Q2"],"series":[{"label":"Now","values":[12,18]}]}|});
+      ("svg", Cell_grid.Pele_svg,
+       {|<svg viewBox="0 0 100 40"><rect width="100" height="40" fill="#224466"/></svg>|});
+      ("graph", Cell_grid.Pele_graph,
+       {|{"nodes":[{"id":"a","label":"Start"},{"id":"b","label":"End"}],"edges":[{"from":"a","to":"b"}]}|});
+    ]
+  in
+  List.iter
+    (fun (tag, expected_fmt, body) ->
+      let md = Printf.sprintf "```%s\n%s\n```" tag body in
+      let lines = Markdown.render_lines ~theme:Theme.default ~width:80 md in
+      let scene_rows =
+        List.filter_map
+          (fun (line : Markdown.rendered_line) ->
+            match line.image_part with
+            | Some { Cell_grid.rows = { source = Cell_grid.Pele_scene { format; _ }; count }; _ }
+              when format = expected_fmt ->
+                Some count
+            | _ -> None)
+          lines
+      in
+      check bool (Printf.sprintf "fence %s produces >= 8 Pele_scene rows" tag)
+        true
+        (List.length scene_rows >= 8
+        && List.for_all (fun c -> c >= 8) scene_rows))
+    pele_fences;
+
+  (* 14b. AlphaTex extended directives (\tempo with label, \key, \instrument, \capo, \album) *)
+  let atex_src =
+    {|
+\title "Autumn Study"
+\album "Sketches"
+\tempo 120 "Allegro"
+\key am
+\instrument "electric_guitar_clean"
+\tuning E4 B3 G3 D3 A2 E2
+\capo 2
+.
+0.1.4 2.1.4 3.1.4 0.2.4 |
+|}
+  in
+  (match Alphatex_score.read atex_src with
+  | Error _ -> fail "Alphatex_score.read failed on extended directives"
+  | Ok score ->
+      check (option string) "AlphaTex title" (Some "Autumn Study") score.title;
+      check (option int) "AlphaTex tempo with trailing label" (Some 120) score.tempo;
+      check int "AlphaTex parsed 1 measure" 1 (List.length score.measures));
+  let atex_leading_tempo = "\\tempo \"Moderato\" 96\n.\n0.1.4 2.1.4 |" in
+  (match Alphatex_score.read atex_leading_tempo with
+  | Error _ -> fail "Alphatex_score.read failed on leading tempo label"
+  | Ok score ->
+      check (option int) "AlphaTex leading tempo label" (Some 96) score.tempo);
+  (* Unsupported AlphaTex score shows calm /score whisper hint *)
+  let unsupported_atex = "```alphatex\n\\staff {score}\n\\track \"Piano\"\n.\nC4.4 D4.4 |\n```" in
+  let atex_lines =
+    Markdown.render_lines ~theme:Theme.default ~width:80 unsupported_atex
+  in
+  let atex_text =
+    atex_lines
+    |> List.map (fun (l : Markdown.rendered_line) ->
+           l.spans
+           |> List.map (fun (s : Markdown.styled_span) -> s.text)
+           |> String.concat "")
+    |> String.concat "\n"
+  in
+  check bool "unsupported AlphaTex shows /score hint" true
+    (contains_sub ~needle:"/score" ~haystack:atex_text);
+
+  (* 14c. Video poster frame rendering + collect_chat_playable_media *)
+  let vid_id = "att_" ^ String.make 64 'v' in
+  let mid_id = "att_" ^ String.make 64 'm' in
+  let wav_id = "att_" ^ String.make 64 'w' in
+  let vid_img : Wire_fleet.retained_image =
+    {
+      media_path = "/api/v1/attachments/" ^ vid_id;
+      caption = None;
+      mime_type = Some "video/mp4";
+      attachment_id = Some vid_id;
+      width = Some 1280;
+      height = Some 720;
+      bytes = Some (2 * 1024 * 1024);
+      filename = Some "demo.mp4";
+      kind = Wire_attachment.Kind_video;
+    }
+  in
+  let mid_img : Wire_fleet.retained_image =
+    {
+      media_path = "/api/v1/attachments/" ^ mid_id;
+      caption = None;
+      mime_type = Some "audio/midi";
+      attachment_id = Some mid_id;
+      width = None;
+      height = None;
+      bytes = Some 4096;
+      filename = Some "melody.mid";
+      kind = Wire_attachment.Kind_audio;
+    }
+  in
+  let wav_img : Wire_fleet.retained_image =
+    {
+      media_path = "/api/v1/attachments/" ^ wav_id;
+      caption = None;
+      mime_type = Some "audio/wav";
+      attachment_id = Some wav_id;
+      width = None;
+      height = None;
+      bytes = Some 16384;
+      filename = Some "clip.wav";
+      kind = Wire_attachment.Kind_audio;
+    }
+  in
+  let vid_rows =
+    Chat_transcript.retained_image_rows ~theme:Theme.default ~lang:Say.Lang_en
+      ~width:80 ~height:6 [ vid_img ]
+  in
+  let has_poster_path =
+    List.exists
+      (fun (l : Markdown.rendered_line) ->
+        match l.image_part with
+        | Some
+            {
+              Cell_grid.rows =
+                {
+                  source =
+                    Cell_grid.Retained_image
+                      { path; mime_type = Some "image/png" };
+                  _;
+                };
+              _;
+            } ->
+            String.equal path
+              ("/api/v1/attachments/" ^ vid_id ^ "?format=png&max_px=640")
+        | _ -> false)
+      vid_rows
+  in
+  check bool "video attachment renders poster frame via ?format=png&max_px=640"
+    true has_poster_path;
+  let vid_text =
+    vid_rows
+    |> List.map (fun (l : Markdown.rendered_line) ->
+           l.spans
+           |> List.map (fun (s : Markdown.styled_span) -> s.text)
+           |> String.concat "")
+    |> String.concat "\n"
+  in
+  check bool "video attachment caption has [VIDEO] and /play hint" true
+    (contains_sub ~needle:"[VIDEO]" ~haystack:vid_text
+    && contains_sub ~needle:"/play" ~haystack:vid_text);
+
+  (* 14d. /play & /stop Slash parsing + Update.step dispatch *)
+  check bool "Slash.parse /play" true (Slash.parse "/play" = Ok (Slash.Play None));
+  check bool "Slash.parse /play 2" true
+    (Slash.parse "/play 2" = Ok (Slash.Play (Some "2")));
+  check bool "Slash.parse /stop" true (Slash.parse "/stop" = Ok Slash.Stop);
+  let keeper = "alpha" in
+  let hist_msg : Wire_fleet.chat_message =
+    {
+      id = "msg-rich-1";
+      role = Wire_fleet.Role_assistant;
+      content = "Here are your files";
+      ts_unix = 1764288000.0;
+      turn_ref = None;
+      model_used = None;
+      tool_call_id = None;
+      tool_call_name = None;
+      execution_id = None;
+      provenance = None;
+      failure_kind = None;
+      thinking = None;
+      retained_images = [ vid_img; mid_img; wav_img ];
+      tool_meta = None;
+      trace_tools = [];
+    }
+  in
+  let page : Wire_fleet.chat_history_page =
+    {
+      messages = [ hist_msg ];
+      has_more = false;
+      next_cursor = None;
+    }
+  in
+  let m0 =
+    Model.initial ~auth_session:Rbac.single_user_local_admin ~lang:Say.Lang_en
+      ~cols:120 ~rows:36 ()
+  in
+  let m_hist, _ =
+    Update.step ~now:t0 m0
+      (Msg.Http_reply
+         { epoch = m0.epoch; reply = Msg.Reply_chat_history { keeper; result = Ok page } })
+  in
+  let submit_line m line =
+    let m_txt, _ = Update.step ~now:t0 m (Msg.Paste_text line) in
+    Update.step ~now:t0 m_txt (Msg.Key_event (mk_key Keymap.Input.Enter))
+  in
+  let m_chat, _ =
+    submit_line
+      {
+        m_hist with
+        nav = { m_hist.nav with workspace = Nav.Keepers };
+        drafts = Drafts.set_active_keeper keeper m_hist.drafts;
+      }
+      ("/keeper " ^ keeper)
+  in
+  let playable = Chat_transcript.collect_chat_playable_media ~model:m_chat ~keeper in
+  check int "collect_chat_playable_media finds all 3 media items" 3
+    (List.length playable);
+  let _, play_cmds = submit_line m_chat "/play" in
+  let played_latest =
+    List.exists
+      (function
+        | Cmd.Play_media { source = `Remote (url, _); label; _ } ->
+            String.equal url wav_img.media_path && String.equal label "clip.wav"
+        | _ -> false)
+      (Cmd.flatten play_cmds)
+  in
+  check bool "/play emits Cmd.Play_media for newest attachment (clip.wav)" true
+    played_latest;
+  let _, play2_cmds = submit_line m_chat "/play 2" in
+  let played_second =
+    List.exists
+      (function
+        | Cmd.Play_media { source = `Remote (url, _); label; _ } ->
+            String.equal url mid_img.media_path && String.equal label "melody.mid"
+        | _ -> false)
+      (Cmd.flatten play2_cmds)
+  in
+  check bool "/play 2 emits Cmd.Play_media for 2nd newest (melody.mid)" true
+    played_second;
+  let _, stop_cmds = submit_line m_chat "/stop" in
+  let stopped =
+    List.exists
+      (function Cmd.Stop_media_playback -> true | _ -> false)
+      (Cmd.flatten stop_cmds)
+  in
+  check bool "/stop emits Cmd.Stop_media_playback" true stopped;
+
+  (* 14e. Media_player.plan_playback & find_soundfont *)
+  let resolve_macos = function
+    | "afplay" -> Some "/usr/bin/afplay"
+    | "open" -> Some "/usr/bin/open"
+    | "fluidsynth" -> Some "/opt/homebrew/bin/fluidsynth"
+    | _ -> None
+  in
+  (match
+     Media_player.plan_playback ~os:Media_player.Os_macos ~resolve:resolve_macos
+       ~mime_type:"audio/wav" ~path:"/tmp/a.wav" ()
+   with
+  | Ok (Media_player.Audio_spawn { executable = "/usr/bin/afplay"; args = [ "/tmp/a.wav" ] }) -> ()
+  | _ -> fail "expected afplay for audio/wav on macOS");
+  (match
+     Media_player.plan_playback ~os:Media_player.Os_macos ~resolve:resolve_macos
+       ~soundfont:"/opt/sf/sonivox.sf2" ~mime_type:"audio/x-midi" ~path:"/tmp/b.mid" ()
+   with
+  | Ok (Media_player.Midi_fluidsynth { executable = "/opt/homebrew/bin/fluidsynth"; args }) ->
+      check bool "fluidsynth args include soundfont and midi path" true
+        (List.mem "/opt/sf/sonivox.sf2" args && List.mem "/tmp/b.mid" args)
+  | _ -> fail "expected Midi_fluidsynth when fluidsynth + soundfont present");
+  (match
+     Media_player.plan_playback ~os:Media_player.Os_macos
+       ~resolve:(fun _ -> None) ~mime_type:"audio/midi" ~path:"/tmp/b.mid" ()
+   with
+  | Ok (Media_player.Midi_handoff_alphatex "/tmp/b.mid") -> ()
+  | _ -> fail "expected Midi_handoff_alphatex when fluidsynth unavailable");
+  (match
+     Media_player.plan_playback ~os:Media_player.Os_macos ~resolve:resolve_macos
+       ~mime_type:"video/mp4" ~path:"/tmp/v.mp4" ()
+   with
+  | Ok (Media_player.Video_open { executable = "/usr/bin/open"; args = [ "/tmp/v.mp4" ] }) -> ()
+  | _ -> fail "expected open for video/mp4 on macOS");
+  let resolve_linux = function
+    | "ffplay" -> Some "/usr/bin/ffplay"
+    | "xdg-open" -> Some "/usr/bin/xdg-open"
+    | _ -> None
+  in
+  (match
+     Media_player.plan_playback ~os:Media_player.Os_linux ~resolve:resolve_linux
+       ~mime_type:"audio/ogg" ~path:"/tmp/c.ogg" ()
+   with
+  | Ok (Media_player.Audio_spawn { executable = "/usr/bin/ffplay"; args }) ->
+      check bool "ffplay linux audio uses -nodisp -autoexit" true
+        (List.mem "-nodisp" args && List.mem "-autoexit" args)
+  | _ -> fail "expected ffplay for audio/ogg on Linux");
+  check (option string) "find_soundfont respects MASC_SOUNDFONT"
+    (Some "/custom/sonivox.sf2")
+    (Media_player.find_soundfont
+       ~getenv:(function "MASC_SOUNDFONT" -> Some "/custom/sonivox.sf2" | _ -> None)
+       ~file_exists:(String.equal "/custom/sonivox.sf2") ())
+
 let () =
   run "masc_tui_v2_vision_attachments"
     [
@@ -1733,5 +2068,7 @@ let () =
             test_inspector_cached_decode_and_halfblock_max_px;
           test_case "P3: Png_decode early inflate cap abort & 1/2/4-bit PNGs" `Quick
             test_png_decode_sub_byte_and_inflate_cap;
+          test_case "Rich media: Pele charts/svg/graph, AlphaTex, video poster, /play & /stop" `Quick
+            test_rich_media_pele_alphatex_and_playback;
         ] );
     ]

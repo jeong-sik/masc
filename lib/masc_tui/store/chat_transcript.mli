@@ -72,6 +72,12 @@ val collect_chat_images :
 (** All raster images across persisted history, live stream, and pending user
     transmissions for [keeper], deduplicated in transcript order. *)
 
+val collect_chat_playable_media :
+  model:Model.t -> keeper:string -> Wire_fleet.retained_image list
+(** All playable audio, MIDI, and video attachments across persisted history,
+    live stream, and pending user transmissions for [keeper], deduplicated in
+    chronological order. *)
+
 val stream_reply_already_persisted :
   Wire_fleet.chat_message list -> Fleet_store.chat_stream_buffer -> bool
 (** Whether the operation's durable terminal transcript row has arrived. *)

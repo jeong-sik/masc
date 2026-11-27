@@ -10,6 +10,7 @@ type format =
   | Mermaid
   | Svg
   | Graph
+  | Chart
 
 type scene = private {
   format : format;

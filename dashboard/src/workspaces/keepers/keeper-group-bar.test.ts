@@ -71,6 +71,7 @@ describe('KeeperGroupBar', () => {
   it('normalizes ungrouped sentinels to 미지정 and always sorts 미지정 last', () => {
     expect(normalizeKeeperGroup('ungrouped')).toBe(UNGROUPED_LABEL)
     expect(normalizeKeeperGroup('UNGROUPED')).toBe(UNGROUPED_LABEL)
+    expect(normalizeKeeperGroup('General')).toBe(UNGROUPED_LABEL)
     expect(normalizeKeeperGroup('')).toBe(UNGROUPED_LABEL)
     expect(normalizeKeeperGroup('   ')).toBe(UNGROUPED_LABEL)
     expect(normalizeKeeperGroup(null)).toBe(UNGROUPED_LABEL)
@@ -118,7 +119,7 @@ describe('KeeperGroupBar', () => {
             data: {
               applied: true,
               dry_run: false,
-              target: 'keeper_config',
+              target: 'keeper:sangsu',
               changed: true,
               before_sha256: 'sha-abc-123',
               new_sha256: 'sha-def-456',
@@ -173,8 +174,7 @@ describe('KeeperGroupBar', () => {
       expect(patchBodies).toHaveLength(1)
     })
     expect(patchBodies[0]).toMatchObject({
-      target: 'keeper_config',
-      keeper_name: 'sangsu',
+      target: 'keeper:sangsu',
       expected_sha256: 'sha-abc-123',
       dry_run: false,
       changes: [
@@ -187,6 +187,54 @@ describe('KeeperGroupBar', () => {
         },
       ],
     })
+    expect(patchBodies[0]).not.toHaveProperty('keeper_name')
     expect(onGroupAssigned).toHaveBeenCalledTimes(1)
+  })
+
+  it('aborts group assignment without sending patch when schema fetch fails and surfaces shell load errors', async () => {
+    const patchCalls = vi.fn()
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input)
+        if (url.includes('/api/v1/dashboard/shell')) {
+          return jsonResponse({ error: 'shell unavailable' }, 503)
+        }
+        if (url.includes('/api/v1/config/schema')) {
+          return jsonResponse({ error: 'schema unavailable' }, 500)
+        }
+        if (url.includes('/api/v1/config/patch')) {
+          patchCalls()
+          return jsonResponse({})
+        }
+        return jsonResponse({})
+      }),
+    )
+
+    const keepers = [makeKeeper({ name: 'sangsu', company: 'General' })]
+    const view = render(
+      html`
+        <${KeeperGroupBar}
+          keepers=${keepers}
+          selectedGroup=${null}
+          onSelectGroup=${vi.fn()}
+          activeKeeper=${keepers[0]!}
+        />
+      `,
+    )
+
+    await waitFor(() => {
+      expect(view.getByTestId('kgb-shell-error')).toBeTruthy()
+    })
+
+    fireEvent.click(view.getByTestId('kgb-assign-toggle'))
+    const input = view.container.querySelector('#kgb-group-input') as HTMLInputElement
+    fireEvent.input(input, { target: { value: 'ops' } })
+    fireEvent.click(view.getByTestId('kgb-assign-save'))
+
+    await waitFor(() => {
+      expect(view.getByTestId('kgb-assign-status').textContent).toContain('설정 스키마 조회 실패')
+    })
+    expect(patchCalls).not.toHaveBeenCalled()
   })
 })

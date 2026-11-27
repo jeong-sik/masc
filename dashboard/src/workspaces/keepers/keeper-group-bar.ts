@@ -57,11 +57,12 @@ export const collapsedGroupNames = persistentSignal<readonly string[]>({
   },
 })
 
-/** Normalize `"ungrouped"` / `null` / `undefined` / `""` to `"미지정"`. */
+/** Normalize `"ungrouped"` / `"general"` / `null` / `undefined` / `""` to `"미지정"`. */
 export function normalizeKeeperGroup(raw: string | null | undefined): string {
   if (typeof raw !== 'string') return UNGROUPED_LABEL
   const trimmed = raw.trim()
-  if (!trimmed || trimmed.toLowerCase() === 'ungrouped' || trimmed === UNGROUPED_LABEL) {
+  const lower = trimmed.toLowerCase()
+  if (!trimmed || lower === 'ungrouped' || lower === 'general' || trimmed === UNGROUPED_LABEL) {
     return UNGROUPED_LABEL
   }
   return trimmed
@@ -145,17 +146,24 @@ export async function assignKeeperGroupApi(
   nextGroupRaw: string,
 ): Promise<{ readonly ok: true } | { readonly ok: false; readonly message: string }> {
   const trimmed = nextGroupRaw.trim()
-  const value = !trimmed || trimmed.toLowerCase() === 'ungrouped' || trimmed === UNGROUPED_LABEL ? '' : trimmed
+  const lower = trimmed.toLowerCase()
+  const value =
+    !trimmed || lower === 'ungrouped' || lower === 'general' || trimmed === UNGROUPED_LABEL
+      ? ''
+      : trimmed
 
-  let expectedSha256: string | undefined
-  const schemaRes = await fetchConfigSchemaApi(`keeper:${keeperName}`)
-  if (schemaRes.ok) {
-    expectedSha256 = schemaRes.value.file_sha256
+  const target = `keeper:${keeperName}`
+  const schemaRes = await fetchConfigSchemaApi(target)
+  if (!schemaRes.ok) {
+    return { ok: false, message: `설정 스키마 조회 실패: ${schemaRes.error.message}` }
+  }
+  const expectedSha256 = schemaRes.value.file_sha256
+  if (!expectedSha256) {
+    return { ok: false, message: '설정 체크섬(file_sha256)을 확인할 수 없습니다.' }
   }
 
   const patchRes = await postConfigPatchApi({
-    target: 'keeper_config',
-    keeperName,
+    target,
     expectedSha256,
     dryRun: false,
     changes: [
@@ -183,6 +191,7 @@ export function KeeperGroupBar(props: KeeperGroupBarProps) {
   const epoch = sessionEpoch.value
 
   const [shellGroups, setShellGroups] = useState<readonly ShellGroupEntry[]>([])
+  const [shellLoadError, setShellLoadError] = useState<string | null>(null)
   const [assignOpen, setAssignOpen] = useState(false)
   const [assignDraft, setAssignDraft] = useState('')
   const [assignBusy, setAssignBusy] = useState(false)
@@ -199,6 +208,7 @@ export function KeeperGroupBar(props: KeeperGroupBarProps) {
   useEffect(() => {
     if (!isSingleUser) {
       setShellGroups([])
+      setShellLoadError(null)
       return
     }
     const ctrl = new AbortController()
@@ -208,6 +218,11 @@ export function KeeperGroupBar(props: KeeperGroupBarProps) {
       if (!mountedRef.current || ctrl.signal.aborted) return
       if (res.ok && Array.isArray(res.value.groups)) {
         setShellGroups(res.value.groups)
+        setShellLoadError(null)
+      } else if (!res.ok) {
+        setShellLoadError(res.error.message)
+      } else {
+        setShellLoadError('응답 형식 오류')
       }
     })
     return () => ctrl.abort()
@@ -298,6 +313,17 @@ export function KeeperGroupBar(props: KeeperGroupBarProps) {
         </div>
 
         <div class="kgb-head-actions">
+          ${shellLoadError && html`
+            <span
+              class="kp-pill"
+              data-tone="warn"
+              role="status"
+              data-testid="kgb-shell-error"
+              title=${`그룹 목록 조회 실패: ${shellLoadError}`}
+            >
+              그룹 목록 일부 미반영
+            </span>
+          `}
           ${assignStatus && html`
             <span
               class="kp-pill"

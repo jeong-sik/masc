@@ -45,6 +45,8 @@ export function QuickPeekDrawer(props: QuickPeekDrawerProps) {
     max: QPEEK_MAX_WIDTH,
   })
   const [wide, setWide] = useState(() => (props.defaultWide ?? false) || drawerWidth >= QPEEK_WIDE_THRESHOLD)
+  const wideRef = useRef(wide)
+  wideRef.current = wide
   const [isPushViewport, setIsPushViewport] = useState(detectDesktopPush)
   const previousFocusRef = useRef<HTMLElement | null>(null)
   const drawerRef = useRef<HTMLElement>(null)
@@ -54,19 +56,20 @@ export function QuickPeekDrawer(props: QuickPeekDrawerProps) {
   onCloseRef.current = props.onClose
 
   const toggleWide = useCallback(() => {
-    setWide((prev) => {
-      const nextWide = !prev
-      const nextWidth = nextWide ? QPEEK_WIDE_WIDTH : QPEEK_DEFAULT_WIDTH
-      setDrawerWidth(nextWidth)
-      drawerRef.current?.style.setProperty('--qpeek-w', `${nextWidth}px`)
-      return nextWide
-    })
+    const nextWide = !wideRef.current
+    wideRef.current = nextWide
+    const nextWidth = nextWide ? QPEEK_WIDE_WIDTH : QPEEK_DEFAULT_WIDTH
+    setWide(nextWide)
+    setDrawerWidth(nextWidth)
+    drawerRef.current?.style.setProperty('--qpeek-w', `${nextWidth}px`)
   }, [setDrawerWidth])
 
   const handleResizeChange = useCallback(
     (next: number) => {
+      const nextWide = next >= QPEEK_WIDE_THRESHOLD
+      wideRef.current = nextWide
       setDrawerWidth(next)
-      setWide(next >= QPEEK_WIDE_THRESHOLD)
+      setWide(nextWide)
     },
     [setDrawerWidth],
   )

@@ -376,7 +376,7 @@ export function StructuredPayloadView(props: StructuredPayloadViewProps) {
     setCollapsed(autoCollapse)
     setMode(defaultMode ?? (parsedPayload.isJson ? 'tree' : 'raw'))
     setCopied(false)
-  }, [value, autoCollapse, defaultMode, parsedPayload.isJson])
+  }, [parsedPayload.formatted, autoCollapse, defaultMode, parsedPayload.isJson])
 
   const handleCopy = useCallback(async () => {
     if (!parsedPayload.formatted) return
@@ -390,15 +390,16 @@ export function StructuredPayloadView(props: StructuredPayloadViewProps) {
     }, 1500)
   }, [parsedPayload.formatted])
 
+  const summary = useMemo(
+    () => (parsedPayload.formatted ? summarizePayload(parsedPayload.parsed, parsedPayload.formatted) : ''),
+    [parsedPayload.parsed, parsedPayload.formatted],
+  )
+
   if (!parsedPayload.formatted) {
     return html`<div class="kp-block-status">${emptyText}</div>`
   }
 
   const effectiveMode = parsedPayload.isJson ? mode : 'raw'
-  const summary = useMemo(
-    () => summarizePayload(parsedPayload.parsed, parsedPayload.formatted),
-    [parsedPayload.parsed, parsedPayload.formatted],
-  )
   const badgeText = `${formatByteSize(parsedPayload.bytes)} · ${parsedPayload.lines}줄`
 
   return html`

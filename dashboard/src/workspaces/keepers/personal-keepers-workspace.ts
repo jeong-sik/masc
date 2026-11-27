@@ -451,7 +451,7 @@ export function PersonalKeepersWorkspace(props: PersonalKeepersWorkspaceProps) {
                   <div class="kp-roster-list" role="list" aria-label="개인 Keeper 목록">
                     ${filteredKeepers.map((k) => {
                       const selected = activeKeeper?.keeper_id === k.keeper_id
-                      const rt = k.runtime_id ? runtimeById.get(k.runtime_id) : null
+                      const rt = k.runtime_id ? runtimeById.get(k.runtime_id) ?? null : null
                       const runtimeUnavailable =
                         k.runtime_id !== null && providerData !== null && providerError === null && rt === null
                       const subLine = k.runtime_id

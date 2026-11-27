@@ -1036,6 +1036,11 @@ describe('Multi-Account Personal Keepers UI flows (Worker & Admin)', () => {
       const pill = view.getByTestId('ma-keeper-runtime-pill')
       expect(pill.getAttribute('data-tone')).toBe('warn')
       expect(pill.textContent).toContain('재연결 필요')
+      const rosterRow = view.container.querySelector('[data-keeper="stale-rt-keeper"]')
+      expect(rosterRow).not.toBeNull()
+      expect(rosterRow?.textContent).toContain('재연결 필요')
+      expect(rosterRow?.querySelector('.kp-status-dot')?.getAttribute('data-tone')).toBe('warn')
+      expect(rosterRow?.querySelector('.kp-pill')?.getAttribute('data-tone')).toBe('warn')
     })
 
     // Create keeper succeeds, optional initial assign fails -> exactly 1 non-contradictory toast

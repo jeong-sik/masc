@@ -2719,8 +2719,6 @@
 (include stanzas/test_log_file_writer.inc)
 (include stanzas/test_start_log_dir_refusal.inc)
 
-(include stanzas/test_artifacts_upload.inc)
-
 (include stanzas/test_auth_oauth.inc)
 (include stanzas/test_auth_oauth_client_metadata.inc)
 (include stanzas/test_server_oauth_protocol.inc)

@@ -176,7 +176,8 @@ let create ~sw ~mono_clock ?(max_idle_per_host = 8) ?(idle_ttl_seconds = 60.0) (
      normal switch completion, and the release hook that sets [stop] only
      runs after all fibers finish. *)
   let eviction_interval =
-    Mtime.Span.of_uint64_ns (Int64.div (Mtime.Span.to_uint64_ns idle_ttl) 2L)
+    Mtime.Span.of_uint64_ns
+      (Int64.max 1L (Int64.div (Mtime.Span.to_uint64_ns idle_ttl) 2L))
   in
   Eio.Fiber.fork_daemon ~sw (fun () ->
     let rec loop () =

@@ -452,33 +452,36 @@ let invalid_url url detail =
 ;;
 
 let parse_uri url =
-  match Uri.of_string url with
-  | exception Invalid_argument detail -> invalid_url url detail
-  | uri ->
-    let* scheme =
-      match Option.map String.lowercase_ascii (Uri.scheme uri) with
-      | Some "http" -> Ok Http
-      | Some "https" -> Ok Https
-      | Some unsupported ->
-        invalid_url url (Printf.sprintf "unsupported scheme %S" unsupported)
-      | None -> invalid_url url "missing HTTP scheme"
-    in
-    let* host =
-      match Uri.host uri with
-      | Some host when String.trim host <> "" -> Ok host
-      | Some _ | None -> invalid_url url "missing host"
-    in
-    let* port =
-      match Uri.port uri with
-      | Some port when port > 0 && port <= 65535 -> Ok port
-      | Some port -> invalid_url url (Printf.sprintf "invalid port %d" port)
-      | None ->
-        Ok
-          (match scheme with
-           | Http -> 80
-           | Https -> 443)
-    in
-    Ok { uri; url; scheme; host; port }
+  if String.exists (fun c -> c = '\n' || c = '\r') url
+  then invalid_url url "contains line break"
+  else
+    match Uri.of_string url with
+    | exception Invalid_argument detail -> invalid_url url detail
+    | uri ->
+      let* scheme =
+        match Option.map String.lowercase_ascii (Uri.scheme uri) with
+        | Some "http" -> Ok Http
+        | Some "https" -> Ok Https
+        | Some unsupported ->
+          invalid_url url (Printf.sprintf "unsupported scheme %S" unsupported)
+        | None -> invalid_url url "missing HTTP scheme"
+      in
+      let* host =
+        match Uri.host uri with
+        | Some host when String.trim host <> "" -> Ok host
+        | Some _ | None -> invalid_url url "missing host"
+      in
+      let* port =
+        match Uri.port uri with
+        | Some port when port > 0 && port <= 65535 -> Ok port
+        | Some port -> invalid_url url (Printf.sprintf "invalid port %d" port)
+        | None ->
+          Ok
+            (match scheme with
+             | Http -> 80
+             | Https -> 443)
+      in
+      Ok { uri; url; scheme; host; port }
 ;;
 
 let known_network_error_kind = function
@@ -543,12 +546,28 @@ let https_init_error_network_kind = function
   | Api_common.Tls_config_unavailable _ -> Tls_error
 ;;
 
+exception Response_head_too_large of { limit_bytes : int }
+exception Too_many_interim_responses of { limit : int }
+
 (** Classify a network/timeout exception into an [http_error]. A timeout
     is classified as [Http_operation] — accurate for the connect/headers
     phase; body-phase timeouts are intercepted before this function (see
     {!with_post_stream}) so the caller can attach a phase-accurate label. *)
 let classify_network_exn (e : exn) =
   match e with
+  | Response_head_too_large { limit_bytes } ->
+    Some
+      (ProviderFailure
+         { kind = Response_body_too_large { limit_bytes }
+         ; message = Printf.sprintf "HTTP response head exceeded %d bytes" limit_bytes
+         })
+  | Too_many_interim_responses { limit } ->
+    Some
+      (NetworkError
+         { message =
+             Printf.sprintf "HTTP server sent more than %d interim 1xx responses" limit
+         ; kind = Unknown
+         })
   | End_of_file -> Some (NetworkError { message = "End_of_file"; kind = End_of_file })
   | Eio.Time.Timeout ->
     Some
@@ -1238,6 +1257,9 @@ module Final_response_bytes = struct
       code >= 100 && code < 200
   ;;
 
+  let max_head_bytes = 256 * 1024
+  let max_interim_responses = 16
+
   (* A final head that is cut short, and bytes that are not HTTP, are passed
      up as they arrived: cohttp-eio reads them again and reports them as it
      did before. After an interim head that is cut short nothing is left to
@@ -1251,21 +1273,27 @@ module Final_response_bytes = struct
 
       let single_read () buffer =
         let count = read buffer in
+        if Buffer.length pulled + count > max_head_bytes
+        then raise (Response_head_too_large { limit_bytes = max_head_bytes });
         Buffer.add_string pulled (Cstruct.to_string ~len:count buffer);
         count
       ;;
     end
     in
     let source = Eio.Resource.T ((), Eio.Flow.Pi.source (module Pulled)) in
-    (* No size limit, as where cohttp-eio reads a head. *)
-    let input = Eio.Buf_read.of_flow ~max_size:max_int source in
-    let rec final_head_offset () =
+    let input = Eio.Buf_read.of_flow ~max_size:max_head_bytes source in
+    let rec final_head_offset ~interim_count () =
       let offset = Eio.Buf_read.consumed_bytes input in
       match Response_io.read input with
-      | `Ok response when is_interim response -> final_head_offset ()
+      | `Ok response when is_interim response ->
+        if interim_count >= max_interim_responses
+        then raise (Too_many_interim_responses { limit = max_interim_responses })
+        else final_head_offset ~interim_count:(interim_count + 1) ()
       | `Ok _ | `Eof | `Invalid _ -> offset
+      | exception Eio.Buf_read.Buffer_limit_exceeded ->
+        raise (Response_head_too_large { limit_bytes = max_head_bytes })
     in
-    let offset = final_head_offset () in
+    let offset = final_head_offset ~interim_count:0 () in
     Cstruct.of_string ~off:offset (Buffer.contents pulled)
   ;;
 

@@ -92,16 +92,22 @@ let validate_object_fields ~path ~known fields =
 let create_supported_interface_at ~path ~url ~protocol_binding ~protocol_version ~tenant =
   let open Result.Syntax in
   let* url = validate_non_empty ~field:(path ^ ".url") url in
-  let uri = Uri.of_string url in
   let* () =
-    match Uri.Absolute_http.of_uri uri with
-    | Ok absolute_uri
-      when Uri.Absolute_http.scheme absolute_uri = `Https
-           && not (String.equal (Uri.Absolute_http.host absolute_uri) "") -> Ok ()
-    | Ok _ | Error _ ->
+    if String.exists (fun c -> c = '\n' || c = '\r') url
+    then
       invalid_config
         ~field:(path ^ ".url")
         ~detail:"must be an absolute HTTPS URL with a non-empty host"
+    else
+      let uri = Uri.of_string url in
+      match Uri.Absolute_http.of_uri uri with
+      | Ok absolute_uri
+        when Uri.Absolute_http.scheme absolute_uri = `Https
+             && not (String.equal (Uri.Absolute_http.host absolute_uri) "") -> Ok ()
+      | Ok _ | Error _ ->
+        invalid_config
+          ~field:(path ^ ".url")
+          ~detail:"must be an absolute HTTPS URL with a non-empty host"
   in
   let* protocol_binding =
     validate_non_empty ~field:(path ^ ".protocolBinding") protocol_binding

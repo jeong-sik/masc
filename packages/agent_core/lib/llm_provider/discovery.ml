@@ -131,9 +131,19 @@ let normalize_ollama_host_value raw =
       String.starts_with ~prefix:"http://" lower
       || String.starts_with ~prefix:"https://" lower
     in
+    let bare = strip_trailing_slashes trimmed in
+    let is_bare_ipv6 =
+      (not has_http_scheme)
+      && (not (has_scheme_separator trimmed))
+      && bare <> ""
+      && Result.is_ok (Ipaddr.V6.of_string bare)
+    in
     if (not has_http_scheme) && has_scheme_separator trimmed
     then None
-    else if (not has_http_scheme) && String.starts_with ~prefix:":" trimmed
+    else if
+      (not has_http_scheme)
+      && (not is_bare_ipv6)
+      && String.starts_with ~prefix:":" trimmed
     then
       Option.map
         (fun port -> Printf.sprintf "http://127.0.0.1:%d" port)
@@ -142,9 +152,11 @@ let normalize_ollama_host_value raw =
       let candidate =
         if has_http_scheme
         then trimmed
-        else (
-          let bare = strip_trailing_slashes trimmed in
-          if bare = "" then "" else "http://" ^ bare)
+        else if is_bare_ipv6
+        then Printf.sprintf "http://[%s]" bare
+        else if bare = ""
+        then ""
+        else "http://" ^ bare
       in
       if candidate = ""
       then None

@@ -9,10 +9,18 @@ comment_offset and comment_limit for the preceding page; \
 Repeat toward offset 0 for older comments. To skip comments \
 you have read, pass after_comment_id (the \
 newest one you read) or comment_tail (the newest N). If no post_id is visible, call masc_board_list or masc_board_search first; \
-never call this tool with empty arguments."""
+never call this tool with empty arguments. A result that repeats an earlier \
+result of the same turn byte for byte may arrive as one line, \
+[masc:same-result first_tool_use_id="..." bytes=N sha256=...]: the post and \
+the comments you asked for are the same as in that first result."""
 
 identity_fields = []
 defer_loading = true
+# A read whose text equals an earlier read of the same turn goes to the
+# provider as a pointer to that turn's first result (RFC-0510 D6). This is
+# the one tool that led the same-turn repeats in all three measured windows
+# (RFC-0510 §2.3, §2.7, §2.8).
+same_turn_result_stub = true
 
 [[params]]
 name = "post_id"

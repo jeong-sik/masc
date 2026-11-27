@@ -20,7 +20,6 @@ type checkpoint_error =
   | Published_format_mismatch
 val error_message : error -> string
 val checkpoint_error_message : checkpoint_error -> string
-val view_to_json : view -> Yojson.Safe.t
 val read : ?runner:Artifact_document_engine.runner -> base_path:string -> artifact_id:string -> unit -> (view, error) result
 val execute : ?runner:Artifact_document_engine.runner -> base_path:string -> actor:string -> Artifact_draft.command -> (view, error) result
 val checkpoint : ?runner:Artifact_document_engine.runner -> base_path:string -> actor:string ->

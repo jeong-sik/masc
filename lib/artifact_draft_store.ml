@@ -38,7 +38,6 @@ let checkpoint_error_message = function
   | Published_format_mismatch -> "published format changed since the shared draft's base"
 let dirname = "artifact_drafts"
 
-let view_to_json view = Draft.document_to_json ~draft:view.draft ~content:view.content ~selection:view.selection
 let root ~base_path = Filename.concat (Common.masc_dir_from_base_path ~base_path) dirname
 let path ~base_path artifact_id = Filename.concat (root ~base_path) (artifact_id ^ ".json")
 let protect f = try f () with

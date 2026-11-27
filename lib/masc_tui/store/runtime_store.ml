@@ -2862,8 +2862,14 @@ let is_keeper_waiting_inventory_absent ~keeper t =
   String_set.mem keeper t.keeper_waiting_inventory_absent_keepers
 
 let mark_keeper_waiting_inventory_absent ~keeper t =
+  let keeper_waiting_inventory =
+    match Observed.to_option t.keeper_waiting_inventory with
+    | Some (k, _) when String.equal k keeper -> Observed.absent
+    | Some _ | None -> t.keeper_waiting_inventory
+  in
   {
     t with
+    keeper_waiting_inventory;
     keeper_waiting_inventory_absent_keepers =
       String_set.add keeper t.keeper_waiting_inventory_absent_keepers;
   }
@@ -2876,9 +2882,11 @@ let clear_keeper_waiting_inventory_absent ~keeper t =
   }
 
 let keeper_waiting_inventory_for ~keeper t =
-  match Observed.to_option t.keeper_waiting_inventory with
-  | Some (k, inv) when String.equal k keeper -> Some inv
-  | Some _ | None -> None
+  if is_keeper_waiting_inventory_absent ~keeper t then None
+  else
+    match Observed.to_option t.keeper_waiting_inventory with
+    | Some (k, inv) when String.equal k keeper -> Some inv
+    | Some _ | None -> None
 
 let apply_runtime_standings entries t =
   let runtime_standings =
@@ -2973,9 +2981,15 @@ let apply_addon_action_receipt ~observed_at recp t =
 let apply_addon_slice ~observed_at sl t =
   { t with addon_slice = Observed.value ~observed_at sl }
 
+let addon_request_nonce =
+  let pid = Unix.getpid () in
+  let ms = Int64.of_float (Unix.gettimeofday () *. 1000.0) in
+  Printf.sprintf "%d-%Lx" pid ms
+
 let next_addon_request_id t =
   let n = t.addon_req_seq in
-  ({ t with addon_req_seq = n + 1 }, Printf.sprintf "tui-addon-req-%d" n)
+  ( { t with addon_req_seq = n + 1 },
+    Printf.sprintf "tui-addon-%s-%d" addon_request_nonce n )
 
 let apply_browser_scene ~observed_at ~tab_id sc t =
   { t with browser_scene = Observed.value ~observed_at (tab_id, sc) }

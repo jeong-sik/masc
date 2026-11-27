@@ -485,6 +485,40 @@ let cycle_subtab ~keeper t =
 let set_subtab ~keeper subtab t =
   update_keeper ~keeper (fun ks -> { ks with subtab; scroll_offset = 0 }) t
 
+let slot_matches_turn_ref target_ref slot =
+  match target_ref, Observed.to_option slot with
+  | Some tr, Some (stored_tr, _) -> String.equal tr stored_tr
+  | Some _, None | None, (Some _ | None) -> false
+
+let part_slot_matches_turn_ref target_ref slot =
+  match target_ref, Observed.to_option slot with
+  | Some tr, Some (stored_tr, _, _) -> String.equal tr stored_tr
+  | Some _, None | None, (Some _ | None) -> false
+
+let reset_turn_scoped_slots ks =
+  let target_ref = selected_turn_ref ks in
+  let reset_if_mismatch pred slot =
+    if pred target_ref slot then slot else Observed.unreported
+  in
+  let reset_absent_ref = function
+    | Some r when Option.equal String.equal target_ref (Some r) -> Some r
+    | Some _ | None -> None
+  in
+  {
+    ks with
+    provider_input = reset_if_mismatch slot_matches_turn_ref ks.provider_input;
+    absent_provider_input_ref = reset_absent_ref ks.absent_provider_input_ref;
+    part_content = reset_if_mismatch part_slot_matches_turn_ref ks.part_content;
+    cache_outcome = reset_if_mismatch slot_matches_turn_ref ks.cache_outcome;
+    absent_cache_outcome_ref = reset_absent_ref ks.absent_cache_outcome_ref;
+    turn_transcript = reset_if_mismatch slot_matches_turn_ref ks.turn_transcript;
+    absent_transcript_ref = reset_absent_ref ks.absent_transcript_ref;
+    call_evidence = reset_if_mismatch slot_matches_turn_ref ks.call_evidence;
+    absent_call_evidence_ref = reset_absent_ref ks.absent_call_evidence_ref;
+    turn_flow = reset_if_mismatch slot_matches_turn_ref ks.turn_flow;
+    absent_turn_flow_ref = reset_absent_ref ks.absent_turn_flow_ref;
+  }
+
 let step_turn ~keeper ~delta t =
   update_keeper ~keeper
     (fun ks ->
@@ -496,12 +530,13 @@ let step_turn ~keeper ~delta t =
       let next_idx = Store_scroll.clamp_index total (ks.selected_turn_idx + delta) in
       if Int.equal next_idx ks.selected_turn_idx then ks
       else
-        {
-          ks with
-          selected_turn_idx = next_idx;
-          selected_part_idx = 0;
-          scroll_offset = 0;
-        })
+        reset_turn_scoped_slots
+          {
+            ks with
+            selected_turn_idx = next_idx;
+            selected_part_idx = 0;
+            scroll_offset = 0;
+          })
     t
 
 let move_scroll ~keeper ?max_scroll ~delta t =
@@ -523,10 +558,12 @@ let move_part_selection ~keeper ~delta t =
         | None -> 0
       in
       let next_idx = Store_scroll.clamp_index total (ks.selected_part_idx + delta) in
-      let scroll_offset =
-        if Int.equal next_idx ks.selected_part_idx then ks.scroll_offset else 0
-      in
-      { ks with selected_part_idx = next_idx; scroll_offset })
+      if Int.equal next_idx ks.selected_part_idx then ks
+      else
+        let next_ks = { ks with selected_part_idx = next_idx; scroll_offset = 0 } in
+        match part_content_for_selected next_ks with
+        | Some _ -> next_ks
+        | None -> { next_ks with part_content = Observed.unreported })
     t
 
 let move_call_selection ~keeper ?(viewport_rows = 12) ~delta t =
@@ -566,16 +603,24 @@ let apply_turn_records ~observed_at ~keeper
     (page : Wire_keeper_context.turn_records_page) t =
   update_keeper ~keeper
     (fun ks ->
+      let prev_ref = selected_turn_ref ks in
       let selected_turn_idx =
         Store_scroll.clamp_index
           (List.length page.Wire_keeper_context.entries)
           ks.selected_turn_idx
       in
-      {
-        ks with
-        turn_records = Observed.value ~observed_at page;
-        selected_turn_idx;
-      })
+      let next_ks =
+        {
+          ks with
+          turn_records = Observed.value ~observed_at page;
+          selected_turn_idx;
+        }
+      in
+      let next_ref = selected_turn_ref next_ks in
+      if Option.equal String.equal prev_ref next_ref then next_ks
+      else
+        reset_turn_scoped_slots
+          { next_ks with selected_part_idx = 0; scroll_offset = 0 })
     t
 
 let apply_provider_input ~observed_at ~keeper ~turn_ref

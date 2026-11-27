@@ -853,9 +853,7 @@ let draw_flow_subtab grid ~(rect : Rect.t) ~(theme : Theme.t)
               (fun (c : Wire_keeper_context.tool_call_entry) ->
                 let batch_s =
                   match (c.batch_index, c.batch_size) with
-                  | Some bi, Some bs when bs > 1 ->
-                      Printf.sprintf "[B%d/%d] " bi bs
-                  | Some bi, Some bs -> Printf.sprintf "[%d/%d] " bi bs
+                  | Some bi, Some bs -> Printf.sprintf "[B%d ×%d] " bi bs
                   | _ -> ""
                 in
                 let mode_s =
@@ -1959,7 +1957,7 @@ let draw_tool_calls_tab grid ~(rect : Rect.t) ~(theme : Theme.t)
                 let tool_disp =
                   match (c.batch_index, c.batch_size) with
                   | Some bi, Some bs when bs > 1 ->
-                      Printf.sprintf "%s [%d/%d]" c.tool bi bs
+                      Printf.sprintf "%s [B%d ×%d]" c.tool bi bs
                   | _ -> c.tool
                 in
                 {
@@ -2037,10 +2035,10 @@ let draw_tool_calls_tab grid ~(rect : Rect.t) ~(theme : Theme.t)
                   let mode_s =
                     match (call.execution_mode, call.batch_index, call.batch_size) with
                     | Some m, Some bi, Some bs ->
-                        Printf.sprintf " · %s [%d/%d]" m bi bs
+                        Printf.sprintf " · %s [B%d ×%d]" m bi bs
                     | Some m, _, _ -> " · " ^ m
                     | None, Some bi, Some bs ->
-                        Printf.sprintf " · batch [%d/%d]" bi bs
+                        Printf.sprintf " · batch %d · ×%d" bi bs
                     | None, _, _ -> ""
                   in
                   let inflight, res_obs, page_err =

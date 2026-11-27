@@ -39,6 +39,23 @@ let resolve_recorder_from ~find =
           | Some p -> Some (Recorder_ffmpeg, p)
           | None -> None))
 
+let resolve_recorder_for_device ~device ~find =
+  let has_explicit_device =
+    match device with
+    | Some dev -> not (String.equal (String.trim dev) "")
+    | None -> false
+  in
+  if has_explicit_device then
+    (* [rec] only records from the default input; prefer [sox] or [ffmpeg]
+       when the user configured a specific input device. *)
+    match find "sox" with
+    | Some p -> Some (Recorder_sox, p)
+    | None -> (
+        match find "ffmpeg" with
+        | Some p -> Some (Recorder_ffmpeg, p)
+        | None -> resolve_recorder_from ~find)
+  else resolve_recorder_from ~find
+
 let build_record_argv ~kind ~bin_path ~device ~out_path =
   match (kind, device) with
   | Recorder_rec, _ ->
@@ -239,7 +256,7 @@ let http_and_local_backend ~io ~clock ~endpoint =
   let record_until_stopped ~device ~stop_signal ~on_level:_ =
     let recorder =
       Eio_unix.run_in_systhread (fun () ->
-          resolve_recorder_from ~find:find_on_path)
+          resolve_recorder_for_device ~device ~find:find_on_path)
     in
     match recorder with
     | None -> Error "no supported audio recorder (rec/sox/ffmpeg) found on PATH"

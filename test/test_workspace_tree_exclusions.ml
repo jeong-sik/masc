@@ -1,13 +1,10 @@
-(** [.masc-ide/] must not appear in the workspace
-    file tree returned by [/api/v1/workspace/tree].
+(** Runtime state must not appear in the workspace file tree returned by
+    [/api/v1/workspace/tree].
 
-    Before this PR, [scan_dir] excluded [.masc/] (the keeper
-    workspace store) but not [.masc-ide/] (the keeper annotation
-    store). With [?repo_id=<id>] resolving the workspace base to a
-    registered repository and the IDE seeding its file explorer from
-    the response, the agent's own annotation directory was leaking
-    into the file picker. This regression test pins
-    [.masc-ide/]-exclusion alongside the other internal dirs. *)
+    Connector channel bindings, their audit and the poll cursors live under
+    [.masc/connectors/<kind>/], so the [.masc] rule hides them with the other
+    runtime state (#42809). This test pins that, alongside the other internal
+    dirs. *)
 
 open Alcotest
 
@@ -73,22 +70,20 @@ let string_field node key =
 
 let find_node nodes p = List.find_opt (fun n -> path_of_node n = p) nodes
 
-let test_masc_ide_excluded () =
+(* The files are planted where the connectors write them by default, so a
+   default that leaves [.masc] would show up in the listing. *)
+let test_connector_state_excluded () =
   with_temp_dir (fun base ->
-    mkdir_p (Filename.concat base ".masc-ide/by-url/some_slug");
-    touch (Filename.concat base ".masc-ide/by-url/some_slug/tool_events.jsonl");
+    let dir = Common.connector_state_dir_of_base ~base_path:base Common.Connector_slack in
+    touch (Filename.concat dir Common.connector_bindings_filename);
+    touch (Filename.concat dir Common.connector_binding_audit_filename);
     touch (Filename.concat base "lib/bar.ml");
-    let nodes = W.scan_dir ~base ~depth:0 ~max_depth:3 ~max_nodes:200 [] base in
-    let ps = paths nodes in
-    let has_masc_ide = List.exists (fun p -> p = ".masc-ide" || String.length p > 10 && String.sub p 0 10 = ".masc-ide/") ps in
-    let has_lib = List.exists (fun p -> p = "lib" || p = "lib/bar.ml") ps in
-    check bool ".masc-ide must not appear in tree" false has_masc_ide;
-    check bool "lib must appear in tree" true has_lib)
+    let nodes = W.scan_dir ~base ~depth:0 ~max_depth:5 ~max_nodes:200 [] base in
+    check (list string) "only workspace content is listed" [ "lib"; "lib/bar.ml" ]
+      (List.sort String.compare (paths nodes)))
 ;;
 
 let test_other_internal_dirs_still_excluded () =
-  (* Defence-in-depth: verify the existing excluded entries did not
-     regress when [.masc-ide] was added to the list. *)
   with_temp_dir (fun base ->
     List.iter
       (fun d -> mkdir_p (Filename.concat base d))
@@ -144,7 +139,7 @@ let () =
   run
     "workspace_tree_exclusions"
     [ ( "RFC-0128 §4.6"
-      , [ test_case ".masc-ide is excluded from tree" `Quick test_masc_ide_excluded
+      , [ test_case "connector state is excluded from tree" `Quick test_connector_state_excluded
         ; test_case
             "other internal dirs still excluded"
             `Quick

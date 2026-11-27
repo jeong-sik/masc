@@ -77,7 +77,7 @@ val rel_under : string -> string -> string
 (** [component_is_confidential name] is [true] when a single path
     component [name] names a secret or agent-internal store that must not
     be served by the file read routes nor listed in the file tree
-    ([.git], [.masc]/[.masc-ide], [.env]*, [.ssh], any name containing
+    ([.git], [.masc]*, [.env]*, [.ssh], any name containing
     "credentials"). Single SSOT shared by the workspace-file resolver and
     {!scan_dir}. Exposed for unit testing. *)
 val component_is_confidential : string -> bool

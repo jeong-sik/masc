@@ -18,23 +18,24 @@ type binding = Store.binding =
 let connector_id = "imessage"
 let display_name = "iMessage"
 let channel = "imessage"
-let default_binding_store_path = ".gate/runtime/imessage/bindings.json"
-let default_binding_audit_path = ".gate/runtime/imessage/binding_audit.jsonl"
-
-let imessage_path ~env_var ~default () =
+let imessage_path ~env_var ~filename () =
   match Env_config_core.raw_value_opt env_var |> Env_config_core.trim_opt with
   | Some path -> Env_config_core.resolve_against_base_path path
-  | None -> Env_config_core.resolve_against_base_path default
+  | None ->
+    Filename.concat
+      (Common.connector_state_dir_of_base
+         ~base_path:(Env_config_core.base_path ()) Common.Connector_imessage)
+      filename
 ;;
 
 let binding_store_path () =
   imessage_path ~env_var:"MASC_IMESSAGE_BINDING_STORE_PATH"
-    ~default:default_binding_store_path ()
+    ~filename:Common.connector_bindings_filename ()
 ;;
 
 let binding_audit_path () =
   imessage_path ~env_var:"MASC_IMESSAGE_BINDING_AUDIT_PATH"
-    ~default:default_binding_audit_path ()
+    ~filename:Common.connector_binding_audit_filename ()
 ;;
 
 (* iMessage has no Discord-style guild, so audit events omit guild_id. *)

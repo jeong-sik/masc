@@ -1,13 +1,12 @@
 (** IDE observation scope — the addressing vocabulary shared by every IDE
     read surface.
 
-    A [.masc-ide/] store is laid out per codebase, so any reader has to
-    say which codebase it is addressing before it can name a document. The REST
-    routes take that decision from query parameters; the LSP proxy takes it
-    from the same parameters on its WebSocket URL. Both resolve through this
-    module so the two surfaces cannot drift into separate vocabularies —
-    the drift that once had the LSP overlay and the keeper writes
-    addressing two different store directories. *)
+    Canonical Keeper tool-call rows carry a codebase address, so any reader
+    has to say which codebase it is addressing before it can read its events.
+    The REST routes take that decision from query parameters; the LSP proxy
+    takes it from the same parameters on its WebSocket URL. Both resolve
+    through this module so the two surfaces cannot drift into separate
+    vocabularies. *)
 
 type ide_error =
   { code : string
@@ -16,15 +15,15 @@ type ide_error =
 
 val ide_error : string -> string -> ide_error
 
-(** One wire key, one store. [Scope_codebase]
-    carries the canonical slug itself — the store directory name and the
-    value the co-view context hands the keeper. Full-URL and repo_id
-    spellings are projection labels, not addresses. The keeper-lane
-    scope died with the orphan store it existed to reach. *)
+(** One wire key. [Scope_codebase] carries the canonical slug itself — the
+    codebase address on the tool-call rows and the value the co-view context
+    hands the keeper. Full-URL and repo_id spellings are projection labels,
+    not addresses. *)
 type ide_scope = Scope_codebase of { slug : string }
 
 val codebase_of_ide_scope : ide_scope -> string
-(** The slug the scope addresses — the store directory name. *)
+(** The slug the scope addresses — the codebase filter on the tool-call
+    rows. *)
 
 val resolve_ide_scope_for_query
   :  state:Mcp_server.server_state

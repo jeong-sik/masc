@@ -196,10 +196,9 @@ let cached_response_with_source_and_base ~source ~base_path req reqd payload =
    listing hides the same components (see [scan_dir]). Anything blocked
    from reads is therefore also hidden from the tree.
 
-   [.masc-ide/] is keeper metadata about the workspace,
-   not workspace content; listing it exposed the agent's annotation
-   store to the IDE (leak observed 2026-05-17 against [?repo_id=masc]).
-   The [.masc] prefix rule below subsumes both [.masc] and [.masc-ide]. *)
+   The [.masc] prefix rule below covers the runtime root, including the
+   connector bindings, binding audit and cursors under [.masc/connectors/],
+   and siblings such as the owner lease directory [.masc-owner]. *)
 type confidential_rule =
   | Name_equals of string
   | Name_prefix of string
@@ -207,7 +206,7 @@ type confidential_rule =
 
 let confidential_rules =
   [ Name_equals ".git"
-  ; Name_prefix Common.masc_dirname (* ".masc" — SSOT #9571; subsumes .masc-ide *)
+  ; Name_prefix Common.masc_dirname (* ".masc" — SSOT #9571; also .masc-owner *)
   ; Name_prefix ".env"
   ; Name_equals ".ssh"
     (* [Name_contains] over-blocks names such as [credentials_guide.md];

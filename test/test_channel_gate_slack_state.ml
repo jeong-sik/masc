@@ -46,7 +46,7 @@ let without_env key f =
 ;;
 
 (* A private base path so the binding store reads cleanly and no test touches
-   an operator's real .gate/runtime/slack. *)
+   an operator's real .masc/connectors/slack. *)
 let with_temp_base f =
   let base_path =
     Filename.concat

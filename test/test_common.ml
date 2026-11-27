@@ -242,6 +242,20 @@ let test_default_roster_target_rejects_non_manifests () =
     ; "runtime.toml"
     ]
 
+(* Operators move connector state into these directories by hand, so the
+   location is a contract: a different path starts every connector with no
+   bindings. *)
+let test_connector_state_dirs () =
+  List.iter
+    (fun (connector, kind) ->
+      check string kind ("/base/.masc/connectors/" ^ kind)
+        (Common.connector_state_dir_of_base ~base_path:"/base" connector))
+    [ Common.Connector_discord, "discord"
+    ; Common.Connector_imessage, "imessage"
+    ; Common.Connector_slack, "slack"
+    ; Common.Connector_telegram, "telegram"
+    ]
+
 let () =
   run "Common" [
     "config_root_seed", [
@@ -260,6 +274,9 @@ let () =
         test_default_roster_target_rejects_non_manifests;
       test_case "matches whole segment only" `Quick
         test_seeds_matches_whole_segment_only;
+    ];
+    "connector_state", [
+      test_case "directory per connector" `Quick test_connector_state_dirs;
     ];
     "finalizer_guard", [
       test_case "runs finally" `Quick test_protect_finally_runs;

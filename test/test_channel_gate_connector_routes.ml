@@ -167,7 +167,7 @@ let test_slack_default_paths_resolve_under_base_path () =
                   | Error err -> fail err
                   | Ok json ->
                     let expected_binding_path =
-                      Filename.concat base_dir ".gate/runtime/slack/bindings.json"
+                      Filename.concat base_dir ".masc/connectors/slack/bindings.json"
                     in
                     check string "binding store path under base" expected_binding_path
                       (json |> U.member "binding_store_path" |> U.to_string);
@@ -175,7 +175,7 @@ let test_slack_default_paths_resolve_under_base_path () =
                       (Sys.file_exists expected_binding_path);
                     check bool "binding not written under cwd" false
                       (Sys.file_exists
-                         (Filename.concat cwd_dir ".gate/runtime/slack/bindings.json")))))))
+                         (Filename.concat cwd_dir ".masc/connectors/slack/bindings.json")))))))
 
 (* F412 — the Slack credential verdict is a closed sum, not an empty-string
    sentinel. [status_json] used to build the credential message as a string,

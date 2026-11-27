@@ -199,7 +199,10 @@ let decode = function
      | _ -> Error "unknown Slack checkpoint kind")
   | _ -> Error "Slack checkpoint must be an object"
 
-let cursor_path ~base_dir = Filename.concat base_dir ".gate/runtime/slack/poll-cursor.json"
+let cursor_path ~base_dir =
+  Filename.concat
+    (Common.connector_state_dir_of_base ~base_path:base_dir Common.Connector_slack)
+    "poll-cursor.json"
 let read_checkpoints ~path =
   match Unix.lstat path with
   | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok []

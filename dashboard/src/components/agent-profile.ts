@@ -2,7 +2,7 @@
 // Layout: character plate (portrait + identity + stats) -> detail grid -> history
 
 import { html } from 'htm/preact'
-import { signal } from '@preact/signals'
+import { signal, useSignal } from '@preact/signals'
 import { useEffect, useRef } from 'preact/hooks'
 import { useManagedAsyncResource } from '../lib/use-managed-async-resource'
 import { captureDashboardObservationOwner, dashboardObservationOwnerIsCurrent } from '../lib/observation-read-owner'
@@ -57,10 +57,9 @@ interface ProfileData {
   workspaceActivity: string[]
   taskHistories: TaskHistoryRow[]
   agentTimeline: AgentTimelineResponse | null
+  timelineError: string | null
 }
 
-const mentionText = signal('')
-const sendingMention = signal(false)
 const activityQuery = signal('')
 
 /**
@@ -122,9 +121,14 @@ async function readProfile(name: string, signal: AbortSignal): Promise<ProfileDa
   // The task list belongs to this dispatch, before either network read can yield.
   const taskIds = assignedTasks(name).slice(0, 6).map(task => task.id)
   assertCurrent()
+  let timelineError: string | null = null
   const [lines, timeline] = await Promise.all([
     fetchWorkspaceMessages(80, options),
-    fetchAgentTimeline(name, 4, 20, { signal }).catch(() => null),
+    fetchAgentTimeline(name, 4, 20, { signal }).catch((err: unknown) => {
+      if (signal.aborted || !current()) return null
+      timelineError = err instanceof Error ? err.message : '타임라인을 불러오지 못했습니다'
+      return null
+    }),
   ])
   assertCurrent()
 
@@ -155,25 +159,7 @@ async function readProfile(name: string, signal: AbortSignal): Promise<ProfileDa
     workspaceActivity: activity,
     taskHistories: histories,
     agentTimeline: timeline,
-  }
-}
-
-async function submitMention(target: string, refresh: () => void): Promise<void> {
-  const text = mentionText.value.trim()
-  if (!target || !text) return
-  sendingMention.value = true
-  try {
-    const receipt = await sendBroadcast(currentDashboardActor(), `@${target} ${text}`)
-    mentionText.value = ''
-    showToast(
-      receipt.ok ? `${target}에게 전송` : broadcastReceiptMessage(receipt),
-      receipt.ok ? 'success' : 'warning',
-    )
-    refresh()
-  } catch (err) {
-    showToast(err instanceof Error ? err.message : '실패', 'error')
-  } finally {
-    sendingMention.value = false
+    timelineError,
   }
 }
 
@@ -318,8 +304,34 @@ export function AgentProfile({ name }: { name: string }) {
 function ScopedAgentProfile({ name }: { name: string }) {
   const resource = useManagedAsyncResource<ProfileData>()
   const mounted = useRef(false)
+  const mentionText = useSignal('')
+  const sendingMention = useSignal(false)
+  const sendingRef = useRef(false)
   const refresh = () => {
     if (mounted.current) void resource.load(signal => readProfile(name, signal))
+  }
+  const submitMention = async () => {
+    const text = mentionText.peek().trim()
+    if (!name || !text || sendingRef.current) return
+    sendingRef.current = true
+    sendingMention.value = true
+    try {
+      const receipt = await sendBroadcast(currentDashboardActor(), `@${name} ${text}`)
+      if (!mounted.current) return
+      mentionText.value = ''
+      showToast(
+        receipt.ok ? `${name}에게 전송` : broadcastReceiptMessage(receipt),
+        receipt.ok ? 'success' : 'warning',
+      )
+      refresh()
+    } catch (err) {
+      if (mounted.current) {
+        showToast(err instanceof Error ? err.message : '실패', 'error')
+      }
+    } finally {
+      sendingRef.current = false
+      if (mounted.current) sendingMention.value = false
+    }
   }
   useEffect(() => {
     mounted.current = true
@@ -378,7 +390,9 @@ function ScopedAgentProfile({ name }: { name: string }) {
 
         <${SectionCard} label="타임라인" class="ff-card rounded-[var(--r-1)]">
           <${DashboardFeedSourceStrip} meta=${timeline} className="mb-2" />
-          ${!timeline || (timeline.events ?? []).length === 0
+          ${profileData?.timelineError
+            ? html`<div class="rounded-[var(--r-1)] border border-[var(--bad-30)] bg-[var(--bad-10)] px-3 py-2 text-xs text-[var(--color-status-err)]" role="alert">${profileData.timelineError}</div>`
+            : !timeline || (timeline.events ?? []).length === 0
             ? html`<${EmptyState} message="이벤트 없음" compact />`
             : html`<div class="flex flex-col gap-0.5 max-h-75 overflow-y-auto">${(timeline.events ?? []).map((evt: AgentTimelineEvent, idx: number) => {
                 const detail = evt.detail as Record<string, string | undefined>
@@ -443,11 +457,11 @@ function ScopedAgentProfile({ name }: { name: string }) {
             placeholder="메시지 입력..."
             value=${mentionText.value}
             onInput=${(e: Event) => { mentionText.value = (e.target as HTMLInputElement).value }}
-            onKeyDown=${(e: KeyboardEvent) => { if (isSubmitEnter(e)) void submitMention(name, refresh) }}
+            onKeyDown=${(e: KeyboardEvent) => { if (isSubmitEnter(e)) void submitMention() }}
             disabled=${sendingMention.value}
           />
           <${ActionButton}
-            onClick=${() => { void submitMention(name, refresh) }}
+            onClick=${() => { void submitMention() }}
             disabled=${sendingMention.value || mentionText.value.trim() === ''}
           >
             ${sendingMention.value ? '...' : '전송'}

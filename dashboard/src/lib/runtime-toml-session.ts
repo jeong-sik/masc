@@ -175,8 +175,17 @@ export class RuntimeTomlSession {
       if (!this.admits(authority)) return true
       const controller = new AbortController()
       this.resumeController = controller
-      await resumeSavedModelSetup({ signal: controller.signal })
+      const resumed = await resumeSavedModelSetup({ signal: controller.signal })
       if (!this.admits(authority)) return true
+      if (resumed.kind === 'failed') {
+        const resumeDetail =
+          resumed.reason === 'upgrade_required'
+            ? '서버 업그레이드가 필요합니다.'
+            : resumed.reason === 'access_required'
+              ? '권한 확인이 필요합니다.'
+              : '모델 설정을 활성화하지 못했습니다.'
+        this.update({ error: `설정은 저장했지만 활성화에 실패했습니다: ${resumeDetail}` })
+      }
       // Setup resume may publish the registry for the first time after the
       // file receipt. Editors that remounted during this write must reread it.
       this.update({ projectionRevision: this.state.peek().projectionRevision + 1 })

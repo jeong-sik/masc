@@ -251,4 +251,165 @@ describe("KeeperCheckpointPanel diagnostics", () => {
       globalThis.fetch = originalFetch
     }
   })
+
+  it("cross-disables delete and purge buttons while either mutation is in flight and unlocks cleanly on completion", async () => {
+    const historyItem = {
+      snapshot_id: "snap-old-1",
+      source_kind: "agent_core_history",
+      is_current: false,
+      status: "available",
+      path: "/tmp/trace-test/snap-old-1.json",
+      created_at: 1700000000,
+      message_count: 10,
+      system_prompt_present: true,
+      latest_preview: "old snapshot",
+      file_stat: { size_bytes: 2048, mtime: 1700000000 },
+    }
+    const baseInventory = {
+      keeper: "keeper-test",
+      trace_id: "trace-test",
+      session_dir: "/tmp/trace-test",
+      current: {
+        snapshot_id: "trace-test.json",
+        source_kind: "agent_core_current",
+        is_current: true,
+        status: "available",
+        path: "/tmp/trace-test/trace-test.json",
+        created_at: 1700000000,
+        message_count: 20,
+        system_prompt_present: true,
+        latest_preview: "latest",
+        file_stat: { size_bytes: 4096, mtime: 1700000000 },
+      },
+      current_status: "available",
+      current_error: null,
+      history: [historyItem],
+      history_errors: [],
+    }
+    let resolvePreview: ((res: Response) => void) | null = null
+    let resolveDelete: ((res: Response) => void) | null = null
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = async (_input, init) => {
+      const body = init?.body ? JSON.parse(String(init.body)) : null
+      if (body?.action === "preview_purge") {
+        return new Promise<Response>(resolve => {
+          resolvePreview = resolve
+        })
+      }
+      if (body?.action === "delete_history") {
+        return new Promise<Response>(resolve => {
+          resolveDelete = resolve
+        })
+      }
+      return new Response(JSON.stringify(baseInventory), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      })
+    }
+
+    const container = document.createElement("div")
+    document.body.appendChild(container)
+    try {
+      await act(async () => {
+        render(
+          html`<${KeeperCheckpointPanel}
+            keeperName="keeper-test"
+            refreshToken=${0}
+          />`,
+          container,
+        )
+      })
+      await vi.waitFor(() => {
+        expect(container.querySelector('input[type="checkbox"]')).toBeTruthy()
+      })
+
+      // Select one history snapshot so the delete button becomes enabled.
+      await act(async () => {
+        const checkbox = container.querySelector('input[type="checkbox"]') as HTMLInputElement
+        checkbox.checked = true
+        checkbox.dispatchEvent(new Event("change", { bubbles: true }))
+      })
+      const deleteButton = () => Array.from(container.querySelectorAll("button")).find(
+        btn => btn.textContent?.includes("선택 삭제") || btn.textContent?.includes("삭제 중"),
+      ) as HTMLButtonElement
+      const previewButton = () => container.querySelector('[data-testid="keeper-checkpoint-purge-preview"]') as HTMLButtonElement
+      const applyButton = () => container.querySelector('[data-testid="keeper-checkpoint-purge-apply"]') as HTMLButtonElement
+
+      expect(deleteButton().disabled).toBe(false)
+      expect(previewButton().disabled).toBe(false)
+
+      // 1. Start purge preview: delete button must be disabled while preview is in flight.
+      await act(async () => {
+        previewButton().click()
+      })
+      await vi.waitFor(() => {
+        expect(resolvePreview).not.toBeNull()
+        expect(previewButton().disabled).toBe(true)
+        expect(deleteButton().disabled).toBe(true)
+      })
+
+      // Resolve purge preview: both buttons unlock cleanly.
+      await act(async () => {
+        resolvePreview!(new Response(JSON.stringify({
+          schema: "masc.keeper_checkpoint_purge.v1",
+          ok: true,
+          action: "preview_purge",
+          keeper: "keeper-test",
+          trace_id: "trace-test",
+          apply_allowed: true,
+          applied: false,
+          backup_path: null,
+          report: {
+            messages_before: 20,
+            messages_after: 20,
+            bytes_before: 4096,
+            bytes_after: 2048,
+            bytes_removed: 2048,
+            reasoning_blocks_stripped: 1,
+            tool_results_cleared: 2,
+            messages_dropped_at_structural_break: 0,
+          },
+          warnings: [],
+          inventory: baseInventory,
+        }), { status: 200, headers: { "Content-Type": "application/json" } }))
+      })
+      await vi.waitFor(() => {
+        expect(previewButton().disabled).toBe(false)
+        expect(applyButton().disabled).toBe(false)
+        expect(deleteButton().disabled).toBe(false)
+      })
+
+      // 2. Start snapshot delete: both purge preview and purge apply buttons must be disabled.
+      await act(async () => {
+        deleteButton().click()
+      })
+      await vi.waitFor(() => {
+        expect(resolveDelete).not.toBeNull()
+        expect(deleteButton().disabled).toBe(true)
+        expect(previewButton().disabled).toBe(true)
+        expect(applyButton().disabled).toBe(true)
+      })
+
+      // Resolve delete: buttons recover cleanly and deleted snapshot leaves inventory.
+      await act(async () => {
+        resolveDelete!(new Response(JSON.stringify({
+          deleted_snapshot_ids: ["snap-old-1"],
+          missing_snapshot_ids: [],
+          refused_snapshot_ids: [],
+          failed_snapshot_ids: [],
+          inventory: { ...baseInventory, history: [] },
+        }), { status: 200, headers: { "Content-Type": "application/json" } }))
+      })
+      await vi.waitFor(() => {
+        expect(previewButton().disabled).toBe(false)
+        expect(applyButton().disabled).toBe(false)
+        expect(deleteButton().textContent).toBe("선택 삭제 (0)")
+        expect(deleteButton().disabled).toBe(true)
+      })
+    } finally {
+      render(null, container)
+      document.body.removeChild(container)
+      globalThis.fetch = originalFetch
+    }
+  })
 })

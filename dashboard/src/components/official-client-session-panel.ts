@@ -72,7 +72,7 @@ export function OfficialClientSessionPanel() {
     .sort((left, right) => left.localeCompare(right))
   const keeperKey = keeperNames.join('\u0000')
 
-  const load = async (keeperName: string) => {
+  const load = async (keeperName: string, options?: { preserveError?: boolean }) => {
     if (!keeperName) {
       response.value = null
       return
@@ -81,7 +81,9 @@ export function OfficialClientSessionPanel() {
     requestRevision.value = revision
     response.value = null
     loading.value = true
-    error.value = null
+    if (!options?.preserveError) {
+      error.value = null
+    }
     try {
       const next = await fetchOfficialClientSession(keeperName)
       if (requestRevision.value === revision) response.value = next
@@ -107,17 +109,22 @@ export function OfficialClientSessionPanel() {
       ? currentPhase.recovery_id
       : null
     if (!keeperName || !recoveryId || resolving.value) return
+    const revision = requestRevision.value + 1
+    requestRevision.value = revision
+    const isCurrent = () => selectedKeeper.value === keeperName && requestRevision.value === revision
     resolving.value = true
     error.value = null
     try {
       const resolved = await resolveOfficialClientSession(keeperName, recoveryId, decision)
+      if (!isCurrent()) return
       response.value = resolved
       if (!resolved.audit.recorded) {
         error.value = `복구는 ${resolved.resolution_application} 상태로 반영됐지만 audit 기록에 실패했습니다: ${resolved.audit.error}`
       }
     } catch (cause) {
+      if (!isCurrent()) return
       error.value = errorToString(cause)
-      await load(keeperName)
+      await load(keeperName, { preserveError: true })
     } finally {
       resolving.value = false
     }
@@ -174,7 +181,7 @@ export function OfficialClientSessionPanel() {
       ${keeperNames.length === 0
         ? html`<${EmptyState} message="운영할 Keeper가 없습니다." compact />`
         : null}
-      ${keeperNames.length > 0 && !loading.value && !session
+      ${keeperNames.length > 0 && !loading.value && !error.value && !session
         ? html`<${EmptyState} message="이 Keeper는 아직 공식 클라이언트 세션을 시작하지 않았습니다." compact />`
         : null}
 

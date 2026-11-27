@@ -184,6 +184,17 @@ const KeeperDetailContent = memo(function KeeperDetailContent({
   const [preserveSystemPrompt, setPreserveSystemPrompt] = useState(true)
   const [clearPending, setClearPending] = useState(false)
   const [purgePending, setPurgePending] = useState(false)
+  const mountedRef = useRef(true)
+  const activeKeeperRef = useRef(keeper.name)
+  const clearPendingRef = useRef(false)
+  const purgePendingRef = useRef(false)
+  activeKeeperRef.current = keeper.name
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+    }
+  }, [])
   const [checkpointRefreshToken, setCheckpointRefreshToken] = useState(0)
   // 3-pane workspace is the default conversation view; "운영 상세" flips to
   // the full tabbed KeeperDetailBody (FSM / 진단 / 정체성 / 설정 / 디버그).
@@ -277,6 +288,9 @@ const KeeperDetailContent = memo(function KeeperDetailContent({
     setClearReason('')
     setPreserveSystemPrompt(true)
     setClearPending(false)
+    setPurgePending(false)
+    clearPendingRef.current = false
+    purgePendingRef.current = false
   }, [keeper.name])
 
   // Removed 4 props formerly fed into KeeperDetailOverviewSidebar QuickFacts
@@ -286,66 +300,88 @@ const KeeperDetailContent = memo(function KeeperDetailContent({
   // real data behind it. `최근 활동` duplicated the page header subtitle.
 
   const submitClearContext = () => {
+    if (clearPendingRef.current) return
+    const targetKeeper = keeper.name
+    const isCurrent = () => mountedRef.current && activeKeeperRef.current === targetKeeper
     void (async () => {
       const trimmedReason = clearReason.trim()
       if (!trimmedReason) {
         showToast('사유를 먼저 적으세요', 'warning')
         return
       }
+      clearPendingRef.current = true
       setClearPending(true)
       try {
-        const res = await clearKeeper(keeper.name, {
+        const res = await clearKeeper(targetKeeper, {
           reason: trimmedReason,
           preserve_system_prompt: preserveSystemPrompt,
         })
         if (res.ok) {
-          setClearDialogOpen(false)
-          setClearReason('')
-          setPreserveSystemPrompt(true)
-          setCheckpointRefreshToken(token => token + 1)
+          if (isCurrent()) {
+            setClearDialogOpen(false)
+            setClearReason('')
+            setPreserveSystemPrompt(true)
+            setCheckpointRefreshToken(token => token + 1)
+          }
           const outcome = keeperClearOutcome(res.detail)
           switch (outcome.kind) {
             case 'history_cleared':
-              showToast(`${keeper.name} 컨텍스트를 비웠습니다`, 'success')
+              showToast(`${targetKeeper} 컨텍스트를 비웠습니다`, 'success')
               break
             case 'undecodable_checkpoint_removed':
-              showToast(`${keeper.name} 의 읽을 수 없는 checkpoint 를 삭제했습니다. 대화 기록은 복구되지 않습니다`, 'warning')
+              showToast(`${targetKeeper} 의 읽을 수 없는 checkpoint 를 삭제했습니다. 대화 기록은 복구되지 않습니다`, 'warning')
               break
           }
           await refreshAfterRuntimeAction()
-        } else {
+        } else if (isCurrent()) {
           showToast(res.error ?? '컨텍스트 비우기 실패', 'error')
         }
       } catch (err) {
-        showToast(err instanceof Error ? err.message : '컨텍스트 비우기 실패', 'error')
+        if (isCurrent()) {
+          showToast(err instanceof Error ? err.message : '컨텍스트 비우기 실패', 'error')
+        }
       } finally {
-        setClearPending(false)
+        if (isCurrent()) {
+          clearPendingRef.current = false
+          setClearPending(false)
+        }
       }
     })()
   }
 
   const submitPurgeKeeper = () => {
+    if (purgePendingRef.current) return
+    const targetKeeper = keeper.name
+    const isCurrent = () => mountedRef.current && activeKeeperRef.current === targetKeeper
     void (async () => {
       const confirmed = await requestConfirm({
         title: '키퍼 완전 삭제',
-        message: `${keeper.name}의 안전한 삭제 작업을 접수합니다.\n현재 작업이 정리된 뒤 세션 trace, 인증, metrics와 Keeper 설정이 삭제됩니다.`,
+        message: `${targetKeeper}의 안전한 삭제 작업을 접수합니다.\n현재 작업이 정리된 뒤 세션 trace, 인증, metrics와 Keeper 설정이 삭제됩니다.`,
         tone: 'danger',
         confirmText: '삭제 작업 접수',
       })
-      if (!confirmed) return
+      if (!confirmed || !isCurrent() || purgePendingRef.current) return
+      purgePendingRef.current = true
       setPurgePending(true)
       try {
-        const result = await purgeAgent(keeper.name)
+        const result = await purgeAgent(targetKeeper)
         if (result.target_kind !== 'keeper') {
           throw new Error('Keeper 삭제 요청이 agent 즉시 삭제로 처리되었습니다')
         }
-        closeKeeperDetail()
-        showToast(`${keeper.name} 삭제 작업 접수됨 (${result.operation_id})`, 'success')
+        if (isCurrent()) {
+          closeKeeperDetail()
+        }
+        showToast(`${targetKeeper} 삭제 작업 접수됨 (${result.operation_id})`, 'success')
         await refreshAfterRuntimeAction()
       } catch (err) {
-        showToast(err instanceof Error ? err.message : '키퍼 삭제 실패', 'error')
+        if (isCurrent()) {
+          showToast(err instanceof Error ? err.message : '키퍼 삭제 실패', 'error')
+        }
       } finally {
-        setPurgePending(false)
+        if (isCurrent()) {
+          purgePendingRef.current = false
+          setPurgePending(false)
+        }
       }
     })()
   }

@@ -47,6 +47,12 @@ function isDirectImageSrc(url: string): boolean {
   return url.startsWith('blob:') || url.startsWith('data:')
 }
 
+// Cache only terminal auth/missing statuses so transient 5xx/429/network
+// outages recover on the next render instead of pinning misses for the session.
+function isTerminalPortraitMissStatus(status: number): boolean {
+  return status === 401 || status === 403 || status === 404 || status === 410
+}
+
 function revokeAllPortraits(): void {
   const canRevoke = typeof URL !== 'undefined' && typeof URL.revokeObjectURL === 'function'
   if (canRevoke) {
@@ -130,7 +136,9 @@ export async function loadAuthenticatedPortrait(
       })
       if (!isEpochCurrent(startEpoch)) return null
       if (!response.ok) {
-        portraitEntries.set(key, { kind: 'miss' })
+        if (isTerminalPortraitMissStatus(response.status)) {
+          portraitEntries.set(key, { kind: 'miss' })
+        }
         return null
       }
       const ct = (response.headers.get('content-type') ?? '').toLowerCase()
@@ -148,9 +156,6 @@ export async function loadAuthenticatedPortrait(
       portraitEntries.set(key, { kind: 'ok', blobUrl })
       return blobUrl
     } catch {
-      if (isEpochCurrent(startEpoch)) {
-        portraitEntries.set(key, { kind: 'miss' })
-      }
       return null
     } finally {
       inFlightPortraits.delete(key)

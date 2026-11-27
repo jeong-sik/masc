@@ -806,11 +806,14 @@ export function KeeperToolCallInspector({ keeperName }: { keeperName: string }) 
     fetchKeeperToolCalls(keeperName, 100, { signal }), [keeperName])
 
   useEffect(() => {
+    filterTool.value = ''
+    filterSandbox.value = ''
+    resource.reset()
     void resource.load(loadToolCalls)
     return () => {
       resource.cancel()
     }
-  }, [loadToolCalls, resource])
+  }, [filterSandbox, filterTool, loadToolCalls, resource])
 
   useEffect(() => {
     const unsubscribe = lastEvent.subscribe((event) => {
@@ -835,9 +838,10 @@ export function KeeperToolCallInspector({ keeperName }: { keeperName: string }) 
   const sandboxOptions = [...new Set(
     allEntries.map(entry => entry.sandbox_profile).filter((p): p is string => !!p),
   )].sort()
+  const effectiveSandbox = sandbox && sandboxOptions.includes(sandbox) ? sandbox : ''
   const filtered = allEntries.filter(entry =>
     (!filter || entry.tool.toLowerCase().includes(filter))
-    && (!sandbox || entry.sandbox_profile === sandbox))
+    && (!effectiveSandbox || entry.sandbox_profile === effectiveSandbox))
 
   // Reverse to show newest first
   const sorted = [...filtered].reverse()
@@ -879,6 +883,11 @@ export function KeeperToolCallInspector({ keeperName }: { keeperName: string }) 
 
   return html`
     <div class="space-y-3 v2-monitoring-surface">
+      ${resource.state.value.error ? html`
+        <div class="rounded-[var(--r-1)] border border-[var(--bad-30)] bg-[var(--bad-10)] px-3 py-2 text-xs text-[var(--color-status-err)]" role="alert">
+          ${resource.state.value.error}
+        </div>
+      ` : null}
       <${ToolCallDossier} entries=${entries} response=${response ?? { keeper: keeperName, count: entries.length, source: 'tool_call_io', entries }} />
 
       <div class="flex items-center justify-between gap-3 flex-wrap v2-monitoring-toolbar">
@@ -909,7 +918,7 @@ export function KeeperToolCallInspector({ keeperName }: { keeperName: string }) 
         <select
           aria-label="샌드박스 필터"
           class="bg-[var(--bg-deep)] border border-[var(--color-border-default)] rounded-[var(--r-1)] px-2 py-1 text-xs font-mono"
-          value=${filterSandbox.value}
+          value=${effectiveSandbox}
           onChange=${(e: Event) => { filterSandbox.value = (e.target as HTMLSelectElement).value }}
         >
           <option value="">샌드박스 전체</option>

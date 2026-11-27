@@ -390,6 +390,7 @@ const runtimeSaving = signal(false)
 const runtimeSaveRequest = signal<KeeperConfigSaveRequest | null>(null)
 const promptSaveRequest = signal<KeeperConfigSaveRequest | null>(null)
 const runtimeDirectiveSaving = signal<'pause' | 'resume' | 'wakeup' | null>(null)
+const runtimeDirectiveRequest = signal<KeeperConfigSaveRequest | null>(null)
 function resetKeeperConfigPanelDrafts(): void {
   editMode.value = false
   editDraft.value = null
@@ -402,6 +403,7 @@ function resetKeeperConfigPanelDrafts(): void {
   runtimeSaveRequest.value = null
   promptSaveRequest.value = null
   runtimeDirectiveSaving.value = null
+  runtimeDirectiveRequest.value = null
   hookFilterQuery.value = ''
   globalArchExpanded.value = false
   kcfTab.value = 'identity'
@@ -2082,6 +2084,22 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
   }
 
   async function runRuntimeDirective(action: 'pause' | 'resume' | 'wakeup') {
+    if (runtimeDirectiveSaving.value !== null) return
+    const owner = activeKeeperConfigOwner.value
+    if (!owner || owner.keeperName !== keeperName) return
+    const directiveRequest: KeeperConfigSaveRequest = {
+      owner,
+      request: Symbol('keeper-config-directive'),
+    }
+    const isCurrentOwner = () => {
+      const activeOwner = activeKeeperConfigOwner.value
+      return (
+        activeOwner?.keeperName === directiveRequest.owner.keeperName
+        && activeOwner.epoch === directiveRequest.owner.epoch
+        && configKeeperName.value === keeperName
+      )
+    }
+    runtimeDirectiveRequest.value = directiveRequest
     runtimeDirectiveSaving.value = action
     try {
       const result =
@@ -2090,18 +2108,25 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
           : action === 'resume'
             ? await resumeKeeper(keeperName)
             : await wakeKeeper(keeperName)
+      if (!isCurrentOwner()) return
       if (!result.ok) {
         throw new Error(result.error || `${action} directive failed`)
       }
       runtimeDraft.value = null
       await loadKeeperConfig(keeperName, { force: true })
+      if (!isCurrentOwner()) return
       const label =
         action === 'pause' ? '일시정지' : action === 'resume' ? '재개' : '깨우기'
       showToast(`keeper ${label} 요청 완료`, 'success')
     } catch (err) {
-      showToast(err instanceof Error ? err.message : 'directive 실패', 'error')
+      if (isCurrentOwner()) {
+        showToast(err instanceof Error ? err.message : 'directive 실패', 'error')
+      }
     } finally {
-      runtimeDirectiveSaving.value = null
+      if (runtimeDirectiveRequest.value?.request === directiveRequest.request) {
+        runtimeDirectiveRequest.value = null
+        runtimeDirectiveSaving.value = null
+      }
     }
   }
 

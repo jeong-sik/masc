@@ -175,10 +175,12 @@ export function VerificationRunsPanel() {
       </div>
 
       ${current.error
-        ? html`<${ErrorState}>판정 실행 목록을 불러오지 못했습니다: ${current.error}<//>`
-        : rows.length === 0
-          ? html`<${EmptyState}>기록된 판정 실행이 없습니다.<//>`
-          : html`
+        ? html`<${ErrorState} message=${`판정 실행 목록을 불러오지 못했습니다: ${current.error}`} />`
+        : !current.loading && data !== null && rows.length === 0
+          ? html`<${EmptyState} message="기록된 판정 실행이 없습니다." />`
+          : rows.length === 0
+            ? null
+            : html`
               <div class="overflow-x-auto">
                 <table class="w-full text-xs">
                   <thead class="text-[var(--color-fg-muted)] border-b border-[var(--color-border-default)]">

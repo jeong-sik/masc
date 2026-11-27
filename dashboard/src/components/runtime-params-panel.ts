@@ -12,7 +12,7 @@
 // against the bounds the parameter registered.
 
 import { html } from 'htm/preact'
-import { useEffect } from 'preact/hooks'
+import { useEffect, useRef } from 'preact/hooks'
 import { useSignal } from '@preact/signals'
 import {
   fetchRuntimeParams,
@@ -77,17 +77,16 @@ function boundsText(param: RuntimeParam): string | null {
 
 function ParamRow({
   param,
-  acting,
+  busy,
   onSet,
   onClear,
 }: {
   param: RuntimeParam
-  acting: string | null
-  onSet: (key: string, raw: string) => void
-  onClear: (key: string) => void
+  busy: boolean
+  onSet: (key: string, raw: string) => Promise<boolean>
+  onClear: (key: string) => Promise<void>
 }) {
   const draft = useSignal('')
-  const busy = acting === param.key
   const bounds = boundsText(param)
   const valueType = param.meta?.value_type ?? 'unknown'
   return html`
@@ -121,13 +120,18 @@ function ParamRow({
         />
         <button type="button" class="rounded border border-[var(--color-border-divider)] px-2 py-1 text-xs"
                 disabled=${busy}
-                onClick=${() => { onSet(param.key, draft.value); draft.value = '' }}>
+                onClick=${() => {
+                  const submitted = draft.value
+                  void onSet(param.key, submitted).then(saved => {
+                    if (saved && draft.value === submitted) draft.value = ''
+                  })
+                }}>
           ${busy ? '저장 중' : '저장'}
         </button>
         ${param.has_override
           ? html`<button type="button" class="rounded border border-[var(--color-border-divider)] px-2 py-1 text-xs"
                          disabled=${busy}
-                         onClick=${() => onClear(param.key)}>기본값으로</button>`
+                         onClick=${() => { void onClear(param.key) }}>기본값으로</button>`
           : null}
       </div>
     </li>
@@ -137,56 +141,86 @@ function ParamRow({
 export function RuntimeParamsPanel() {
   const params = useSignal<RuntimeParam[] | null>(null)
   const error = useSignal<string | null>(null)
-  const acting = useSignal<string | null>(null)
+  const actingKeys = useSignal<ReadonlySet<string>>(new Set())
+  const mountedRef = useRef(true)
+  const loadGenRef = useRef(0)
+
+  const setKeyActing = (key: string, active: boolean) => {
+    const next = new Set(actingKeys.peek())
+    if (active) next.add(key)
+    else next.delete(key)
+    actingKeys.value = next
+  }
 
   const load = async () => {
+    const gen = ++loadGenRef.current
     try {
-      params.value = await fetchRuntimeParams()
+      const next = await fetchRuntimeParams()
+      if (!mountedRef.current || loadGenRef.current !== gen) return
+      params.value = next
       error.value = null
     } catch (err) {
+      if (!mountedRef.current || loadGenRef.current !== gen) return
       error.value = err instanceof Error ? err.message : '런타임 설정을 읽지 못했습니다'
     }
   }
 
-  useEffect(() => { void load() }, [])
+  useEffect(() => {
+    mountedRef.current = true
+    void load()
+    return () => {
+      mountedRef.current = false
+      loadGenRef.current += 1
+    }
+  }, [])
 
-  const onSet = async (key: string, raw: string) => {
+  const onSet = async (key: string, raw: string): Promise<boolean> => {
+    if (actingKeys.peek().has(key)) return false
     const param = params.value?.find(p => p.key === key)
     const parsed = parseValue(raw, param?.meta?.value_type ?? 'unknown')
     if (!parsed.ok) {
       showToast(`${key}: ${parsed.detail}`, 'error')
-      return
+      return false
     }
-    acting.value = key
+    setKeyActing(key, true)
     try {
       await setRuntimeParam(key, parsed.value)
+      if (!mountedRef.current) return true
       // Re-read rather than patching the row: the server is what decides what
       // the value became, and a screen that assumes otherwise shows a number
       // nobody is running on.
       await load()
       showToast(`${key} 저장됨`, 'success')
+      return true
     } catch (err) {
-      showToast(err instanceof Error ? err.message : `${key} 저장 실패`, 'error')
+      if (mountedRef.current) {
+        showToast(err instanceof Error ? err.message : `${key} 저장 실패`, 'error')
+      }
+      return false
     } finally {
-      acting.value = null
+      if (mountedRef.current) setKeyActing(key, false)
     }
   }
 
-  const onClear = async (key: string) => {
-    acting.value = key
+  const onClear = async (key: string): Promise<void> => {
+    if (actingKeys.peek().has(key)) return
+    setKeyActing(key, true)
     try {
       await clearRuntimeParam(key)
+      if (!mountedRef.current) return
       await load()
       showToast(`${key} 기본값으로`, 'success')
     } catch (err) {
-      showToast(err instanceof Error ? err.message : `${key} 해제 실패`, 'error')
+      if (mountedRef.current) {
+        showToast(err instanceof Error ? err.message : `${key} 해제 실패`, 'error')
+      }
     } finally {
-      acting.value = null
+      if (mountedRef.current) setKeyActing(key, false)
     }
   }
 
   return html`
-    <${SectionCard} title="런타임 설정" data-testid="runtime-params-panel">
+    <${SectionCard} label="런타임 설정" data-testid="runtime-params-panel">
       <div class="mb-2 text-2xs text-[var(--color-fg-muted)]">
         재시작 없이 적용됩니다. 기본값은 환경변수에서 오고, 바꾼 값만
         <span class="font-mono">.masc/runtime_params.json</span> 에 남습니다.
@@ -203,7 +237,7 @@ export function RuntimeParamsPanel() {
                 <${ParamRow}
                   key=${param.key}
                   param=${param}
-                  acting=${acting.value}
+                  busy=${actingKeys.value.has(param.key)}
                   onSet=${onSet}
                   onClear=${onClear}
                 />

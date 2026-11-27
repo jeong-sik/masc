@@ -295,6 +295,7 @@ let panel_failure ~runtime_id = function
        | Runtime_acp_client.Spawn_refused _
        | Runtime_acp_client.Protocol_error _
        | Runtime_acp_client.Rpc_error _
+       | Runtime_acp_client.Host_turn_failed _
        | Runtime_acp_client.Process_exited _
        | Runtime_acp_client.Client_closed ) as error) ->
     provider_error ~runtime_id (Runtime_acp_client.error_to_string error)
@@ -536,7 +537,8 @@ let antigravity_standing_of_error ~now :
 let acp_standing_of_error ~now :
   Runtime_acp_client.error -> Runtime_candidate_standing.observation option
   = function
-  | Runtime_acp_client.Rpc_error { refusal; _ } -> standing_of_signal_refusal ~now refusal
+  | Runtime_acp_client.Rpc_error { refusal; _ }
+  | Runtime_acp_client.Host_turn_failed { refusal; _ } -> standing_of_signal_refusal ~now refusal
   | Runtime_acp_client.Invalid_config _
   | Runtime_acp_client.Spawn_refused _
   | Runtime_acp_client.Protocol_error _

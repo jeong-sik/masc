@@ -696,6 +696,7 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ?fs ~cwd ~cwd_path ~timeout_s ~ac
                | Runtime_acp_client.Timeout _ -> Error Timed_out
                | ( Runtime_acp_client.Protocol_error _
                  | Runtime_acp_client.Rpc_error _
+                 | Runtime_acp_client.Host_turn_failed _
                  | Runtime_acp_client.Process_exited _
                  | Runtime_acp_client.Client_closed ) as err ->
                  Error (Provider_rejected (Runtime_acp_client.error_to_string err))

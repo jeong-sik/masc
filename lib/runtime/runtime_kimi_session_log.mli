@@ -1,4 +1,5 @@
-(** Compactions of one [kimi acp] prompt, read from the host's session record.
+(** Compactions and the ending of one [kimi acp] prompt, read from the host's
+    session record.
 
     [kimi acp] (Kimi Code 2.7.3) compacts a session on its own when the
     context reaches the share of the window set in its settings. Over ACP it
@@ -86,10 +87,38 @@ type mark
     [session/prompt] is sent. *)
 val mark : root -> session_id:string -> (mark, error) result
 
-(** [compactions mark] counts the [context.apply_compaction] records written
-    after [mark], and returns the mark the next count starts from: the end of
-    the last whole record read. Only records ending in a newline count: a
-    record the host is still writing is left out and counted from the next
-    mark. A record that was half written at [mark] belongs to earlier activity
-    and is skipped. *)
-val compactions : mark -> (int * mark, error) result
+(** How the host ended a prompt, from its [turn.ended] record.
+
+    Over ACP a prompt the host could not run still answers
+    [{"stopReason":"end_turn"}], with no error and no message. On 2026-11-27
+    the account's weekly usage limit was reached and every [kimi acp] prompt
+    came back that way; the host wrote the cause only here, as
+    [{"reason":"failed","error":{"code":"provider.api_error","message":
+    "You've reached your weekly (7-day) usage limit. ..."}}]. *)
+type turn_end =
+  | Turn_completed
+  | Turn_cancelled
+  | Turn_failed of
+      { code : string  (** The host's own code, such as [provider.api_error]. *)
+      ; message : string
+      ; status : int option
+          (** [error.details.statusCode]: the provider's HTTP status, when the
+              host recorded one. *)
+      }
+
+type prompt_record =
+  { compactions : int  (** [context.apply_compaction] records. *)
+  ; turn_end : turn_end option
+      (** The [turn.ended] record of the last prompt that started after the
+          mark ([turn.prompt]); [None] when the host wrote none for it. *)
+  }
+
+(** [read_prompt mark] reads the records written after [mark] and returns
+    what they say about the prompt, with the mark the next read starts from:
+    the end of the last whole record read. Only records ending in a newline
+    count: a record the host is still writing is left out and read from the
+    next mark. A record that was half written at [mark] belongs to earlier
+    activity and is skipped. A [turn.ended] record with a reason other than
+    [completed], [cancelled] or [failed], or a [failed] one without
+    [error.code] and [error.message], is a {!Malformed_record}. *)
+val read_prompt : mark -> (prompt_record * mark, error) result

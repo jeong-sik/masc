@@ -135,7 +135,9 @@ let antigravity_error_is_binding_rest : Runtime_antigravity.error -> bool = func
 ;;
 
 let acp_error_is_binding_rest : Runtime_acp_client.error -> bool = function
-  | Runtime_acp_client.Rpc_error { refusal; _ } -> signal_refusal_is_binding_rest refusal
+  | Runtime_acp_client.Rpc_error { refusal; _ }
+  | Runtime_acp_client.Host_turn_failed { refusal; _ } ->
+    signal_refusal_is_binding_rest refusal
   | Runtime_acp_client.Invalid_config _
   | Runtime_acp_client.Spawn_refused _
   | Runtime_acp_client.Protocol_error _
@@ -232,7 +234,10 @@ let refused_for_input_size = function
   | Execution_failed
       { cause =
           Fusion_official_client.Acp_failure
-            (Runtime_acp_client.Rpc_error { refusal = Some (Llm_provider.Retry.Signal_context_overflow _); _ })
+            ( Runtime_acp_client.Rpc_error
+                { refusal = Some (Llm_provider.Retry.Signal_context_overflow _); _ }
+            | Runtime_acp_client.Host_turn_failed
+                { refusal = Some (Llm_provider.Retry.Signal_context_overflow _); _ } )
       ; runtime_id = _
       } -> true
   | Execution_failed
@@ -242,6 +247,18 @@ let refused_for_input_size = function
             | Runtime_acp_client.Spawn_refused _
             | Runtime_acp_client.Protocol_error _
             | Runtime_acp_client.Rpc_error
+                { refusal =
+                    ( None
+                    | Some
+                        ( Llm_provider.Retry.Signal_request_body_too_large _
+                        | Llm_provider.Retry.Signal_hard_quota _
+                        | Llm_provider.Retry.Signal_rate_limited _
+                        | Llm_provider.Retry.Signal_auth_error _
+                        | Llm_provider.Retry.Signal_authorization_error _
+                        | Llm_provider.Retry.Signal_provider_unavailable _ ) )
+                ; _
+                }
+            | Runtime_acp_client.Host_turn_failed
                 { refusal =
                     ( None
                     | Some

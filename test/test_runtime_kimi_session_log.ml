@@ -26,6 +26,16 @@ let compaction_records =
   ]
 ;;
 
+(* The [turn.ended] record of a prompt the weekly usage limit refused, with the
+   fields Kimi Code 2.7.3 wrote on 2026-11-27 (trace id and time replaced). *)
+let weekly_limit_record =
+  {|{"type":"turn.ended","agentId":"main","turnId":0,"reason":"failed","durationMs":1194,"modelSteps":1,"error":{"code":"provider.api_error","message":"You've reached your weekly (7-day) usage limit.","name":"APIProviderQuotaExhaustedError","details":{"requestId":null,"statusCode":429,"traceId":"t"},"retryable":false},"time":1795768797761}|}
+;;
+
+let completed_record =
+  {|{"type":"turn.ended","agentId":"main","turnId":1,"reason":"completed","durationMs":900,"modelSteps":2,"time":1795768800000}|}
+;;
+
 let text_of records = String.concat "" (List.map (fun record -> record ^ "\n") records)
 
 (* ── A sessions directory in a temporary home ────────────────────────────── *)
@@ -87,11 +97,15 @@ let mark_of home =
 ;;
 
 let check_compactions name expected mark =
-  check (result int error_t) name (Ok expected) (Result.map fst (Log.compactions mark))
+  check
+    (result int error_t)
+    name
+    (Ok expected)
+    (Result.map (fun (record, _) -> record.Log.compactions) (Log.read_prompt mark))
 ;;
 
 let next_of mark =
-  match Log.compactions mark with
+  match Log.read_prompt mark with
   | Ok (_, next) -> next
   | Error err -> failf "count failed: %s" (Log.error_to_string err)
 ;;
@@ -241,24 +255,93 @@ let test_unreadable_slices () =
     write_file path start;
     let mark = mark_of home in
     append_file path "not json\n";
-    (match Log.compactions mark with
+    (match Log.read_prompt mark with
      | Error (Log.Malformed_record { byte_offset; _ }) ->
        check int "the bad record's offset" (String.length start) byte_offset
-     | Ok (n, _) -> failf "a record that is not JSON was read, count %d" n
+     | Ok (record, _) -> failf "a record that is not JSON was read, count %d" record.Log.compactions
      | Error err -> failf "expected a malformed record, got %s" (Log.error_to_string err));
     write_file path start;
     append_file path {|{"agentId":"main"}|};
     append_file path "\n";
-    (match Log.compactions mark with
+    (match Log.read_prompt mark with
      | Error (Log.Malformed_record _) -> ()
-     | Ok (n, _) -> failf "a record without a type was read, count %d" n
+     | Ok (record, _) -> failf "a record without a type was read, count %d" record.Log.compactions
      | Error err -> failf "expected a malformed record, got %s" (Log.error_to_string err));
     write_file path (text_of [ metadata_record ~version:"1.5" ]);
-    match Log.compactions mark with
+    match Log.read_prompt mark with
     | Error (Log.Record_shrank { marked_at; _ }) ->
       check int "the length at the mark" (String.length start) marked_at
-    | Ok (n, _) -> failf "a shrunk record was read, count %d" n
+    | Ok (record, _) -> failf "a shrunk record was read, count %d" record.Log.compactions
     | Error err -> failf "expected a shrunk record, got %s" (Log.error_to_string err))
+;;
+
+let turn_end_name = function
+  | None -> "none"
+  | Some Log.Turn_completed -> "completed"
+  | Some Log.Turn_cancelled -> "cancelled"
+  | Some (Log.Turn_failed { code; message; status }) ->
+    Printf.sprintf
+      "failed %s %s %s"
+      code
+      (match status with
+       | Some n -> string_of_int n
+       | None -> "-")
+      message
+;;
+
+let read_turn_end mark =
+  match Log.read_prompt mark with
+  | Ok (record, _) -> turn_end_name record.Log.turn_end
+  | Error err -> failf "read failed: %s" (Log.error_to_string err)
+;;
+
+let test_reads_how_the_prompt_ended () =
+  with_home (fun home ->
+    let path = record_path home ~workspace ~id:session_id in
+    write_file path (text_of [ metadata_record ~version:"1.5"; binding_record ]);
+    let first = mark_of home in
+    append_file path (text_of [ prompt_record ]);
+    check string "a prompt the host has not ended" "none" (read_turn_end first);
+    append_file path (text_of [ weekly_limit_record ]);
+    check
+      string
+      "a prompt the weekly limit refused"
+      "failed provider.api_error 429 You've reached your weekly (7-day) usage limit."
+      (read_turn_end first);
+    (* A failed prompt keeps its mark, so the next prompt is read from it. *)
+    append_file path (text_of [ prompt_record ]);
+    check
+      string
+      "the prompt after a failure starts with no ending"
+      "none"
+      (read_turn_end first);
+    append_file path {|{"type":"turn.ended","agentId":"main","turnId":1,"reason":"cancel|};
+    check string "an ending still being written is no ending" "none" (read_turn_end first);
+    append_file path "led\",\"time\":1}\n";
+    check string "a cancelled prompt" "cancelled" (read_turn_end first);
+    let second = next_of first in
+    append_file path (text_of [ prompt_record; completed_record ]);
+    check string "the next prompt reads only its own ending" "completed" (read_turn_end second);
+    let third = next_of second in
+    append_file
+      path
+      (text_of
+         [ {|{"type":"turn.ended","agentId":"main","turnId":2,"reason":"paused","time":1}|} ]);
+    (match Log.read_prompt third with
+     | Error (Log.Malformed_record _) -> ()
+     | Ok (record, _) ->
+       failf "an unknown reason was read as %s" (turn_end_name record.Log.turn_end)
+     | Error err -> failf "expected a malformed record, got %s" (Log.error_to_string err));
+    write_file path (text_of [ metadata_record ~version:"1.5"; binding_record ]);
+    let fresh = mark_of home in
+    append_file
+      path
+      (text_of [ {|{"type":"turn.ended","agentId":"main","turnId":0,"reason":"failed","time":1}|} ]);
+    match Log.read_prompt fresh with
+    | Error (Log.Malformed_record _) -> ()
+    | Ok (record, _) ->
+      failf "a failure without its error was read as %s" (turn_end_name record.Log.turn_end)
+    | Error err -> failf "expected a malformed record, got %s" (Log.error_to_string err))
 ;;
 
 (* ── Through the ACP client ───────────────────────────────────────────────── *)
@@ -266,8 +349,8 @@ let test_unreadable_slices () =
 (* A stand-in for [kimi acp]: it creates the session record when the session is
    made, appends to it while a prompt runs, and like Kimi Code 2.7.3 sends one
    [usage_update] per prompt, just before the response. The prompt text says
-   whether the prompt compacts, whether it fails, and what [used] the update
-   carries. *)
+   whether the prompt compacts, whether it fails or the weekly limit refuses it,
+   and what [used] the update carries. *)
 let kimi_mock_host_script =
   Printf.sprintf
     {|#!/usr/bin/env python3
@@ -278,6 +361,8 @@ WORKSPACE = %S
 METADATA = %S
 PROMPT_RECORD = %S
 COMPACTION = %S
+WEEKLY_LIMIT = %S
+COMPLETED = %S
 
 def send(obj):
     sys.stdout.write(json.dumps(obj) + "\n")
@@ -322,6 +407,12 @@ for line in sys.stdin:
         if "fail" in text:
             send({"jsonrpc": "2.0", "id": mid, "error": {"code": -32603, "message": "mock failure"}})
             continue
+        # Like Kimi Code 2.7.3 past the weekly limit: no message, end_turn, and
+        # the cause only in the record.
+        if "weekly" in text:
+            append(WEEKLY_LIMIT)
+            send({"jsonrpc": "2.0", "id": mid, "result": {"stopReason": "end_turn"}})
+            continue
         send({"jsonrpc": "2.0", "method": "session/update", "params": {
             "sessionId": SESSION,
             "update": {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "pong"}}
@@ -331,6 +422,7 @@ for line in sys.stdin:
             "sessionId": SESSION,
             "update": {"sessionUpdate": "usage_update", "used": used, "size": 1048576}
         }})
+        append(COMPLETED)
         send({"jsonrpc": "2.0", "id": mid, "result": {"stopReason": "end_turn"}})
     else:
         send({"jsonrpc": "2.0", "id": mid, "result": {}})
@@ -340,6 +432,8 @@ for line in sys.stdin:
     (text_of [ metadata_record ~version:"1.5"; binding_record ])
     (text_of [ prompt_record ])
     (text_of compaction_records)
+    (text_of [ weekly_limit_record ])
+    (text_of [ completed_record ])
 ;;
 
 let with_kimi_code_home dir f =
@@ -431,8 +525,44 @@ let test_a_kimi_prompt_reads_its_compactions_from_the_session_record () =
               "a drop in the count still counts"
               "compacted"
               (compaction_name (prompt ~prior:80000 "carry on used=30000"));
+            (match
+               Runtime_acp_client.prompt
+                 client
+                 ~session_id:session.session_id
+                 ~blocks:[ Runtime_acp_client.Text_block "weekly after a compact" ]
+                 ~prior_context_used:30000
+                 ()
+             with
+             | Error
+                 (Runtime_acp_client.Host_turn_failed
+                    { code
+                    ; message
+                    ; refusal = Some (Llm_provider.Retry.Signal_rate_limited _)
+                    }) ->
+               check string "the host's code" "provider.api_error" code;
+               check
+                 string
+                 "the host's message"
+                 "You've reached your weekly (7-day) usage limit."
+                 message
+             | Error err ->
+               failf
+                 "a prompt the host recorded as failed with status 429 must be a rate-limited \
+                  Host_turn_failed, got %s"
+                 (Runtime_acp_client.error_to_string err)
+             | Ok _ -> fail "a prompt the host recorded as failed was read as an answer");
+            check
+              string
+              "a compaction during a recorded failure counts at the next prompt"
+              "compacted"
+              (compaction_name (prompt ~prior:30000 "carry on used=31000"));
+            check
+              string
+              "the prompt after that counts only its own records"
+              "not compacted"
+              (compaction_name (prompt ~prior:31000 "carry on used=32000"));
             remove_tree (Filename.concat home "sessions");
-            (match prompt ~prior:30000 "carry on used=40000" with
+            (match prompt ~prior:32000 "carry on used=40000" with
              | Runtime_acp_client.Compaction_unknown
                  (Runtime_acp_client.Kimi_session_record_unreadable (Log.Read_failed _)) -> ()
              | other ->
@@ -473,6 +603,7 @@ let () =
             `Quick
             test_the_next_count_starts_where_this_one_stopped
         ; test_case "slices that cannot be read" `Quick test_unreadable_slices
+        ; test_case "how the prompt ended" `Quick test_reads_how_the_prompt_ended
         ] )
     ; ( "acp client"
       , [ test_case

@@ -3641,6 +3641,61 @@ let test_keeper_typed_tool_call_effect_fencing () =
     (fence ~native_posture:Runtime_native_tools.Native_full native_read)
 ;;
 
+(* [kimi acp] answers a prompt it could not run with [end_turn]; the client
+   reads the failure from the host's record as [Host_turn_failed]. The Keeper
+   treats it as it treats a provider-reported RPC error with the same refusal. *)
+let test_host_recorded_failure_is_a_provider_error () =
+  let module Rt = Keeper_acp_runtime.For_testing in
+  let module Store = Keeper_official_client_session_store in
+  let failed refusal =
+    Runtime_acp_client.Host_turn_failed
+      { code = "provider.api_error"
+      ; message = "You've reached your weekly (7-day) usage limit."
+      ; refusal
+      }
+  in
+  let rate_limited =
+    failed
+      (Some
+         (Llm_provider.Retry.Signal_rate_limited
+            { message = "You've reached your weekly (7-day) usage limit."; retry_after = None }))
+  in
+  let unclassified = failed None in
+  (match Rt.acp_error_to_core_error rate_limited with
+   | Agent_core.Error.Provider (Llm_provider.Error.RateLimit _) -> ()
+   | other ->
+     failf "a rate-limited host failure must be a rate limit, got %s"
+       (Agent_core.Error.to_string other));
+  (match Rt.acp_error_to_core_error unclassified with
+   | Agent_core.Error.Provider
+       (Llm_provider.Error.ProviderReportedError { error_type = Some "provider.api_error"; _ }) -> ()
+   | other ->
+     failf "an unclassified host failure must carry the host's code, got %s"
+       (Agent_core.Error.to_string other));
+  check bool "a rate-limited host failure keeps the persistent child" false
+    (Rt.should_evict_persistent_child_on_error rate_limited);
+  check bool "an unclassified host failure evicts the persistent child" true
+    (Rt.should_evict_persistent_child_on_error unclassified);
+  check bool "a host failure is a provider rejection" true
+    (Rt.recovery_failure_of_acp_error rate_limited = Store.Provider_rejected);
+  let overflow =
+    failed
+      (Some
+         (Llm_provider.Retry.Signal_context_overflow { message = "too long"; limit = None }))
+  in
+  (match Rt.classify_prompt_error ~is_gate_continuation:false ~activity_observed:true overflow with
+   | Store.Input_rejected Store.Effect_fenced, _ -> ()
+   | failure, _ ->
+     failf "an overflow after activity must fence effects, got %s"
+       (Store.recovery_failure_to_string failure));
+  match Rt.classify_prompt_error ~is_gate_continuation:false ~activity_observed:false overflow with
+  | Store.Input_rejected Store.Bootstrap_floor_exceeded, Agent_core.Error.Api _ -> ()
+  | failure, err ->
+    failf "an overflow before activity must reject the bootstrap floor, got %s / %s"
+      (Store.recovery_failure_to_string failure)
+      (Agent_core.Error.to_string err)
+;;
+
 let test_acp_rpc_error_classification_pool_preservation_and_scopes () =
   let module Retry = Llm_provider.Retry in
   let rpc ?(code = -32000) ?data message =
@@ -6533,6 +6588,8 @@ let () =
     ; ( "quota_and_vision"
       , [ test_case "ACP RPC quota/429/401/403/5xx classification, pool preservation & scopes" `Quick
             test_acp_rpc_error_classification_pool_preservation_and_scopes
+        ; test_case "a host-recorded prompt failure is a provider error" `Quick
+            test_host_recorded_failure_is_a_provider_error
         ; test_case "ACP v1 image negotiation & pre-RPC validation" `Quick
             test_acp_v1_image_negotiation_and_validation
         ] )

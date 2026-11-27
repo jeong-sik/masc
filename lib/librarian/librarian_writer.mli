@@ -93,6 +93,11 @@ val create
     until [run] returns. *)
 val run : t -> unit
 
+(** Marks a writer whose {!run} fiber was never started (e.g., owner switch
+    shutting down) as retired and resolves its completion promise so callers
+    blocked in {!write} / {!resume} / {!adopt} cannot hang. *)
+val abort_unstarted : t -> unit
+
 val status : t -> status
 
 (** What the writer holds, for the operator's row (§12): the value of its

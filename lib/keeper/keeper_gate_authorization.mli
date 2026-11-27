@@ -37,10 +37,12 @@ type cycle_grant_entry =
 
 type cycle_grant_state =
   | Cycle_grant_available of cycle_grant_entry
-  | Cycle_grant_consuming of cycle_grant_entry
   | Cycle_grant_consumed
 
-type cycle_grant = cycle_grant_state Atomic.t
+type cycle_grant =
+  { mutex : Cross_context_mutex.t
+  ; state : cycle_grant_state Atomic.t
+  }
 
 type cycle_grant_take_result =
   | Cycle_grant_authorized of string * Keeper_approval.Audit.receipt

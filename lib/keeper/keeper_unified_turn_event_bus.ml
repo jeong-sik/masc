@@ -247,17 +247,19 @@ let pending_tool_count t = (Atomic.get t.state).pending_tool_count
 
 let start_background_drain ~clock t =
   match Atomic.get t.event_bus_subscription, Eio_context.get_switch_opt () with
-  | Subscribed _, Some sw ->
+  | Subscribed _, Some sw when Option.is_none (Eio.Switch.get_error sw) ->
     (match Atomic.get t.drain_cancel with
      | Closed | Active _ -> ()
      | Inactive ->
        let done_p, done_r = Eio.Promise.create () in
        if Atomic.compare_and_set t.background_done None (Some done_p)
        then (
+         let started = Atomic.make false in
          try
            Eio.Fiber.fork ~sw (fun () ->
+             Atomic.set started true;
              Fun.protect
-               ~finally:(fun () -> Eio.Promise.resolve done_r ())
+               ~finally:(fun () -> ignore (Eio.Promise.try_resolve done_r ()))
                (fun () ->
                  Eio.Cancel.sub (fun cc ->
                    match Atomic.compare_and_set t.drain_cancel Inactive (Active cc) with
@@ -299,13 +301,20 @@ let start_background_drain ~clock t =
                      (* [unsubscribe] has already closed the bus, or another fiber has
                         already claimed the active drainer role. Either way this fiber
                         must not install [cc] or start polling. *)
-                     ())))
+                     ())));
+           (* In Eio, [Fiber.fork ~sw] silently drops the closure when [sw]
+              turned off concurrently. Resolve [done_r] so [unsubscribe]'s
+              [Cancel.protect (Promise.await done_p)] never deadlocks. *)
+           if (not (Atomic.get started)) && Option.is_some (Eio.Switch.get_error sw)
+           then (
+             ignore (Atomic.compare_and_set t.background_done (Some done_p) None);
+             ignore (Eio.Promise.try_resolve done_r ()))
          with
          | exn ->
-           Atomic.set t.background_done None;
-           Eio.Promise.resolve done_r ();
+           ignore (Atomic.compare_and_set t.background_done (Some done_p) None);
+           ignore (Eio.Promise.try_resolve done_r ());
            raise exn))
-  | (Subscribed _, None) | (No_event_bus, _) -> ()
+  | (Subscribed _, (Some _ | None)) | (No_event_bus, _) -> ()
 ;;
 
 (* Atomically claim the [Closed] state and hand back any background drain

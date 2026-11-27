@@ -19,7 +19,23 @@ type t =
   ; writers : Writer.t By_keeper.t Atomic.t
   ; retiring : StringSet.t Atomic.t
   ; to_run : Writer.t Eio.Stream.t
+  ; closed : bool Atomic.t
   }
+
+let is_closed t =
+  Atomic.get t.closed || Option.is_some (Eio.Switch.get_error t.sw)
+;;
+
+let drain_unstarted t =
+  let rec loop () =
+    match Eio.Stream.take_nonblocking t.to_run with
+    | None -> ()
+    | Some writer ->
+      Writer.abort_unstarted writer;
+      loop ()
+  in
+  loop ()
+;;
 
 let create ~sw ~now ~registered ~place ~stores ~ask ~ask_room ~start_turn_log =
   let t =
@@ -36,19 +52,38 @@ let create ~sw ~now ~registered ~place ~stores ~ask ~ask_room ~start_turn_log =
     ; writers = Atomic.make By_keeper.empty
     ; retiring = Atomic.make StringSet.empty
     ; to_run = Eio.Stream.create max_int
+    ; closed = Atomic.make (Option.is_some (Eio.Switch.get_error sw))
     }
   in
-  (* A writer is made wherever it is first asked for, in any domain. Its
-     fiber is forked here, where [sw] lives. *)
-  Eio.Fiber.fork_daemon ~sw (fun () ->
-    let rec run_next () =
-      let writer = Eio.Stream.take t.to_run in
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-        Writer.run writer;
-        `Stop_daemon);
-      run_next ()
-    in
-    run_next ());
+  if not (Atomic.get t.closed)
+  then (
+    Eio.Switch.on_release sw (fun () ->
+      Atomic.set t.closed true;
+      drain_unstarted t);
+    (* A writer is made wherever it is first asked for, in any domain. Its
+       fiber is forked here, where [sw] lives. *)
+    let spawner_started = Atomic.make false in
+    Eio.Fiber.fork_daemon ~sw (fun () ->
+      Atomic.set spawner_started true;
+      Fun.protect
+        ~finally:(fun () ->
+          Atomic.set t.closed true;
+          drain_unstarted t)
+        (fun () ->
+          let rec run_next () =
+            let writer = Eio.Stream.take t.to_run in
+            let writer_started = Atomic.make false in
+            Eio.Fiber.fork_daemon ~sw (fun () ->
+              Atomic.set writer_started true;
+              Writer.run writer;
+              `Stop_daemon);
+            if (not (Atomic.get writer_started)) && Option.is_some (Eio.Switch.get_error sw)
+            then Writer.abort_unstarted writer;
+            run_next ()
+          in
+          run_next ()));
+    if (not (Atomic.get spawner_started)) && Option.is_some (Eio.Switch.get_error sw)
+    then Atomic.set t.closed true);
   t
 ;;
 
@@ -67,31 +102,43 @@ let live_writer writers keeper =
    finding no live writer and registering a new one are one step. A writer
    that loses the race was never run and is dropped. *)
 let rec ensure t keeper =
-  let writers = Atomic.get t.writers in
-  match live_writer writers keeper with
-  | Some _ as found -> found
-  | None ->
-    if not (t.registered keeper)
-    then None
-    else (
-      let writer =
-        Writer.create
-          ~on_world_promotions:(fun ~keeper_id promos ->
-            Option.iter (fun cb -> cb ~keeper_id promos) (Atomic.get t.on_world_promotions))
-          ~now:t.now
-          ~registered:(fun () -> t.registered keeper)
-          ~declared:(fun () -> Atomic.get t.declared)
-          ~stores:(t.stores keeper)
-          ~ask:t.ask
-          ~ask_room:t.ask_room
-          ~start_turn_log:(fun () -> t.start_turn_log keeper)
-          (t.place keeper)
-      in
-      if Atomic.compare_and_set t.writers writers (By_keeper.add keeper writer writers)
-      then (
-        Eio.Stream.add t.to_run writer;
-        Some writer)
-      else ensure t keeper)
+  if is_closed t
+  then None
+  else (
+    let writers = Atomic.get t.writers in
+    match live_writer writers keeper with
+    | Some _ as found -> found
+    | None ->
+      if not (t.registered keeper)
+      then None
+      else (
+        let writer =
+          Writer.create
+            ~on_world_promotions:(fun ~keeper_id promos ->
+              Option.iter (fun cb -> cb ~keeper_id promos) (Atomic.get t.on_world_promotions))
+            ~now:t.now
+            ~registered:(fun () -> t.registered keeper)
+            ~declared:(fun () -> Atomic.get t.declared)
+            ~stores:(t.stores keeper)
+            ~ask:t.ask
+            ~ask_room:t.ask_room
+            ~start_turn_log:(fun () -> t.start_turn_log keeper)
+            (t.place keeper)
+        in
+        if Atomic.compare_and_set t.writers writers (By_keeper.add keeper writer writers)
+        then
+          if is_closed t
+          then (
+            Writer.abort_unstarted writer;
+            None)
+          else (
+            Eio.Stream.add t.to_run writer;
+            if is_closed t
+            then (
+              drain_unstarted t;
+              None)
+            else Some writer)
+        else ensure t keeper))
 ;;
 
 let rec view t keeper =
@@ -203,13 +250,22 @@ let pulse t keepers =
      fork each unregistered writer's retirement asynchronously on [t.sw]. *)
   By_keeper.iter
     (fun keeper writer ->
-       if (not (t.registered keeper)) && claim_retiring t keeper
-       then
-         Eio.Fiber.fork_daemon ~sw:t.sw (fun () ->
-           Fun.protect
-             ~finally:(fun () -> release_retiring t keeper)
-             (fun () -> ignore (retire_writer t keeper writer : Writer.retirement));
-           `Stop_daemon))
+       if (not (is_closed t)) && (not (t.registered keeper)) && claim_retiring t keeper
+       then (
+         let started = Atomic.make false in
+         try
+           Eio.Fiber.fork_daemon ~sw:t.sw (fun () ->
+             Atomic.set started true;
+             Fun.protect
+               ~finally:(fun () -> release_retiring t keeper)
+               (fun () -> ignore (retire_writer t keeper writer : Writer.retirement));
+             `Stop_daemon);
+           if (not (Atomic.get started)) && Option.is_some (Eio.Switch.get_error t.sw)
+           then release_retiring t keeper
+         with
+         | exn ->
+           if not (Atomic.get started) then release_retiring t keeper;
+           raise exn))
     (Atomic.get t.writers)
 ;;
 

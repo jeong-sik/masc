@@ -529,12 +529,17 @@ let create ?on_world_promotions ~now ~registered ~declared ~stores ~ask ~ask_roo
   }
 ;;
 
+let abort_unstarted t =
+  Atomic.set t.held Held_retired;
+  ignore (Eio.Promise.try_resolve t.ended ())
+;;
+
 let run t =
   let retiring =
     Fun.protect
       ~finally:(fun () ->
         Atomic.set t.held Held_retired;
-        Eio.Promise.resolve t.ended ())
+        ignore (Eio.Promise.try_resolve t.ended ()))
       (fun () -> Eio.Switch.run (fun sw -> live t ~sw))
   in
   Eio.Promise.resolve retiring Retired_now

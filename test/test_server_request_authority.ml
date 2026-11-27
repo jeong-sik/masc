@@ -931,6 +931,65 @@ let test_fiber_binding_has_no_fallback () =
     check bool "unbound after request" true (Option.is_none (Authority.current ())))
 ;;
 
+let bigstring_of_string s =
+  let len = String.length s in
+  let buf = Bigarray.Array1.create Bigarray.char Bigarray.c_layout len in
+  for i = 0 to len - 1 do
+    Bigarray.Array1.unsafe_set buf i s.[i]
+  done;
+  buf
+;;
+
+let test_async_body_callback_preserves_admitted_authority () =
+  Eio_main.run (fun _env ->
+    let authority = admitted_http1 [ "host", "localhost:8935" ] in
+    let observed_body = ref None in
+    let observed_authority = ref None in
+    let observed_cors = ref None in
+    let connection =
+      Httpun.Server_connection.create (fun raw_reqd ->
+        let reqd = Http_reqd.of_httpun raw_reqd in
+        let request = Http_reqd.request reqd in
+        Authority.with_current authority (fun () ->
+          Http_reqd.read_body
+            reqd
+            ~max_bytes:1024
+            ~on_body:(fun body ->
+              observed_body := Some body;
+              observed_authority := Option.map Authority.rendered (Authority.current ());
+              observed_cors :=
+                List.assoc_opt
+                  "access-control-allow-origin"
+                  (Server_auth.admitted_cors_headers request))
+            ~on_error:(fun _ -> fail "unexpected body read error")))
+    in
+    let body = "{\"ok\":true}" in
+    let head =
+      Printf.sprintf
+        "POST /api/v1/test HTTP/1.1\r\nHost: localhost:8935\r\nOrigin: http://localhost:8935\r\nContent-Length: %d\r\n\r\n"
+        (String.length body)
+    in
+    let head_buf = bigstring_of_string head in
+    let (_ : int) =
+      Httpun.Server_connection.read connection head_buf ~off:0 ~len:(String.length head)
+    in
+    check bool "authority unbound once request handler returns" true
+      (Option.is_none (Authority.current ()));
+    check bool "body callback has not fired before body arrives" true
+      (Option.is_none !observed_body);
+    let body_buf = bigstring_of_string body in
+    let (_ : int) =
+      Httpun.Server_connection.read_eof connection body_buf ~off:0 ~len:(String.length body)
+    in
+    check (option string) "body delivered" (Some body) !observed_body;
+    check (option string) "authority restored inside deferred on_body"
+      (Some "localhost:8935") !observed_authority;
+    check (option string) "admitted CORS origin reflected inside deferred on_body"
+      (Some "http://localhost:8935") !observed_cors;
+    check bool "authority unbound again after callback completes" true
+      (Option.is_none (Authority.current ())))
+;;
+
 let with_anonymous_mutation_policy enabled f =
   let config =
     resolve_auth_config
@@ -1156,6 +1215,10 @@ let () =
             `Quick
             test_request_context_preserves_scheme_and_trust
         ; test_case "fiber binding has no fallback" `Quick test_fiber_binding_has_no_fallback
+        ; test_case
+            "deferred read_body callbacks preserve admitted authority"
+            `Quick
+            test_async_body_callback_preserves_admitted_authority
         ; test_case
             "trust policy has no permissive default"
             `Quick

@@ -21,8 +21,6 @@ import {
 import { resourceCache } from '../core/resource-cache'
 import { resetTimeWindowForTests, timeWindow } from '../core/time-window'
 import { apiMutate } from '../core/transport'
-import { acceptedExecutionWorkspace } from '../execution-workspace-authority'
-import { confirmRuntimeTestWorkspace } from '../lib/runtime-workspace.test-fixture'
 import { currentRoute, navigate, resetRouterForTests } from '../routes/router'
 import { App, ShellToastHost } from '../app'
 import { CommandPalette, buildPaletteCommands } from './command-palette'
@@ -101,7 +99,6 @@ describe('Proposal A+ Shell components', () => {
     resetRouterForTests('/pulse')
     resetShellStateForTests()
     resourceCache.clearAll()
-    confirmRuntimeTestWorkspace()
   })
 
   afterEach(() => {
@@ -861,7 +858,6 @@ describe('Proposal A+ Shell components', () => {
     })
 
     it('loads schedules without legacy executionWorkspaceAuthority and retains its last sample through an unavailable response', async () => {
-      acceptedExecutionWorkspace.value = null
       const reads: Array<(response: Response) => void> = []
       const encoder = new TextEncoder()
       let pushObserverFrame: ((topic: string) => void) | null = null
@@ -922,7 +918,6 @@ describe('Proposal A+ Shell components', () => {
     })
 
     it('releases the previous workspace sample and request before reading the selected route', async () => {
-      acceptedExecutionWorkspace.value = null
       const reads: Array<{ url: string; signal: AbortSignal | null; finish: (response: Response) => void }> = []
       const encoder = new TextEncoder()
       let pushObserverFrame: ((topic: string) => void) | null = null

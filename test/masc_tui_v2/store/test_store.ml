@@ -17355,6 +17355,7 @@ let test_active_turn_preview_visibility_and_queued_followup () =
         request_id = "old-req-0";
         operation_id = Some "old-req-0";
         execution_id = None;
+        batch_bindings = [];
         turn_ref = None;
         run_started = true;
         interrupting = false;
@@ -17600,6 +17601,7 @@ let test_active_turn_preview_visibility_and_queued_followup () =
       request_id = "prior-req";
       operation_id = Some "prior-req";
       execution_id = None;
+      batch_bindings = [];
       turn_ref = None;
       run_started = true;
       interrupting = false;
@@ -31519,43 +31521,84 @@ let () =
               Alcotest.(check string)
                 "delayed observer delta after persisted history is ignored"
                 "Hel" buf_eof_hist.text;
-              (* (f) Coalesced batch sibling binds execution_id to primary and retires
+              (* (f) 3-member coalesced batch preserves execution_id across
+                 KEEPER_RUNTIME_ATTEMPT_STARTED for all siblings and retires
                  cleanly against primary's persisted Terminal_result row. *)
               let fleet_batch =
                 Fleet_store.empty
+                (* seq 0: RUN_STARTED for all 3 members *)
                 |> Fleet_store.apply_observer_chat_stream_chunk ~keeper
-                     ~operation_id:"op-batch-primary" ~seq:(Some 0)
+                     ~operation_id:"op-batch-1" ~seq:(Some 0)
                      (Wire_fleet.Chunk_run_started
-                        { operation_id = Some "op-batch-primary" })
+                        { operation_id = Some "op-batch-1" })
                 |> Fleet_store.apply_observer_chat_stream_chunk ~keeper
-                     ~operation_id:"op-batch-sibling" ~seq:(Some 0)
+                     ~operation_id:"op-batch-2" ~seq:(Some 0)
                      (Wire_fleet.Chunk_run_started
-                        { operation_id = Some "op-batch-sibling" })
+                        { operation_id = Some "op-batch-2" })
                 |> Fleet_store.apply_observer_chat_stream_chunk ~keeper
-                     ~operation_id:"op-batch-sibling" ~seq:(Some 1)
+                     ~operation_id:"op-batch-3" ~seq:(Some 0)
+                     (Wire_fleet.Chunk_run_started
+                        { operation_id = Some "op-batch-3" })
+                (* seq 1: KEEPER_CHAT_BATCH_BOUND for all 3 members *)
+                |> Fleet_store.apply_observer_chat_stream_chunk ~keeper
+                     ~operation_id:"op-batch-1" ~seq:(Some 1)
                      (Wire_fleet.Chunk_batch_bound
                         {
-                          operation_id = "op-batch-sibling";
-                          execution_id = "op-batch-primary";
+                          operation_id = "op-batch-1";
+                          execution_id = "op-batch-1";
                         })
                 |> Fleet_store.apply_observer_chat_stream_chunk ~keeper
-                     ~operation_id:"op-batch-sibling" ~seq:(Some 2)
+                     ~operation_id:"op-batch-2" ~seq:(Some 1)
+                     (Wire_fleet.Chunk_batch_bound
+                        {
+                          operation_id = "op-batch-2";
+                          execution_id = "op-batch-1";
+                        })
+                |> Fleet_store.apply_observer_chat_stream_chunk ~keeper
+                     ~operation_id:"op-batch-3" ~seq:(Some 1)
+                     (Wire_fleet.Chunk_batch_bound
+                        {
+                          operation_id = "op-batch-3";
+                          execution_id = "op-batch-1";
+                        })
+                (* seq 2: KEEPER_RUNTIME_ATTEMPT_STARTED for all 3 members *)
+                |> Fleet_store.apply_observer_chat_stream_chunk ~keeper
+                     ~operation_id:"op-batch-1" ~seq:(Some 2)
+                     (Wire_fleet.Chunk_runtime_attempt_started
+                        {
+                          operation_id = Some "op-batch-1";
+                          runtime_id = Some "rt-1";
+                          attempt_index = Some 1;
+                        })
+                |> Fleet_store.apply_observer_chat_stream_chunk ~keeper
+                     ~operation_id:"op-batch-2" ~seq:(Some 2)
+                     (Wire_fleet.Chunk_runtime_attempt_started
+                        {
+                          operation_id = Some "op-batch-2";
+                          runtime_id = Some "rt-1";
+                          attempt_index = Some 1;
+                        })
+                |> Fleet_store.apply_observer_chat_stream_chunk ~keeper
+                     ~operation_id:"op-batch-3" ~seq:(Some 2)
+                     (Wire_fleet.Chunk_runtime_attempt_started
+                        {
+                          operation_id = Some "op-batch-3";
+                          runtime_id = Some "rt-1";
+                          attempt_index = Some 1;
+                        })
+                |> Fleet_store.apply_observer_chat_stream_chunk ~keeper
+                     ~operation_id:"op-batch-3" ~seq:(Some 3)
                      (Wire_fleet.Chunk_text_delta
                         {
-                          operation_id = Some "op-batch-sibling";
+                          operation_id = Some "op-batch-3";
                           delta = "Batch reply";
                           owner = Wire_chat_journal.Unobserved_scope (Some 0);
                         })
-                (* Primary duplicate run_started does not wipe sibling buffer. *)
                 |> Fleet_store.apply_observer_chat_stream_chunk ~keeper
-                     ~operation_id:"op-batch-primary" ~seq:(Some 3)
-                     (Wire_fleet.Chunk_run_started
-                        { operation_id = Some "op-batch-primary" })
-                |> Fleet_store.apply_observer_chat_stream_chunk ~keeper
-                     ~operation_id:"op-batch-sibling" ~seq:(Some 4)
+                     ~operation_id:"op-batch-3" ~seq:(Some 4)
                      (Wire_fleet.Chunk_turn_done
                         {
-                          operation_id = Some "op-batch-sibling";
+                          operation_id = Some "op-batch-3";
                           turn_ref = None;
                           reply = None;
                         })
@@ -31564,27 +31607,28 @@ let () =
                 Fleet_store.String_map.find keeper fleet_batch.chat_streams
               in
               Alcotest.(check (option string))
-                "batch sibling records primary execution_id"
-                (Some "op-batch-primary") buf_batch.execution_id;
+                "3-member batch preserves primary execution_id across attempt start"
+                (Some "op-batch-1") buf_batch.execution_id;
               Alcotest.(check string)
-                "primary frame did not wipe batch reply text" "Batch reply"
-                buf_batch.text;
+                "sibling attempt starts did not wipe batch reply text"
+                "Batch reply" buf_batch.text;
               let primary_persisted : Wire_fleet.chat_message =
                 {
                   persisted_eof_row with
                   id = "m-batch-primary-reply";
                   content = "Batch reply";
                   provenance =
-                    operation_provenance "op-batch-primary" Terminal_result;
+                    operation_provenance "op-batch-1" Terminal_result;
                 }
               in
               Alcotest.(check bool)
-                "batch stream retires when primary Terminal_result is in history"
+                "3-member batch stream retires when primary Terminal_result is in history"
                 true
                 (Chat_transcript.stream_reply_already_persisted
                    [ primary_persisted ] buf_batch);
-              (* (g) Terminal_effect_settled / tool-only connector turn ignores discarded
-                 diagnostic prose and retires cleanly once its tool row is in history. *)
+              (* (g) Terminal_effect_settled (wire label "external_effect_completed")
+                 connector turn ignores discarded diagnostic prose and retires cleanly
+                 once its tool row is in history. *)
               let fleet_tool_only =
                 Fleet_store.empty
                 |> Fleet_store.apply_observer_chat_stream_chunk ~keeper
@@ -31607,7 +31651,7 @@ let () =
                         {
                           operation_id = Some "op-ext-effect";
                           reply = "discarded internal diagnostic";
-                          turn_outcome = Some "terminal_effect_settled";
+                          turn_outcome = Some "external_effect_completed";
                           turn_ref = None;
                         })
                 |> Fleet_store.apply_observer_chat_stream_chunk ~keeper

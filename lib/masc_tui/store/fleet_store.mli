@@ -62,6 +62,11 @@ type chat_stream_buffer = {
       (** Primary execution operation ID when this member belongs to a coalesced
           batch ([KEEPER_CHAT_BATCH_BOUND]). Persisted terminal/tool rows are
           keyed by [execution_id]. *)
+  batch_bindings : (string * string) list;
+      (** Observed [(member_id, execution_id)] bindings for the current active
+          observer batch so sibling [Chunk_runtime_attempt_started] /
+          [Chunk_run_started] frames across N>=2 batch members cannot reset the
+          live buffer or erase [execution_id]. *)
   turn_ref : string option;
   run_started : bool;
   interrupting : bool;
@@ -86,7 +91,7 @@ type chat_stream_buffer = {
           observer SSE frames for a still-running operation can take over. *)
   tool_only_settled : bool;
       (** [true] when the turn settled without persisting a separate assistant
-          reply row ([KEEPER_EXTERNAL_EFFECT_COMPLETED], [terminal_effect_settled],
+          reply row ([KEEPER_EXTERNAL_EFFECT_COMPLETED], [external_effect_completed],
           or [no_visible_reply]). *)
   last_error : string option;
   from_observer : bool;

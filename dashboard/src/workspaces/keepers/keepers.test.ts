@@ -2905,7 +2905,7 @@ describe('Keepers Workspace — Interactive DOM & API Flows', () => {
       observer.enqueue(opEvent('op-discord-tool-only', {
         type: 'CUSTOM',
         name: 'KEEPER_REPLY_DETAILS',
-        value: { reply: 'discarded internal diagnostic prose', turn_outcome: 'terminal_effect_settled', turn_ref: 'tr-1' },
+        value: { reply: 'discarded internal diagnostic prose', turn_outcome: 'external_effect_completed', turn_ref: 'tr-1' },
       }, 3))
       observer.enqueue(opEvent('op-discord-tool-only', {
         type: 'CUSTOM',

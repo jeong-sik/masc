@@ -1303,10 +1303,11 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
       },
       onReplyDetails: (reply, turnRef, turnOutcome) => {
         markUserDelivered()
-        // Terminal_effect_settled and No_visible_reply never persist an assistant
-        // text row; do not copy discarded diagnostic prose into the live bubble.
+        // Terminal_effect_settled (wire label "external_effect_completed") and
+        // No_visible_reply ("no_visible_reply") never persist an assistant text
+        // row; do not copy discarded diagnostic prose into the live bubble.
         const discardsProse =
-          turnOutcome === 'terminal_effect_settled' || turnOutcome === 'no_visible_reply'
+          turnOutcome === 'external_effect_completed' || turnOutcome === 'no_visible_reply'
         updateAssistant((m) => ({
           ...m,
           content: discardsProse ? m.content : (reply || m.content),

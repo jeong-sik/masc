@@ -1144,6 +1144,11 @@
   font-size: var(--fs-12);
   color: var(--fg-2);
   min-width: 0;
+  /* A row ends with its time. Across a wide column that set the time 620 to
+     830px from the words it measures. 64 characters hold a long tool name
+     (an MCP prefix and 25 more), where the call stands, where it reaches and
+     a time of minutes on one line, inside a batch too. */
+  max-inline-size: 64ch;
 }
 
 .kp-open-work-row {

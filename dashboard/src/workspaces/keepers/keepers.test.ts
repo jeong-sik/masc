@@ -1047,6 +1047,55 @@ describe('Keepers Workspace — Interactive DOM & API Flows', () => {
     expect(timers()).toEqual([])
   })
 
+  it('names on the turn card only a tool that no open row names', async () => {
+    const keeper = makeRosterKeeper()
+    let observer!: ReadableStreamDefaultController<Uint8Array>
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input) === '/mcp?sse_kind=observer') {
+        return new Response(new ReadableStream({ start: (controller) => { observer = controller } }),
+          { headers: { 'Content-Type': 'text/event-stream' } })
+      }
+      return Response.json({ operations: [], messages: [], rows: [], keepers: [] })
+    }))
+    const stream = startObserverStream({ autoReconnect: false })
+    await waitFor(() => expect(observerConnected.value).toBe(true))
+    const read = observedValue(new Map(), Date.now() - 1000)
+    const view = render(html`<${KeeperChatTab} keeper=${keeper} onInspect=${vi.fn()} onMutated=${vi.fn()} turnSnapshot=${read} />`)
+    const now = Date.now() / 1000
+    const send = (preview: object) => observer.enqueue(new TextEncoder().encode(`data: ${JSON.stringify({
+      type: 'keeper_turn_preview_changed', name: keeper.name, observation: { owner_key: 'A', preview: { updated_at_unix: now, ...preview } },
+    })}\n\n`))
+    const call = (name: string, stage: 'requested' | 'executing') => ({
+      kind: 'tool', tool_use_id: name, name, stage, started_at_unix: now - 3, since_unix: now - 2, cohort: null, reach: null,
+    })
+    const toolPills = () => [...view.container.querySelectorAll('[data-testid="chat-live-turn-card"] .kp-hierarchy-rail .kp-pill')]
+      .map((pill) => pill.textContent)
+    const rows = () => [...view.container.querySelectorAll('[data-testid="chat-live-turn-card"] .kp-open-work-phrase')]
+      .map((row) => row.textContent)
+
+    // The last tool observed is a call the model has only started: its row says so, and no pill says that it runs.
+    send({ revision: 1, status_text: 'rt · tool called: Read', activity: 'tool', last_tool: 'Read', open_activities: [call('Read', 'requested')] })
+    await waitFor(() => expect(rows()).toEqual(['Read · 호출 준비']))
+    expect(toolPills()).toEqual([])
+
+    // The last tool observed has returned while another call runs: it is the last tool, not the one that runs.
+    send({ revision: 2, status_text: 'rt · tool running: Execute', activity: 'tool', last_tool: 'Grep', open_activities: [call('Execute', 'executing')] })
+    await waitFor(() => expect(toolPills()).toEqual(['최근 도구 · Grep']))
+    expect(rows()).toEqual(['Execute · 실행 중'])
+
+    // Nothing is open: the last tool is still a fact about the turn.
+    send({ revision: 3, status_text: 'rt · waiting', activity: 'waiting', last_tool: 'Grep', open_activities: [] })
+    await waitFor(() => expect(rows()).toEqual([]))
+    expect(toolPills()).toEqual(['최근 도구 · Grep'])
+
+    // A server from before the list: the pill is all the card says about the tool.
+    send({ revision: 4, status_text: 'rt · tool', activity: 'tool', last_tool: 'Grep' })
+    await waitFor(() => expect(toolPills()).toEqual(['실행 중 · Grep']))
+
+    observer.close()
+    await stream
+  })
+
   it('says which preparation step a turn is in, and that a step which did not finish stopped', async () => {
     const keeper = makeRosterKeeper()
     let observer!: ReadableStreamDefaultController<Uint8Array>

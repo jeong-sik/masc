@@ -206,6 +206,11 @@ export function openWorkLead(activities: readonly TurnOpenActivity[]): OpenWorkL
   return { lead, otherCalls: lead.kind === 'tool' ? calls.length - 1 : 0 }
 }
 
+/** Whether a call of this tool is among the open work. */
+export function hasOpenToolCall(activities: readonly TurnOpenActivity[], toolName: string): boolean {
+  return activities.some((activity) => activity.kind === 'tool' && activity.name === toolName)
+}
+
 /** How many more calls are open behind the one a line names. */
 export function otherCallsLabel(count: number): string {
   return `외 ${count}건`

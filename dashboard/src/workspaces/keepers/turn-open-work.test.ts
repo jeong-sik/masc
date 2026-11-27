@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   decodeOpenActivities,
+  hasOpenToolCall,
   openActivityLeavesMasc,
   openActivityPhrase,
   openActivityReachLabel,
@@ -90,6 +91,22 @@ describe('turn open work', () => {
     if (event?.kind === 'turn_preview') {
       expect(event.preview.open_activities).toEqual([thinking])
     }
+  })
+})
+
+describe('whether a tool has a call open', () => {
+  it('is so for a call the model only started and for one that runs, by the name of the tool', () => {
+    const open = decodeOpenActivities([
+      thinking,
+      { kind: 'tool', tool_use_id: 'a', name: 'Read', stage: 'requested', started_at_unix: 1, since_unix: 1 },
+      tool('b', 'Execute', null),
+    ])!
+    expect(hasOpenToolCall(open, 'Read')).toBe(true)
+    expect(hasOpenToolCall(open, 'Execute')).toBe(true)
+    // A tool that returned is in no row, and an open response is not a tool.
+    expect(hasOpenToolCall(open, 'Grep')).toBe(false)
+    expect(hasOpenToolCall(open, 'thinking')).toBe(false)
+    expect(hasOpenToolCall([], 'Read')).toBe(false)
   })
 })
 

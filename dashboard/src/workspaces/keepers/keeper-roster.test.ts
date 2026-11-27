@@ -30,7 +30,7 @@ const preview = (
   revision = 1,
 ): KeeperActiveTurnPreview => ({
   status_text: 'rt-1 · said by the server', activity, preparation, work_context: null,
-  open_activities: open, text_tail: '', last_tool: null, updated_at_unix: 20, revision,
+  open_activities: open, text_tail: '', last_tool: null, last_failure: null, updated_at_unix: 20, revision,
 })
 const turn = (...of: Parameters<typeof preview>): KeeperActiveTurn => ({
   lane: 'autonomous', owner_key: 'A', started_at_unix: 10, preview_observed_through: 1, preview: preview(...of),

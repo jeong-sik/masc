@@ -300,6 +300,7 @@ function decodeTurnPreview(raw: unknown): KeeperActiveTurnPreview | null {
     work_context: decodeTurnWorkContext(raw.work_context),
     text_tail: textTail,
     last_tool: lastTool,
+    last_failure: asStr(raw.last_failure),
     updated_at_unix: updatedAt,
     revision: revision !== null && Number.isInteger(revision) && revision >= 1 ? revision : null,
   }

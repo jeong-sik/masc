@@ -2149,7 +2149,7 @@ describe('Keepers Workspace — Interactive DOM & API Flows', () => {
       preview: preview && {
         status_text: 'rt-1 · said by the server', activity: 'tool', preparation: null, work_context: null, open_activities: null,
         text_tail: 'the tail of the reply',
-        last_tool: 'Grep', updated_at_unix: 20, revision: 1, ...preview,
+        last_tool: 'Grep', last_failure: null, updated_at_unix: 20, revision: 1, ...preview,
       },
     })
     const tool = (name: string, stage: 'executing' | 'requested') => ({

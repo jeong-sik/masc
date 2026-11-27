@@ -33,6 +33,15 @@ val kind_of_mime : string -> kind
 val attachments_upload_path : string
 val attachment_path_prefix : string
 val media_path_prefix : string
+
+type served_path =
+  | Attachment_id of string  (** The rest of the path after {!attachment_path_prefix}. *)
+  | Media_token of string  (** The rest of the path after {!media_path_prefix}. *)
+
+val served_path : string -> served_path option
+(** The server route a path names, with the rest of the path as written.
+    [None] for any other path. *)
+
 val is_attachment_path : string -> bool
 (** [true] for canonical [/api/v1/attachments/<id>] and server-delegated
     [/api/v1/media/<sha|id>] paths that accept [?format=png], [?max_px=], and

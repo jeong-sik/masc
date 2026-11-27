@@ -3884,6 +3884,7 @@ let test_agui_chat_stream_and_history_provenance () =
                     { "t": "thinking", "content": "Plan step 1" },
                     { "t": "image", "src": "/api/v1/media/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "cap": "Report" },
                     { "t": "image", "src": "https://example.invalid/api/v1/media/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" },
+                    { "t": "image", "src": "/api/v1/media/not-a-sha256-token-long-enough" },
                     { "t": "trace", "trace": [
                       { "kind": "think", "text": "Inspect file" },
                       { "kind": "reason", "text": "Check diff", "detail": "2 hunks" }

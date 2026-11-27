@@ -43,7 +43,10 @@
   httpun
   masc
   masc.agent_core
+  ;; The served image path case compares the TUI prefixes with the routes'.
+  masc.attachment_store
   masc.board_handlers
+  masc.config
   masc.dated_jsonl
   masc.fs_compat
   ;; The chat submit case parses the TUI body with the server's own parser;

@@ -2072,6 +2072,15 @@ let test_tui_settings_enum_parity_roundtrip () =
                code err))
     all_tui_langs
 
+(* The TUI writes served image paths with its own prefixes. They must be the
+   prefixes the server routes, or every retained image fetch misses. *)
+let test_served_path_prefixes_match_server_routes () =
+  Alcotest.(check string) "attachment path prefix" Attachment_store.url_prefix
+    Masc_tui_protocol.Wire_attachment.attachment_path_prefix;
+  Alcotest.(check string) "media path prefix"
+    Masc_network_defaults.media_path_prefix
+    Masc_tui_protocol.Wire_attachment.media_path_prefix
+
 let () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -2153,5 +2162,7 @@ let () =
           Alcotest.test_case
             "file change to_json -> decode_repository_activity" `Quick
             test_repository_activity_roundtrip;
+          Alcotest.test_case "served image path prefixes = server routes"
+            `Quick test_served_path_prefixes_match_server_routes;
         ] );
     ]

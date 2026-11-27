@@ -76,9 +76,19 @@ let attachments_upload_path = "/api/v1/attachments"
 let attachment_path_prefix = "/api/v1/attachments/"
 let media_path_prefix = "/api/v1/media/"
 
-let is_attachment_path path =
-  String.starts_with ~prefix:attachment_path_prefix path
-  || String.starts_with ~prefix:media_path_prefix path
+type served_path = Attachment_id of string | Media_token of string
+
+let served_path path =
+  let rest prefix =
+    String.sub path (String.length prefix) (String.length path - String.length prefix)
+  in
+  if String.starts_with ~prefix:attachment_path_prefix path then
+    Some (Attachment_id (rest attachment_path_prefix))
+  else if String.starts_with ~prefix:media_path_prefix path then
+    Some (Media_token (rest media_path_prefix))
+  else None
+
+let is_attachment_path path = Option.is_some (served_path path)
 
 let attachment_path id = attachment_path_prefix ^ percent_encode (String.trim id)
 

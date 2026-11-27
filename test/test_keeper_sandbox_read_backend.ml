@@ -843,11 +843,11 @@ remote_endpoint = "fixture"
         ; timed_out = false; shim_error = None; observed_syscalls = [] } in
     (* The fake ssh answers every request with the same file. A request
        reaches ssh on stdin as a frame that carries the read's command, so the
-       script also writes which read the reader asked for, one line per call.
-       A test can then count the reads of one file. *)
+       script reads that frame and also writes which read the reader asked
+       for, one line per call. A test can then count the reads of one file. *)
     let reads_log = Filename.concat base "ssh-reads.log" in
-    let script = "#!/bin/sh\nframe=$(cat)\ncase \"$frame\" in *'exec cat'*) echo whole;; *'head -c'*) echo prefix;; *) echo other;; esac >> "
-        ^ Filename.quote reads_log ^ "\ncat "
+    let script = "#!/bin/sh\nlen=$(dd bs=1 count=8 2>/dev/null | od -An -tu1 | awk 'NR==1 {print $5*16777216 + $6*65536 + $7*256 + $8; exit}')\nframe=$(dd bs=1 count=$len 2>/dev/null)\ncase \"$frame\" in *'exec cat'*) echo whole;; *'head -c'*) echo prefix;; *) echo other;; esac >> "
+        ^ Filename.quote reads_log ^ "\ncat >/dev/null 2>/dev/null &\ncat "
         ^ Filename.quote endpoint_file ^ "\nprintf '%s' "
         ^ Filename.quote trailer ^ " >&2\nexit 0\n" in
     with_fake_ssh script @@ fun () ->

@@ -583,9 +583,21 @@ let render_board ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
   let all_posts =
     match Observed.to_option k.board with Some f -> f.posts | None -> []
   in
-  let filtered = Knowledge_store.filtered_posts k in
-  let hidden_verify = Int.max 0 (List.length all_posts - List.length filtered) in
-  let verify_count =
+  let server_filtered_out =
+    match k.board_feed_meta with
+    | Some meta -> Int.max 0 meta.filtered_out_count
+    | None -> 0
+  in
+  let local_non_signal =
+    List.fold_left
+      (fun acc (p : Wire_knowledge.board_post) ->
+        if p.is_signal then acc else acc + 1)
+      0 all_posts
+  in
+  (* Count hidden verify/non-signal posts from server filtered_out_count plus
+     any client-filtered non-signal rows, never mixing in `/` search exclusions. *)
+  let hidden_verify = server_filtered_out + local_non_signal in
+  let verify_count_in_posts =
     List.fold_left
       (fun acc (p : Wire_knowledge.board_post) ->
         let is_verify =
@@ -600,6 +612,7 @@ let render_board ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
         if is_verify then acc + 1 else acc)
       0 all_posts
   in
+  let verify_count = server_filtered_out + verify_count_in_posts in
   let direct_count =
     List.fold_left
       (fun acc (p : Wire_knowledge.board_post) ->
@@ -1906,19 +1919,18 @@ let draw_rich_artifact_pane ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~bp
         let content = H.pad_content ~bp inner in
         H.draw_observed_placeholder ~grid ~rect:content ~theme ~lang k.artifacts
     | Some a ->
+        let eff_art =
+          match detail_opt with Some d -> d.artifact | None -> a
+        in
         let pad_x = H.pad_x ~bp inner in
         let title_s =
-          if String.trim a.title <> "" then a.title else a.id
+          if String.trim eff_art.title <> "" then eff_art.title else eff_art.id
         in
-        let fmt = Wire_knowledge.artifact_format_of_entry a in
+        let fmt = Wire_knowledge.artifact_format_of_entry eff_art in
         let band_h = if inner.h >= 7 then 2 else 1 in
-        let eff_rev =
-          match detail_opt with
-          | Some d -> d.artifact.revision
-          | None -> a.revision
-        in
+        let eff_rev = eff_art.revision in
         let check_opt =
-          Knowledge_store.artifact_check_for ~id:a.id ~revision:eff_rev k
+          Knowledge_store.artifact_check_for ~id:eff_art.id ~revision:eff_rev k
         in
         let checked =
           match check_opt with Some c -> c.checked | None -> false
@@ -1927,7 +1939,7 @@ let draw_rich_artifact_pane ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~bp
           match detail_opt with Some d -> d.shared | None -> false
         in
         let sub_s =
-          Printf.sprintf "%s · %s · %s · %s" a.id a.body.mime
+          Printf.sprintf "%s · %s · %s · %s" eff_art.id eff_art.body.mime
             (if checked then
                Glyph.to_utf8 Glyph.Check_mark ^ " "
                ^ Say.resolve lang (Say.make ~ko:"확인됨" ~en:"Checked")
@@ -1943,7 +1955,7 @@ let draw_rich_artifact_pane ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~bp
           ~theme ~left_title:title_s
           ~right_meta:
             (Format_val.format_value Format_val.Bytes
-               (float_of_int a.body.bytes))
+               (float_of_int eff_art.body.bytes))
           ?subtitle:(if band_h >= 2 then Some sub_s else None)
           ();
         let content =
@@ -1957,11 +1969,11 @@ let draw_rich_artifact_pane ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~bp
           (* Compact metadata strip *)
           if !y < bot then begin
             let prod_s =
-              if String.trim a.author <> "" then a.author else "—"
+              if String.trim eff_art.author <> "" then eff_art.author else "—"
             in
             let meta_line =
               Printf.sprintf "SHA:%s · %s"
-                (H.short_hash ~len:10 a.body.sha256)
+                (H.short_hash ~len:10 eff_art.body.sha256)
                 prod_s
             in
             ignore
@@ -1974,7 +1986,7 @@ let draw_rich_artifact_pane ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~bp
             | Some d -> d.content
             | None -> ""
           in
-          let is_json = Knowledge_store.is_json_artifact a in
+          let is_json = Knowledge_store.is_json_artifact eff_art in
           let json_pretty_lines =
             match (k.artifact_view_mode, fmt) with
             | `Document, `Markdown
@@ -2069,7 +2081,7 @@ let draw_rich_artifact_pane ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~bp
                   :: List.map
                        (fun (r : Wire_knowledge.artifact_revision_summary) ->
                          let cur =
-                           if Int.equal r.revision a.revision then "● "
+                           if Int.equal r.revision eff_art.revision then "● "
                            else "  "
                          in
                          ( Update_nav.Line_plain

@@ -8225,56 +8225,67 @@ and execute_action ~now (m : Model.t) action =
                 | Runtime_store.Tools_prompts_presets -> (
                     match m.runtime.pp_section with
                     | Runtime_store.Sec_prompts -> (
-                        match Runtime_store.selected_prompt_item m.runtime with
-                        | Some p ->
-                            ( Model.with_toast ~now ~level:Model.Toast_info
-                                (Say.make
-                                   ~ko:("프롬프트 오버라이드 해제 중: " ^ p.key)
-                                   ~en:("Clearing prompt override: " ^ p.key))
-                                m
-                            , [
-                                Cmd.Http_post
-                                  {
-                                    epoch = m.epoch;
-                                    req =
-                                      Cmd.Post_prompt_override
-                                        { key = p.key; value = None };
-                                  };
-                              ] )
-                        | None -> (m, []))
+                        match Rbac.decide m.auth_session Rbac.Single_user_role_admin with
+                        | Rbac.Denied reason -> rbac_denied_toast ~now reason m
+                        | Rbac.Allowed -> (
+                            match Runtime_store.selected_prompt_item m.runtime with
+                            | Some p ->
+                                ( Model.with_toast ~now ~level:Model.Toast_info
+                                    (Say.make
+                                       ~ko:("프롬프트 오버라이드 해제 중: " ^ p.key)
+                                       ~en:("Clearing prompt override: " ^ p.key))
+                                    m
+                                , [
+                                    Cmd.Http_post
+                                      {
+                                        epoch = m.epoch;
+                                        req =
+                                          Cmd.Post_prompt_override
+                                            { key = p.key; value = None };
+                                      };
+                                  ] )
+                            | None -> (m, [])))
                     | Runtime_store.Sec_presets -> (
-                        match Runtime_store.selected_preset_manifest m.runtime with
-                        | Some p ->
-                            ( Model.with_toast ~now ~level:Model.Toast_info
-                                (Say.make ~ko:("프리셋 삭제 중: " ^ p.name)
-                                   ~en:("Deleting preset: " ^ p.name))
-                                m
-                            , [
-                                Cmd.Http_post
-                                  {
-                                    epoch = m.epoch;
-                                    req = Cmd.Post_preset_delete { name = p.name };
-                                  };
-                              ] )
-                        | None -> (m, []))
+                        match
+                          Rbac.decide m.auth_session Rbac.Single_user_token_admin_only
+                        with
+                        | Rbac.Denied reason -> rbac_denied_toast ~now reason m
+                        | Rbac.Allowed -> (
+                            match Runtime_store.selected_preset_manifest m.runtime with
+                            | Some p ->
+                                ( Model.with_toast ~now ~level:Model.Toast_info
+                                    (Say.make ~ko:("프리셋 삭제 중: " ^ p.name)
+                                       ~en:("Deleting preset: " ^ p.name))
+                                    m
+                                , [
+                                    Cmd.Http_post
+                                      {
+                                        epoch = m.epoch;
+                                        req = Cmd.Post_preset_delete { name = p.name };
+                                      };
+                                  ] )
+                            | None -> (m, [])))
                     | Runtime_store.Sec_params -> (
-                        match Runtime_store.selected_runtime_param m.runtime with
-                        | Some p ->
-                            ( Model.with_toast ~now ~level:Model.Toast_info
-                                (Say.make
-                                   ~ko:("파라미터 기본값 복원 중: " ^ p.key)
-                                   ~en:("Clearing runtime param: " ^ p.key))
-                                m
-                            , [
-                                Cmd.Http_post
-                                  {
-                                    epoch = m.epoch;
-                                    req =
-                                      Cmd.Post_runtime_param_clear
-                                        { param_key = p.key };
-                                  };
-                              ] )
-                        | None -> (m, []))
+                        match Rbac.decide m.auth_session Rbac.Single_user_role_admin with
+                        | Rbac.Denied reason -> rbac_denied_toast ~now reason m
+                        | Rbac.Allowed -> (
+                            match Runtime_store.selected_runtime_param m.runtime with
+                            | Some p ->
+                                ( Model.with_toast ~now ~level:Model.Toast_info
+                                    (Say.make
+                                       ~ko:("파라미터 기본값 복원 중: " ^ p.key)
+                                       ~en:("Clearing runtime param: " ^ p.key))
+                                    m
+                                , [
+                                    Cmd.Http_post
+                                      {
+                                        epoch = m.epoch;
+                                        req =
+                                          Cmd.Post_runtime_param_clear
+                                            { param_key = p.key };
+                                      };
+                                  ] )
+                            | None -> (m, [])))
                     | Runtime_store.Sec_async_requests -> (m, []))
                 | Runtime_store.Tools_usage_calls
                 | Runtime_store.Tools_catalog_tree
@@ -8299,7 +8310,13 @@ and execute_action ~now (m : Model.t) action =
                 (m, [])))
   | Keymap.Edit_or_export -> (
       match active_artifact_target m with
-      | Some art ->
+      | Some list_art ->
+          let detail_opt =
+            Knowledge_store.artifact_detail_for_entry list_art m.knowledge
+          in
+          let art =
+            match detail_opt with Some d -> d.artifact | None -> list_art
+          in
           let ext =
             Wire_knowledge.artifact_extension
               (Wire_knowledge.artifact_format_of_entry art)
@@ -8310,7 +8327,7 @@ and execute_action ~now (m : Model.t) action =
           let content_opt =
             Option.map
               (fun (d : Wire_knowledge.published_artifact_detail) -> d.content)
-              (Knowledge_store.artifact_detail_for_entry art m.knowledge)
+              detail_opt
           in
           ( Model.with_toast ~now ~level:Model.Toast_info
               (Say.make
@@ -8769,7 +8786,12 @@ and execute_action ~now (m : Model.t) action =
                   (m, []))
   | Keymap.Copy_hash -> (
       match active_artifact_target m with
-      | Some art ->
+      | Some list_art ->
+          let art =
+            match Knowledge_store.artifact_detail_for_entry list_art m.knowledge with
+            | Some d -> d.artifact
+            | None -> list_art
+          in
           ( Model.with_toast ~now ~level:Model.Toast_info
               (Say.make ~ko:"SHA-256 복사됨" ~en:"Copied SHA-256")
               m

@@ -873,6 +873,22 @@ let entity_reject_access (m : Model.t) : Rbac.route_access =
                   (m.nav.pane_index = 1 && Model.work_pipeline_verifs_visible m)
         ->
           Rbac.Single_user_write
+      | Nav.Runtime
+        when Nav.equal_runtime_tab m.runtime.active_tab
+               Nav.Runtime_addons_browser
+             && (not m.runtime.addon_catalog_mode)
+             && m.nav.pane_index = 0
+             && not (Model.is_zoomed_active m) ->
+          Rbac.Single_user_write
+      | Nav.Runtime
+        when Nav.equal_runtime_tab m.runtime.active_tab Nav.Runtime_tools_usage
+             && Runtime_store.equal_tools_subview m.runtime.tools_subview
+                  Runtime_store.Tools_prompts_presets -> (
+          match m.runtime.pp_section with
+          | Runtime_store.Sec_prompts | Runtime_store.Sec_params ->
+              Rbac.Single_user_role_admin
+          | Runtime_store.Sec_presets | Runtime_store.Sec_async_requests ->
+              Rbac.Single_user_token_admin_only)
       | Nav.Pulse | Nav.Work | Nav.Knowledge | Nav.Keepers | Nav.Runtime
       | Nav.Infra ->
           Rbac.Single_user_token_admin_only)
@@ -960,6 +976,32 @@ let unbind_connector_access (m : Model.t) : Rbac.route_access =
   then Rbac.Single_user_write
   else Rbac.Single_user_token_admin_only
 
+let delete_selected_access (m : Model.t) : Rbac.route_access =
+  if Option.is_some m.nav.overlay || Model.sidebar_has_focus m then
+    Rbac.Single_user_token_admin_only
+  else if
+    Option.is_none (Model.active_inspector m)
+    && Nav.equal_workspace m.nav.workspace Nav.Runtime
+    && Nav.equal_runtime_tab m.runtime.active_tab Nav.Runtime_failover_lanes
+  then Rbac.Single_user_token_admin_only
+  else if
+    Option.is_none (Model.active_inspector m)
+    && Nav.equal_workspace m.nav.workspace Nav.Knowledge
+    && Nav.equal_knowledge_tab m.knowledge.active_tab Nav.Knowledge_board
+  then Rbac.Single_user_token_admin_only
+  else if
+    Option.is_none (Model.active_inspector m)
+    && Nav.equal_workspace m.nav.workspace Nav.Runtime
+    && Nav.equal_runtime_tab m.runtime.active_tab Nav.Runtime_addons_browser
+    && not m.runtime.addon_catalog_mode
+  then Rbac.Single_user_write
+  else if Model.is_memory_explorer_surface m then
+    if Nav.equal_workspace m.nav.workspace Nav.Keepers then
+      Rbac.Single_user_read
+    else Rbac.Workspace_read
+  else if Model.is_keeper_config_active m then Rbac.Bridged_token_admin
+  else Rbac.Single_user_token_admin_only
+
 let route_access_of_keymap_action_in_model (m : Model.t) (act : Keymap.action) :
     Rbac.route_access =
   match act with
@@ -976,6 +1018,7 @@ let route_access_of_keymap_action_in_model (m : Model.t) (act : Keymap.action) :
   | Keymap.Toggle_unreported -> toggle_unreported_access m
   | Keymap.Account_login -> account_login_access m
   | Keymap.Unbind_connector -> unbind_connector_access m
+  | Keymap.Delete_selected -> delete_selected_access m
   | Keymap.Switch_workspace _
   | Keymap.Toggle_sidebar
   | Keymap.Sub_tab _
@@ -1030,7 +1073,6 @@ let route_access_of_keymap_action_in_model (m : Model.t) (act : Keymap.action) :
   | Keymap.Search_prev_match
   | Keymap.Toggle_memory_chart
   | Keymap.Interrupt_turn
-  | Keymap.Delete_selected
   | Keymap.Link_task_goal
   | Keymap.Keeper_wake_or_online
   | Keymap.Keeper_stop_armed

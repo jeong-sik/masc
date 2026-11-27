@@ -8501,66 +8501,91 @@ let verification_dive_tab_lines ~width (m : Model.t)
     List.iter (fun s -> push ~tone s) xs
   in
   match m.work.verification_dive_tab with
-  | Work_store.Verif_tab_evidence ->
-      if m.work.verification_evidence_auth_denied then (
-        push ~tone:Line_warn
-          "[CanAdmin required] GET /api/v1/verification/evidence returned 401/403";
-        push "Configure an admin token or switch tabs with [v] for Summary / Specs / TLC.")
-      else (
-        match
-          Work_store.verification_evidence_for ~verification_id:v.request_id
-            m.work
-        with
-        | None ->
-            push "(loading /api/v1/verification/evidence...)"
-        | Some bundle ->
+  | Work_store.Verif_tab_evidence -> (
+      match
+        Rbac_policy.decide_get m.auth_session
+          (Cmd.Get_verification_evidence
+             { task_id = v.task_id; verification_id = v.request_id })
+      with
+      | Rbac.Denied reason ->
+          push ~tone:Line_warn
+            ("[Access denied] " ^ Say.resolve m.lang (Rbac.deny_reason_say reason));
+          push "Switch tabs with [v] for Summary / Specs / TLC.";
+          List.rev !lines
+      | Rbac.Allowed ->
+          if m.work.verification_evidence_auth_denied then (
+            push ~tone:Line_warn
+              "[CanAdmin required] GET /api/v1/verification/evidence returned 401/403";
             push
-              (Printf.sprintf "Authority: %s (%s) · Producer: %s · Available: %s"
-                 bundle.authority_kind bundle.authority_actor
-                 (Option.value ~default:"-" bundle.producer)
-                 (if bundle.available then "yes" else "no"));
-            Option.iter
-              (fun r -> push ("Unavailable reason: " ^ r))
-              bundle.unavailable_reason;
-            if bundle.items = [] then push "(no evidence items recorded)"
-            else
-              List.iter
-                (function
-                  | Wire_work.Verif_ev_note txt -> (
-                      match wrap_lines ~width:w ("[note] " ^ txt) with
-                      | [] -> ()
-                      | first :: rest ->
-                          push ~tone:Line_accent first;
-                          push_all rest)
-                  | Wire_work.Verif_ev_artifact
-                      { reference; content; bytes; truncated } ->
-                      push ~tone:Line_accent
-                        (Printf.sprintf "[artifact] %s (%dB%s)" reference bytes
-                           (if truncated then " truncated" else ""));
-                      push_all (wrap_lines ~width:w ("  " ^ content))
-                  | Wire_work.Verif_ev_binary
-                      { reference; bytes; sha256; format; body } ->
-                      push ~tone:Line_accent
-                        (Printf.sprintf "[binary:%s] %s (%dB sha=%s)" format
-                           reference bytes sha256);
-                      Option.iter
-                        (fun b -> push_all (wrap_lines ~width:w ("  " ^ b)))
-                        body
-                  | Wire_work.Verif_ev_collab { reference; content; sha256 } ->
-                      push ~tone:Line_accent
-                        (Printf.sprintf "[collab] %s (sha=%s)" reference sha256);
-                      push_all (wrap_lines ~width:w ("  " ^ content))
-                  | Wire_work.Verif_ev_unreadable { reference; code; detail } ->
-                      push ~tone:Line_error
-                        (Printf.sprintf "[unreadable:%s] %s%s" code
-                           (Option.value ~default:"-" reference)
-                           (match detail with Some d -> " · " ^ d | None -> "")))
-                bundle.items);
-      List.rev !lines
+              "Configure an admin token or switch tabs with [v] for Summary / Specs / TLC.")
+          else (
+            match m.work.verification_evidence with
+            | Observed.Failed { reason; _ } ->
+                push ~tone:Line_error ("Error loading verification evidence: " ^ reason)
+            | Observed.Absent ->
+                push ~tone:Line_warn "(verification evidence endpoint absent / 404)"
+            | Observed.Unreported ->
+                push "(verification evidence not yet loaded — press [r] to refresh)"
+            | Observed.Loading _ ->
+                push "(loading /api/v1/verification/evidence...)"
+            | Observed.Value { data = vid, _; _ }
+              when not (String.equal vid v.request_id) ->
+                push "(loading /api/v1/verification/evidence...)"
+            | Observed.Value { data = _, bundle; _ } ->
+                push
+                  (Printf.sprintf
+                     "Authority: %s (%s) · Producer: %s · Available: %s"
+                     bundle.authority_kind bundle.authority_actor
+                     (Option.value ~default:"-" bundle.producer)
+                     (if bundle.available then "yes" else "no"));
+                Option.iter
+                  (fun r -> push ("Unavailable reason: " ^ r))
+                  bundle.unavailable_reason;
+                if bundle.items = [] then push "(no evidence items recorded)"
+                else
+                  List.iter
+                    (function
+                      | Wire_work.Verif_ev_note txt -> (
+                          match wrap_lines ~width:w ("[note] " ^ txt) with
+                          | [] -> ()
+                          | first :: rest ->
+                              push ~tone:Line_accent first;
+                              push_all rest)
+                      | Wire_work.Verif_ev_artifact
+                          { reference; content; bytes; truncated } ->
+                          push ~tone:Line_accent
+                            (Printf.sprintf "[artifact] %s (%dB%s)" reference bytes
+                               (if truncated then " truncated" else ""));
+                          push_all (wrap_lines ~width:w ("  " ^ content))
+                      | Wire_work.Verif_ev_binary
+                          { reference; bytes; sha256; format; body } ->
+                          push ~tone:Line_accent
+                            (Printf.sprintf "[binary:%s] %s (%dB sha=%s)" format
+                               reference bytes sha256);
+                          Option.iter
+                            (fun b -> push_all (wrap_lines ~width:w ("  " ^ b)))
+                            body
+                      | Wire_work.Verif_ev_collab { reference; content; sha256 } ->
+                          push ~tone:Line_accent
+                            (Printf.sprintf "[collab] %s (sha=%s)" reference sha256);
+                          push_all (wrap_lines ~width:w ("  " ^ content))
+                      | Wire_work.Verif_ev_unreadable { reference; code; detail } ->
+                          push ~tone:Line_error
+                            (Printf.sprintf "[unreadable:%s] %s%s" code
+                               (Option.value ~default:"-" reference)
+                               (match detail with Some d -> " · " ^ d | None -> "")))
+                    bundle.items);
+          List.rev !lines)
   | Work_store.Verif_tab_summary ->
-      (match Observed.to_option m.work.verification_summary with
-      | None -> push "(loading /api/v1/verification/summary...)"
-      | Some s ->
+      (match m.work.verification_summary with
+      | Observed.Loading _ -> push "(loading /api/v1/verification/summary...)"
+      | Observed.Failed { reason; _ } ->
+          push ~tone:Line_error ("Error loading verification summary: " ^ reason)
+      | Observed.Absent ->
+          push ~tone:Line_warn "(verification summary endpoint absent / 404)"
+      | Observed.Unreported ->
+          push "(verification summary not yet reported — press [r] to refresh)"
+      | Observed.Value { data = s; _ } ->
           let parts =
             [ "Updated: " ^ s.updated_at; Printf.sprintf "Total=%d" s.total ]
             @ (match s.pending with
@@ -8600,9 +8625,15 @@ let verification_dive_tab_lines ~width (m : Model.t)
             jlines);
       List.rev !lines
   | Work_store.Verif_tab_specs ->
-      (match Observed.to_option m.work.verification_specs with
-      | None -> push "(loading /api/v1/verification/specs...)"
-      | Some sp ->
+      (match m.work.verification_specs with
+      | Observed.Loading _ -> push "(loading /api/v1/verification/specs...)"
+      | Observed.Failed { reason; _ } ->
+          push ~tone:Line_error ("Error loading verification specs: " ^ reason)
+      | Observed.Absent ->
+          push ~tone:Line_warn "(verification specs endpoint absent / 404)"
+      | Observed.Unreported ->
+          push "(verification specs not yet reported — press [r] to refresh)"
+      | Observed.Value { data = sp; _ } ->
           push
             (Printf.sprintf "Updated: %s · Dir: %s · Specs: %d" sp.updated_at
                (Option.value ~default:"-" sp.specs_dir)
@@ -8618,9 +8649,15 @@ let verification_dive_tab_lines ~width (m : Model.t)
             sp.entries);
       List.rev !lines
   | Work_store.Verif_tab_tlc ->
-      (match Observed.to_option m.work.verification_tlc_results with
-      | None -> push "(loading /api/v1/verification/tlc-results...)"
-      | Some tlc ->
+      (match m.work.verification_tlc_results with
+      | Observed.Loading _ -> push "(loading /api/v1/verification/tlc-results...)"
+      | Observed.Failed { reason; _ } ->
+          push ~tone:Line_error ("Error loading TLC results: " ^ reason)
+      | Observed.Absent ->
+          push ~tone:Line_warn "(TLC results endpoint absent / 404)"
+      | Observed.Unreported ->
+          push "(TLC results not yet reported — press [r] to refresh)"
+      | Observed.Value { data = tlc; _ } ->
           push
             (Printf.sprintf "Updated: %s · Dir: %s · Results: %d" tlc.updated_at
                (Option.value ~default:"-" tlc.results_dir)

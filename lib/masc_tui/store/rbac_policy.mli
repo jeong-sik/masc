@@ -33,7 +33,8 @@ val route_access_of_keymap_action_in_model :
     [Edit_or_export], [Launch_fusion], [Probe_sandbox], [Create_new],
     [Context_primary_action], [Entity_approve_or_assign],
     [Entity_reject_or_cancel], [Cycle_hearth_or_overrule], [Dismiss_errors],
-    [Toggle_unreported], [Account_login], and [Open_external_editor]. *)
+    [Toggle_unreported], [Account_login], [Unbind_connector], [Delete_selected],
+    and [Open_external_editor]. *)
 
 val decide_keymap_action :
   Rbac.auth_session -> Keymap.action -> Rbac.access_verdict

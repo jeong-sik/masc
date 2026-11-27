@@ -871,7 +871,7 @@ remote_endpoint = "fixture"
      | _ -> Alcotest.fail "oversize endpoint image must be retained complete");
     write_file endpoint_file (String.make (Store.verification_evidence_max_bytes + 1) 'x');
     (match reader ~worker:meta.name ~relative:"summary.txt" with
-     | Ok (Store.Text_payload { Store.content = text; bytes }) ->
+     | Ok (Store.Text_payload { content = text; bytes }) ->
        Alcotest.(check int) "a text over the inline cap is read whole"
          (Store.verification_evidence_max_bytes + 1) bytes;
        Alcotest.(check int) "and nothing is cut" (String.length text) bytes

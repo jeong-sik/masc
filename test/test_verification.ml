@@ -2481,7 +2481,7 @@ let test_rejected_submission_captures_current_handoff_on_first_retry () =
         | VS.Evidence_artifact item -> Some item.content
         | VS.Evidence_collaboration _ | VS.Evidence_note _
         | VS.Evidence_invalid_reference | VS.Evidence_artifact_unreadable _
-        | VS.Evidence_artifact_binary _ -> None) items with
+        | VS.Evidence_artifact_body _ | VS.Evidence_artifact_binary _ -> None) items with
       | [body] -> body
       | _ -> Alcotest.fail "one current artifact must be available")
    | VS.Evidence_unavailable {reason; _} ->
@@ -3393,9 +3393,9 @@ let test_submitted_evidence_refuses_a_text_over_the_ceiling () =
     let out = open_out_bin artifact_path in
     let mebibyte = String.make (1024 * 1024) 'z' in
     for _ = 1 to ceiling / String.length mebibyte do
-      out_string out mebibyte 0 (String.length mebibyte)
+      output_string out mebibyte
     done;
-    out_string out "!" 0 1;
+    output_string out "!";
     close_out out;
     let request_id = "vrf-over-ceiling" in
     ignore (create_evidence_request ~base_path ~request_id ~artifact_path);
@@ -4083,8 +4083,8 @@ let test_injected_artifact_read_answers_the_snapshot () =
                && String.equal relative "evidence.txt"
              then
                Ok
-                 (VS.Text_payload
-                    { VS.content = "captured-by-backend"; VS.bytes = 20 })
+                 ((VS.Text_payload { content = "captured-by-backend"; bytes = 20 })
+                   : VS.artifact_payload)
              else Error (VS.Evidence_read_error "backend: not found"))
       in
       let json =
@@ -4121,10 +4121,12 @@ let test_an_injected_reader_answers_under_the_text_line () =
                (* a reader that hands non-text bytes to the text payload
                   still meets the store's own line *)
                Ok
-                 (VS.Text_payload
-                    { VS.content = "\xff\xd8\xff\xe0garbage"; VS.bytes = 12 })
+                 ((VS.Text_payload { content = "\xff\xd8\xff\xe0garbage"; bytes = 12 })
+                   : VS.artifact_payload)
              else if String.equal relative "cut.txt" then
-               Ok (VS.Text_payload { VS.content = "abc\xe2\x82"; VS.bytes = 5 })
+               Ok
+                 ((VS.Text_payload { content = "abc\xe2\x82"; bytes = 5 })
+                   : VS.artifact_payload)
              else Error (VS.Evidence_read_error "backend: not found"))
       in
       let json =
@@ -4156,7 +4158,7 @@ let test_an_injected_reader_answers_too_large () =
       let artifact_read =
         Some
           (fun ~worker:_ ~relative:_ ->
-             Error (VS.Too_large { VS.cap = 100; VS.at_least = 101 }))
+             Error ((VS.Too_large { cap = 100; at_least = 101 }) : VS.evidence_read_failure))
       in
       let json =
         VS.snapshot_submitted_evidence_json

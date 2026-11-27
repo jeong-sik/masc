@@ -473,7 +473,8 @@ let () =
         Alcotest.test_case "actual HTTP permissions, identity and large binary download" `Quick test_actual_download_route_and_local_export;
         Alcotest.test_case "original text and non-image binary bytes round trip" `Quick test_download_preserves_original_bytes;
         Alcotest.test_case "partial and missing snapshots cannot be saved as complete files" `Quick test_download_refuses_missing_or_partial_items;
-        Alcotest.test_case "a stored body is served whole" `Quick test_download_serves_a_stored_body;
+        Alcotest.test_case "a stored body is served whole" `Quick
+          test_download_serves_a_stored_body_whole;
       ] )
     ; ( "preview"
       , [ Alcotest.test_case "an image under the ceiling is inline" `Quick

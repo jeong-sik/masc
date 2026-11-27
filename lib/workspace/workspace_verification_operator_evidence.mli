@@ -59,6 +59,8 @@ val file_to_yojson :
   Workspace_verification_store.submitted_evidence_access ->
   (Yojson.Safe.t, string) result
 (** Export one zero-based item of this exact retained submission. Text is the
-    stored snapshot, never a reread of a producer path. Truncated text is
-    refused. Binary bodies use the store's size/hash checked reader, including
-    PDF/audio/video bodies that have no inline image preview. *)
+    stored snapshot, never a reread of a producer path: inline text from the
+    record, and a text stored whole in the blob store after its bytes are
+    checked against the recorded size and digest. Binary bodies use the
+    store's size/hash checked reader, including PDF/audio/video bodies that
+    have no inline image preview. *)

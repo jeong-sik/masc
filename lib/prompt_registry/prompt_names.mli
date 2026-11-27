@@ -48,8 +48,8 @@ val verification_evidence_posture_note_only : string
     reference. The clause that keeps note-only silence from reading as
     assent (task-785). *)
 val verification_evidence_posture_usable : string
-(** Rendered into a completion question whose snapshot holds [n] readable,
-    untruncated artifacts. Variable: [usable_artifact_count]. *)
+(** Rendered into a completion question whose snapshot holds [n] readable
+    artifacts. Variable: [usable_artifact_count]. *)
 val verification_image_evidence : string
 (** Rendered into a completion question whose goal blocks carry
     binary image artifacts. Variable: [image_evidence_lines]. The lines are

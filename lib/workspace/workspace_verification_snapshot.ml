@@ -382,7 +382,6 @@ let carried_artifact_indices items =
            Some (index, String.length content)
          | ( _
            , ( Evidence_note _
-             | Evidence_artifact _
              | Evidence_artifact_body _
              | Evidence_invalid_reference
              | Evidence_artifact_unreadable _

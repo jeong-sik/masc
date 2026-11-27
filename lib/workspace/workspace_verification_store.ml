@@ -158,7 +158,9 @@ let text_artifact_max_bytes = 64 * 1024 * 1024
    file keeps the whole read whatever its size: the store adopts known binary
    formats whole and files them as the evidence body. *)
 let read_host_artifact ~ownership_root path =
-  let failure error = evidence_read_failure_of_owned_read_failure error.failure in
+  let failure (error : Fs_compat.owned_regular_file_read_error) =
+    evidence_read_failure_of_owned_read_failure error.failure
+  in
   match
     Fs_compat.load_owned_regular_file_prefix ~ownership_root
       ~max_bytes:(text_artifact_max_bytes + 1) path
@@ -349,6 +351,7 @@ let read_binary_body_base64_at_limit ~max_bytes ~base_path (item : submitted_evi
   | Evidence_collaboration _ -> Error Not_binary
   | Evidence_note _ -> Error Not_binary
   | Evidence_artifact _ -> Error Not_binary
+  | Evidence_artifact_body _ -> Error Not_binary
   | Evidence_invalid_reference -> Error Not_binary
   | Evidence_artifact_unreadable _ -> Error Not_binary
 
@@ -366,6 +369,7 @@ let read_binary_body_for_operator_base64 ~base_path item =
      | Ok body -> Ok body)
   | Evidence_artifact_binary _ -> Error (Body_unreadable "negative recorded file size")
   | Evidence_collaboration _ | Evidence_note _ | Evidence_artifact _
+  | Evidence_artifact_body _
   | Evidence_invalid_reference | Evidence_artifact_unreadable _ -> Error Not_binary
 
 (* Where a text artifact goes. Up to the inline cap it is written into the

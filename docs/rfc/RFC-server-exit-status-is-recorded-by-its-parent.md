@@ -3,7 +3,7 @@ rfc: "server-exit-status-is-recorded-by-its-parent"
 title: "서버가 어떻게 끝났는지는 서버를 띄운 부모가 받아 적는다"
 status: Draft
 created: 2026-11-16
-updated: 2026-11-16
+updated: 2026-11-26
 author: claude
 supersedes: []
 superseded_by: null
@@ -201,7 +201,30 @@ RFC 를 맨 아래 층으로 두는 native stack 으로 쌓는다.
 4. **SIGHUP 종료 절차(#52385 의 B)는 witness 기록 뒤로 미룬다.** witness 기록에서 처리할 수 있는 신호가 나오면 그 근거로 다시 연다(§5).
 5. **TUI·`masc setup` 경로는 이 RFC 밖이다.** #52405 로 남긴다(§7).
 
-## 11. 관련
+## 11. 열린 질문
+
+### 11.1 새 세션도 posix_spawn 으로 만들기 (2026-11-26, #52124)
+
+§10 3번(서버는 새 세션)은 그대로다. 이 질문은 새 세션을 만드는 방법만 바꾼다. 운영자가 정하기 전까지 §4.1 이 그대로 기준이다.
+
+- **[사실]** §4.1 의 witness 는 서버를 fork 로 띄운다(`Process_eio_detached.spawn_detached_writing_to`). 자식은 exec 전에 OCaml 코드로 `setsid`, 표준 fd 연결, 준비 byte 쓰기를 한다(`lib/process/process_eio_detached.ml:65-84`).
+- **[사실]** masc 소유 stub 은 지금 새 그룹만 만든다. `own_group` 이면 `POSIX_SPAWN_SETPGROUP` 을 켠다(`lib/process/posix_spawn_stubs.c:189-199`). `Posix_spawn_detached` 는 자식이 "a process group of its own (not a session of its own)" 에서 돈다고 적는다(`posix_spawn_detached.mli:1-9`).
+- **[사실]** 두 플랫폼 모두 posix_spawn 에 새 세션 flag 가 있다.
+  - macOS: `POSIX_SPAWN_SETSID`(0x0400)가 SDK 헤더의 Darwin 전용 flag 묶음에 있다(`MacOSX.sdk/usr/include/sys/spawn.h:61`). 설치된 man page `posix_spawnattr_setflags(3)` 에는 이 flag 가 없다.
+  - glibc: 2.26 부터 있다. 근거는 glibc `NEWS` 2.26 절("posix_spawnattr_setflags now supports the flag POSIX_SPAWN_SETSID", BZ #21340), `posix/spawn.h:62`(`__USE_GNU` 아래 0x80), man-pages `posix_spawn(3)` 의 "POSIX_SPAWN_SETSID (since glibc 2.26)" 다. stub 은 이미 `_GNU_SOURCE` 를 정의한다(`posix_spawn_stubs.c:14`).
+- **[사실]** glibc 의 Linux 구현은 `setsid` 다음에 `setpgid` 를 부른다(`sysdeps/unix/sysv/linux/spawni.c:159-166`). 세션 대표는 `setpgid` 로 그룹을 바꿀 수 없다. 그래서 새 세션 mode 는 `SETPGROUP` 없이 `SETSID` 만 켠다. `setsid` 가 자식을 새 그룹의 대표로도 만들므로 "자식 pid = 자식 그룹" 계약(`posix_spawn_detached.mli` `pid`)은 그대로다.
+- **[후보]** stub 에 새 세션 mode 를 더한다. 그룹 mode 와 같은 함수이고 flag 만 다르다. 그러면 fork 와 exec 사이에 도는 OCaml 코드가 없어진다.
+
+§4.1 witness 설계에 생기는 일:
+
+- fork 를 쓰지 않으니 "domain 이 여럿이면 fork 가 거절된다" 는 제약과 그 **[확인 필요]**(모듈 초기화가 domain·스레드를 띄우는지)가 없어진다.
+- stub 은 0~2 밖의 fd 를 닫고(`posix_spawn_stubs.c:86-92`, `:125-128`) 신호 mask 를 비운다(`:189-195`). 그래서 witness 의 "fork 전에 열린 fd 가 0~2 뿐인지 확인하고, 아니면 1 로 끝난다" 단계가 없어진다. §8 9번 뒤 문장은 "witness 에 0~2 밖의 fd 를 하나 열어 두어도 서버의 열린 fd 는 0~2 와 서버가 연 것뿐이다" 로 바뀐다. §8 11번의 "fd 확인을 건너뛰면" 변형 시험도 없어진다.
+- exec 실패를 posix_spawn 이 바로 돌려준다. glibc 는 자식의 errno 를 부모에게 넘긴다(`spawni.c:306`, `:451`). macOS man page `posix_spawn(2)` 는 "If an error occurs, they return a non-zero error code ... and no child process is created" 라고 적는다. 그래서 fork 경로의 준비 byte 와 exit 127 이 필요 없다.
+- 그대로인 것: 서버가 새 세션에 드는 것(§10 3번), 서버 그룹이 고아로 남는 것, §8 8번(`kill -TSTP`), witness 의 no-op 처리기. stub 은 `SETSIGDEF` 를 켜지 않으므로 처리기와 무시의 차이(§4.1)는 지금과 같다. stdin 도 `/dev/null` 그대로다(stub 은 터미널 stdin 을 `/dev/null` 로 바꾼다, `posix_spawn_stubs.c:205`).
+- **[확인 필요]** macOS 에서 `SETSID` 로 띄운 자식이 실제로 새 세션의 대표가 되는지. man page 에 없으니 자식의 `getsid` 를 보는 작은 시험으로 확인한다. `SETSID` 와 `SETPGROUP` 을 같이 켠 경우는 읽지 않았다. 새 세션 mode 는 둘을 같이 켜지 않는다.
+- 이 길을 고르면 §4.1 의 fork 문단과 §8 9·11번을 고친다. TUI·`masc setup` 경로도 같은 mode 로 옮길 수 있지만 §10 5번대로 이 RFC 밖이다(#52405).
+
+## 12. 관련
 
 - #52385 서버가 종료 절차 없이 끝나도 어떻게 끝났는지 남는 곳이 없다.
 - #52405 TUI·`masc setup --no-tui` 가 띄운 서버도 띄운 쪽이 끝나면 어떻게 끝났는지 남지 않는다.

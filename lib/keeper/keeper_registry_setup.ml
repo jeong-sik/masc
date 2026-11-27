@@ -1447,27 +1447,28 @@ let interrupt_current_turn_exact observed_entry =
       (fun observation -> observation.turn_id)
       entry.current_turn_observation
   in
-    match Atomic.exchange entry.current_turn_switch None, turn_id with
+    match Atomic.get entry.current_turn_switch, turn_id with
     | None, None -> Exact_no_turn_in_flight
     | None, Some turn_id ->
        Exact_turn_cancel_failed
          { turn_id = Some turn_id
          ; detail = "turn observation exists without a live turn switch"
          }
-    | Some turn_sw, observed_turn_id ->
+    | Some _, None ->
+       Exact_turn_cancel_failed
+         { turn_id = None
+         ; detail = "live turn switch exists without a turn observation"
+         }
+    | (Some turn_sw as current_sw), Some turn_id ->
       (try
          Eio.Switch.fail turn_sw Operator_interrupt;
-         match observed_turn_id with
-         | Some turn_id -> Exact_turn_cancelled turn_id
-         | None ->
-           Exact_turn_cancel_failed
-             { turn_id = None
-             ; detail = "live turn switch exists without a turn observation"
-             }
+         ignore
+           (Atomic.compare_and_set entry.current_turn_switch current_sw None : bool);
+         Exact_turn_cancelled turn_id
        with
        | exn -> (* cancel-guard-ok: Eio.Switch.fail is a synchronous cancel, no suspension *)
          Exact_turn_cancel_failed
-           { turn_id = observed_turn_id
+           { turn_id = Some turn_id
            ; detail = Printexc.to_string exn
            })
 ;;

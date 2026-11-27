@@ -207,6 +207,12 @@ let settle_reservation_release ~keeper_name release result =
           ^ keeper_name))
   | Some Keeper_lifecycle_reservation.Released | None -> result
 
+let release_reservation_protected token =
+  match Fs_compat.execution_context () with
+  | Fs_compat.Eio_fiber ->
+    Eio.Cancel.protect (fun () -> Keeper_lifecycle_reservation.release token)
+  | Fs_compat.Non_eio -> Keeper_lifecycle_reservation.release token
+
 let with_authority config keeper_name f = protect (fun () ->
   match Keeper_shutdown_intake_fence.run_durable_intake_if_open
     ~base_path:config.Workspace.base_path ~keeper_name (fun _ ->
@@ -228,7 +234,7 @@ let with_authority config keeper_name f = protect (fun () ->
         let result =
           Fun.protect
             ~finally:(fun () ->
-              release_outcome := Some (Keeper_lifecycle_reservation.release token))
+              release_outcome := Some (release_reservation_protected token))
             (fun () ->
               let path = manifest_path config keeper_name in
               match

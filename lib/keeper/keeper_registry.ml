@@ -822,22 +822,9 @@ let rec dispatch_event_with_audit_internal
             ; transition_outcome = "applied"
             ; wall_clock_at_decision = now
             };
-          (* Broadcast phase transition to SSE subscribers *)
-          (try
-             Sse.broadcast
-               (`Assoc
-                   [ "type", `String "keeper_phase_changed"
-                   ; "name", `String name
-                   ; ( "prev_phase"
-                     , `String (Keeper_state_machine.phase_to_string tr.prev_phase) )
-                   ; "new_phase", `String (Keeper_state_machine.phase_to_string tr.new_phase)
-                   ; "event", `String (Keeper_state_machine.event_to_string event)
-                   ; "ts_unix", `Float now
-                   ])
-           with
-           | Eio.Cancel.Cancelled _ as e -> raise e
-           | exn -> record_phase_broadcast_failure ~name exn);
-          (* Update running count based on phase transition *)
+          (* Update in-memory running count, lifecycle metric, and state-change
+             observer before SSE broadcasts so cancellation during a yielding
+             broadcast cannot leave the gauge or observers out of sync. *)
           (match tr.prev_phase, tr.new_phase with
            | ( Running
              , (Offline | Failing | Draining | Paused | Stopped | Crashed | Restarting) ) ->
@@ -856,6 +843,22 @@ let rec dispatch_event_with_audit_internal
               ; "to_phase", Keeper_state_machine.phase_to_string tr.new_phase
               ]
             ();
+          notify_state_change_observer ~base_path:entry.base_path Lifecycle_phase_changed;
+          (* Broadcast phase transition to SSE subscribers *)
+          (try
+             Sse.broadcast
+               (`Assoc
+                   [ "type", `String "keeper_phase_changed"
+                   ; "name", `String name
+                   ; ( "prev_phase"
+                     , `String (Keeper_state_machine.phase_to_string tr.prev_phase) )
+                   ; "new_phase", `String (Keeper_state_machine.phase_to_string tr.new_phase)
+                   ; "event", `String (Keeper_state_machine.event_to_string event)
+                   ; "ts_unix", `Float now
+                   ])
+           with
+           | Eio.Cancel.Cancelled _ as e -> raise e
+           | exn -> record_phase_broadcast_failure ~name exn);
           (* TLA+ trace emission (MASC_TLA_TRACE=1) *)
           if Keeper_trace_emit.enabled ()
           then
@@ -877,7 +880,6 @@ let rec dispatch_event_with_audit_internal
              full snapshot so the "single writer, pull observers" invariant
              is preserved. *)
           broadcast_composite_changed ~base_path:entry.base_path ~name ~ts_unix:now;
-          notify_state_change_observer ~base_path:entry.base_path Lifecycle_phase_changed;
           Ok tr)
      | Ok tr ->
        (* No phase change — still update conditions *)

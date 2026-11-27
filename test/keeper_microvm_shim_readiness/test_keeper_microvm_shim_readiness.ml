@@ -381,6 +381,82 @@ let test_shim_of_another_source_is_refused_until_reinstalled () = with_fixture (
   install base "reinstalled shim of this source";
   value (verify fs base))
 
+let failing_open_dir_fs ~fs exn : Eio.Fs.dir_ty Eio.Path.t =
+  let (Eio.Resource.T (dir, ops), prefix) = fs in
+  let module Dir = (val Eio.Resource.get ops Eio.Fs.Pi.Dir) in
+  let module Failing = struct
+    include Dir
+    let open_dir _dir ~sw:_ _path = raise exn
+  end in
+  Eio.Resource.T (dir, Eio.Resource.handler
+    [Eio.Resource.H (Eio.Fs.Pi.Dir, (module Failing))]), prefix
+
+let test_exception_in_config_lock_does_not_poison_ensure_config () = with_fixture (fun ~fs base ->
+  install base "valid fixture bytes";
+  value (initialize fs base);
+  value (verify fs base);
+  Unix.unlink (config base);
+  let escaped_ensure =
+    try
+      ignore (Ready.ensure_config
+        ~fs:(failing_open_dir_fs ~fs (Failure "injected ensure_entry fault"))
+        ~base_path:base);
+      false
+    with Failure msg -> String.equal msg "injected ensure_entry fault" in
+  Alcotest.(check bool) "unexpected exception in ensure_entry propagates" true escaped_ensure;
+  value (Ready.ensure_config ~fs ~base_path:base);
+  value (verify fs base);
+  Alcotest.(check string) "subsequent ensure_config restored canonical config"
+    (Shim.shim_config_content ~payload_path) (read (config base));
+  let recover_base = Filename.concat base "recover-init-base" in
+  Unix.mkdir recover_base 0o700;
+  (match initialize fs recover_base with
+   | Error (Ready.Initialization_failed (Ready.Startup_shim_missing _)) -> ()
+   | Error error -> Alcotest.fail (Ready.error_message error)
+   | Ok () -> Alcotest.fail "missing startup shim accepted");
+  install recover_base "installed after startup failure";
+  let escaped_recover =
+    try
+      ignore (Ready.ensure_config
+        ~fs:(failing_open_dir_fs ~fs (Failure "injected recover_initialization fault"))
+        ~base_path:recover_base);
+      false
+    with Failure msg -> String.equal msg "injected recover_initialization fault" in
+  Alcotest.(check bool) "unexpected exception in recover_initialization propagates"
+    true escaped_recover;
+  value (Ready.ensure_config ~fs ~base_path:recover_base);
+  value (verify fs recover_base);
+  Alcotest.(check string) "subsequent ensure_config recovered failed initialization"
+    (Shim.shim_config_content ~payload_path) (read (config recover_base)))
+
+let test_cancellation_in_recover_and_ensure_config_does_not_poison () = with_fixture (fun ~fs base ->
+  (match initialize fs base with
+   | Error (Ready.Initialization_failed (Ready.Startup_shim_missing _)) -> ()
+   | Error error -> Alcotest.fail (Ready.error_message error)
+   | Ok () -> Alcotest.fail "missing startup shim accepted");
+  install base "valid fixture bytes";
+  let cancel_during_ensure () =
+    try
+      Eio.Cancel.sub (fun context ->
+        let fault = Recovery_test.before_parent_sync_dispatch ~before_sync:(fun () ->
+          Eio.Cancel.cancel context Exit;
+          Eio.Fiber.yield ()) in
+        Recovery_test.with_replace_dispatch_fault fault (fun () ->
+          ignore (Ready.ensure_config ~fs ~base_path:base)));
+      false
+    with Eio.Cancel.Cancelled _ -> true in
+  Alcotest.(check bool) "cancellation during recover_initialization propagates"
+    true (cancel_during_ensure ());
+  value (Ready.ensure_config ~fs ~base_path:base);
+  value (verify fs base);
+  Unix.unlink (config base);
+  Alcotest.(check bool) "cancellation during ensure_entry propagates"
+    true (cancel_during_ensure ());
+  value (Ready.ensure_config ~fs ~base_path:base);
+  value (verify fs base);
+  Alcotest.(check string) "canonical config restored after cancellation"
+    (Shim.shim_config_content ~payload_path) (read (config base)))
+
 let () = Alcotest.run "microvm startup and endpoint shim readiness"
   ["actual fixture filesystem", [
     Alcotest.test_case "startup config once and conflicting payload" `Quick test_startup_config_is_written_once;
@@ -402,4 +478,6 @@ let () = Alcotest.run "microvm startup and endpoint shim readiness"
     Alcotest.test_case "hand-built shim remains allowed" `Quick test_hand_built_unverified_policy_is_preserved;
     Alcotest.test_case "shim of another source refused until reinstalled" `Quick test_shim_of_another_source_is_refused_until_reinstalled;
     Alcotest.test_case "cached readiness preserves caller cancellation" `Quick test_cancelled_caller_cannot_reuse_cached_success;
-    Alcotest.test_case "failed recovery preserves caller cancellation" `Quick test_cancellation_during_failed_recovery_propagates]]
+    Alcotest.test_case "failed recovery preserves caller cancellation" `Quick test_cancellation_during_failed_recovery_propagates;
+    Alcotest.test_case "exception in config_lock does not poison ensure_config" `Quick test_exception_in_config_lock_does_not_poison_ensure_config;
+    Alcotest.test_case "cancellation in recover and ensure_config does not poison" `Quick test_cancellation_in_recover_and_ensure_config_does_not_poison]]

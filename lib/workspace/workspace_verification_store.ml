@@ -398,7 +398,7 @@ let store_text_artifact ~base_path ~reference ~content ~bytes =
       Evidence_artifact_unreadable
         { reference; reason = Storage_failed (Printexc.to_string error) }
 
-let store_binary_artifact ~base_path ?request_id ?index ~reference ~data ~bytes ~sha256 ~format =
+let store_binary_artifact ~base_path ~request_id ~index ~reference ~data ~bytes ~sha256 ~format =
   match persist_binary_body ~base_path ?request_id ?index data with
   | body -> Evidence_artifact_binary { reference; bytes; sha256; format; body }
   | exception ((Sys_error _ | Unix.Unix_error _) as error) ->
@@ -418,7 +418,7 @@ let inspect_producer_relative_artifact ?artifact_read ?request_id ?index ~base_p
             (* Bytes that are not text are evidence too: the snapshot keeps
                the hash and the size, and the bytes are filed as the body. *)
             store_binary_artifact
-              ~base_path ?request_id ?index ~reference ~data ~bytes ~sha256 ~format
+              ~base_path ~request_id ~index ~reference ~data ~bytes ~sha256 ~format
         | Ok (Text_payload { content; bytes }) ->
           (* An injected reader hands back bytes from another lane (a guest
              [cat]), so the same scan holds the line here as in the direct
@@ -441,7 +441,7 @@ let inspect_producer_relative_artifact ?artifact_read ?request_id ?index ~base_p
       store_text_artifact ~base_path ~reference ~content ~bytes
     | Ok (Binary_payload { data; bytes; sha256; format }) ->
       store_binary_artifact
-        ~base_path ?request_id ?index ~reference ~data ~bytes ~sha256 ~format
+        ~base_path ~request_id ~index ~reference ~data ~bytes ~sha256 ~format
     | Error (Evidence_missing as reason)
     | Error (Evidence_not_regular_file as reason)
     | Error (Evidence_outside_worker_playground as reason)

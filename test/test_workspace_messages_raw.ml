@@ -564,10 +564,12 @@ let test_get_messages_raw_large_directory_metered_yields_and_order () =
       (List.map
          (fun (m : Masc_domain.message) -> m.seq)
          (Workspace.get_messages_raw config ~since_seq:0 ~limit:1));
-    (* Measure metered yielding in [select_recent_message_names] alone by using
-       [since_seq:2500], which scans all 2501 directory filenames and stops
-       without opening a message file via [Fs_compat.load_file] (whose
-       systhread suspension would let a busy-yielding rival spin). *)
+    (* Measure metered yielding during a cold 2501-file scan alone by using
+       [since_seq:2500] after clearing the settled dir cache so the scan runs
+       deterministically even on slow CI runners where >50ms may have elapsed
+       since [write_msg 2500], without opening any message file via
+       [Fs_compat.load_file]. *)
+    Workspace.clear_message_dir_cache ();
     let done_flag = Atomic.make false in
     let rival_ticks = ref 0 in
     let empty_ref = ref [] in
@@ -594,6 +596,288 @@ let test_get_messages_raw_large_directory_metered_yields_and_order () =
       "metered yield avoids per-file yield storm"
       true
       (!rival_ticks <= 20))
+
+let write_fixture_message ~template ~msgs_dir ~filename ~seq ~from_agent ~content =
+  let msg =
+    { template with
+      Masc_domain.seq
+    ; from_agent
+    ; content
+    ; request_id = Printf.sprintf "req-%s" filename
+    }
+  in
+  let path = Filename.concat msgs_dir filename in
+  let json_str = Yojson.Safe.to_string (Masc_domain.message_to_yojson msg) in
+  Out_channel.with_open_bin path (fun ch -> output_string ch json_str);
+  path
+
+let seed_template config =
+  match
+    Workspace.broadcast
+      ~audience:Workspace_broadcast.System_record
+      config
+      ~from_agent:"claude"
+      ~content:"seed"
+  with
+  | Error error ->
+    Alcotest.failf
+      "seed broadcast failed: %s"
+      (Workspace_broadcast.broadcast_error_to_string error)
+  | Ok _ ->
+    (match Workspace.get_messages_raw config ~since_seq:0 ~limit:1 with
+     | [ msg ] -> msg
+     | rows -> Alcotest.failf "expected 1 seed message, got %d" (List.length rows))
+
+let test_dir_cache_parity_with_select_recent_message_names () =
+  with_test_env (fun config ->
+    let template = seed_template config in
+    let msgs_dir = Workspace_utils.messages_dir config in
+    (* Remove the initial broadcast file so we control every filename explicitly. *)
+    Array.iter (fun name -> Unix.unlink (Filename.concat msgs_dir name)) (Sys.readdir msgs_dir);
+    let specs =
+      [ "000000005_alpha_broadcast.json", 5, "alpha", "m5-a"
+      ; "000000010_alpha_broadcast.json", 10, "alpha", "m10-a"
+      ; "000000010_zeta_broadcast.json", 10, "zeta", "m10-z"
+      ; "000000010_mid_broadcast.json", 10, "mid", "m10-m"
+      ; "000000012_beta_broadcast.json", 12, "beta", "m12-b"
+      ; "000000015_alpha_broadcast.json", 15, "alpha", "m15-a"
+      ]
+    in
+    List.iter
+      (fun (filename, seq, from_agent, content) ->
+         ignore (write_fixture_message ~template ~msgs_dir ~filename ~seq ~from_agent ~content))
+      specs;
+    (* Add stray/ignored files that must be skipped identically. *)
+    Out_channel.with_open_bin
+      (Filename.concat msgs_dir "000000099_alpha_broadcast.json.tmp-atomic")
+      (fun ch -> output_string ch "{}");
+    Out_channel.with_open_bin
+      (Filename.concat msgs_dir "invalid name with spaces_broadcast.json")
+      (fun ch -> output_string ch "{}");
+    Out_channel.with_open_bin
+      (Filename.concat msgs_dir "not_a_message.json")
+      (fun ch -> output_string ch "{}");
+    let valid_names_asc =
+      Sys.readdir msgs_dir
+      |> Array.to_list
+      |> List.filter Workspace.is_valid_filename
+      |> List.sort String.compare
+    in
+    let valid_names_desc = List.rev valid_names_asc in
+    let content_of_name name =
+      match List.find_opt (fun (n, _, _, _) -> String.equal n name) specs with
+      | Some (_, _, _, content) -> content
+      | None -> Alcotest.failf "unexpected selected name %s" name
+    in
+    (* Let directory settle so cached path runs. *)
+    Unix.sleepf 0.08;
+    Workspace.clear_message_dir_cache ();
+    (* Check parity across combinations of since_seq and limit, including tie-breaks. *)
+    let cases =
+      [ 0, 0
+      ; 0, 1
+      ; 0, 2
+      ; 0, 3
+      ; 0, 4
+      ; 0, 10
+      ; 5, 2
+      ; 5, 4
+      ; 9, 2
+      ; 10, 5
+      ; 12, 5
+      ; 15, 5
+      ]
+    in
+    List.iter
+      (fun (since_seq, limit) ->
+         let uncached_asc =
+           Workspace.select_recent_message_names ~since_seq ~limit valid_names_asc
+           |> List.map content_of_name
+         in
+         let uncached_desc =
+           Workspace.select_recent_message_names ~since_seq ~limit valid_names_desc
+           |> List.map content_of_name
+         in
+         Alcotest.(check (list string))
+           (Printf.sprintf "select_recent_message_names order-independent since=%d limit=%d"
+              since_seq limit)
+           uncached_asc uncached_desc;
+         let cached =
+           Workspace.get_messages_raw config ~since_seq ~limit
+           |> List.map (fun (m : Masc_domain.message) -> m.content)
+         in
+         Alcotest.(check (list string))
+           (Printf.sprintf "cached get_messages_raw matches uncached since=%d limit=%d"
+              since_seq limit)
+           uncached_asc cached)
+      cases;
+    (* Verify tie-breaking order explicitly on seq=10: zeta > mid > alpha newest-first. *)
+    let seq10_top2 =
+      Workspace.get_messages_raw config ~since_seq:5 ~limit:4
+      |> List.map (fun (m : Masc_domain.message) -> m.content)
+    in
+    Alcotest.(check (list string))
+      "seq=10 tie-break newest-first is zeta then mid"
+      [ "m15-a"; "m12-b"; "m10-z"; "m10-m" ]
+      seq10_top2;
+    (* Verify get_all_messages_raw oldest-first is exact reverse (alpha, mid, zeta). *)
+    let all_since_5 =
+      Workspace.get_all_messages_raw config ~since_seq:5
+      |> List.map (fun (m : Masc_domain.message) -> m.content)
+    in
+    Alcotest.(check (list string))
+      "get_all_messages_raw oldest-first reverses tie-break cleanly"
+      [ "m10-a"; "m10-m"; "m10-z"; "m12-b"; "m15-a" ]
+      all_since_5;
+    (* Verify get_messages_matching hits same deterministic order. *)
+    let matching_alpha =
+      Workspace.get_messages_matching config ~since_seq:0 ~limit:3
+        ~keep:(fun m -> String.equal m.from_agent "alpha")
+      |> List.map (fun (m : Masc_domain.message) -> m.content)
+    in
+    Alcotest.(check (list string))
+      "get_messages_matching preserves newest-first order"
+      [ "m15-a"; "m10-a"; "m5-a" ]
+      matching_alpha)
+
+let test_dir_cache_hit_and_mutation_invalidation () =
+  with_test_env (fun config ->
+    let template = seed_template config in
+    let msgs_dir = Workspace_utils.messages_dir config in
+    Array.iter (fun name -> Unix.unlink (Filename.concat msgs_dir name)) (Sys.readdir msgs_dir);
+    ignore
+      (write_fixture_message ~template ~msgs_dir
+         ~filename:"000000001_claude_broadcast.json" ~seq:1 ~from_agent:"claude" ~content:"msg-1");
+    let p2 =
+      write_fixture_message ~template ~msgs_dir
+        ~filename:"000000002_claude_broadcast.json" ~seq:2 ~from_agent:"claude" ~content:"msg-2"
+    in
+    ignore
+      (write_fixture_message ~template ~msgs_dir
+         ~filename:"000000003_claude_broadcast.json" ~seq:3 ~from_agent:"claude" ~content:"msg-3");
+    (* Wait past 50ms settle window, then clear cache to observe cold->warm transition. *)
+    Unix.sleepf 0.08;
+    Workspace.clear_message_dir_cache ();
+    let h0, m0, c0 = Workspace.message_dir_cache_stats () in
+    Alcotest.(check int) "cache starts empty after clear" 0 c0;
+    (* Cold call on settled dir: miss + populate. *)
+    let r1 = Workspace.get_messages_raw config ~since_seq:0 ~limit:3 in
+    let h1, m1, c1 = Workspace.message_dir_cache_stats () in
+    Alcotest.(check int) "cold call records 1 miss" (m0 + 1) m1;
+    Alcotest.(check int) "cold call records 0 hits" h0 h1;
+    Alcotest.(check int) "settled dir is cached" 1 c1;
+    Alcotest.(check (list int)) "cold call returns seqs" [ 3; 2; 1 ]
+      (List.map (fun (m : Masc_domain.message) -> m.seq) r1);
+    (* Subsequent calls across all 3 query surfaces must hit the dir cache. *)
+    let r2 = Workspace.get_messages_raw config ~since_seq:0 ~limit:2 in
+    let r3 = Workspace.get_messages_raw config ~since_seq:3 ~limit:2 in
+    let r4 =
+      Workspace.get_messages_matching config ~since_seq:0 ~limit:2
+        ~keep:(fun (m : Masc_domain.message) -> m.seq mod 2 = 1)
+    in
+    let r5 = Workspace.get_all_messages_raw config ~since_seq:1 in
+    let h2, m2, c2 = Workspace.message_dir_cache_stats () in
+    Alcotest.(check int) "4 warm calls all hit cache" (h1 + 4) h2;
+    Alcotest.(check int) "0 extra misses on settled dir" m1 m2;
+    Alcotest.(check int) "single dir entry remains cached" 1 c2;
+    Alcotest.(check (list int)) "warm raw top2" [ 3; 2 ]
+      (List.map (fun (m : Masc_domain.message) -> m.seq) r2);
+    Alcotest.(check int) "warm raw at head is empty" 0 (List.length r3);
+    Alcotest.(check (list int)) "warm matching odd seqs" [ 3; 1 ]
+      (List.map (fun (m : Masc_domain.message) -> m.seq) r4);
+    Alcotest.(check (list int)) "warm all oldest-first" [ 2; 3 ]
+      (List.map (fun (m : Masc_domain.message) -> m.seq) r5);
+    (* Adding a file invalidates immediately (even before 50ms settle). *)
+    ignore
+      (write_fixture_message ~template ~msgs_dir
+         ~filename:"000000004_claude_broadcast.json" ~seq:4 ~from_agent:"claude" ~content:"msg-4");
+    let r_added = Workspace.get_messages_raw config ~since_seq:0 ~limit:2 in
+    let h3, m3, _ = Workspace.message_dir_cache_stats () in
+    Alcotest.(check int) "file addition bypasses stale cache" h2 h3;
+    Alcotest.(check int) "file addition increments miss" (m2 + 1) m3;
+    Alcotest.(check (list int)) "newly added message visible immediately" [ 4; 3 ]
+      (List.map (fun (m : Masc_domain.message) -> m.seq) r_added);
+    (* Re-settle, warm cache again, then delete a file and verify immediate invalidation. *)
+    Unix.sleepf 0.08;
+    ignore (Workspace.get_messages_raw config ~since_seq:0 ~limit:4);
+    let h4, m4, c4 = Workspace.message_dir_cache_stats () in
+    Alcotest.(check int) "re-settled dir cached again" 1 c4;
+    Unix.unlink p2;
+    let r_removed = Workspace.get_messages_raw config ~since_seq:0 ~limit:4 in
+    let h5, m5, _ = Workspace.message_dir_cache_stats () in
+    Alcotest.(check int) "file removal bypasses stale cache" h4 h5;
+    Alcotest.(check int) "file removal increments miss" (m4 + 1) m5;
+    Alcotest.(check (list int)) "removed message disappears immediately" [ 4; 3; 1 ]
+      (List.map (fun (m : Masc_domain.message) -> m.seq) r_removed))
+
+let test_dir_cache_missing_nondir_and_symlink_eviction () =
+  with_test_env (fun config ->
+    let template = seed_template config in
+    let msgs_dir = Workspace_utils.messages_dir config in
+    ignore
+      (write_fixture_message ~template ~msgs_dir
+         ~filename:"000000002_claude_broadcast.json" ~seq:2 ~from_agent:"claude" ~content:"msg-2");
+    Unix.sleepf 0.08;
+    Workspace.clear_message_dir_cache ();
+    ignore (Workspace.get_messages_raw config ~since_seq:0 ~limit:5);
+    let _, _, c_warm = Workspace.message_dir_cache_stats () in
+    Alcotest.(check int) "populated before removal" 1 c_warm;
+    (* 1. Missing directory (ENOENT): returns [] and evicts cache entry. *)
+    Array.iter (fun name -> Unix.unlink (Filename.concat msgs_dir name)) (Sys.readdir msgs_dir);
+    Unix.rmdir msgs_dir;
+    let missing_msgs = Workspace.get_messages_raw config ~since_seq:0 ~limit:5 in
+    let _, _, c_missing = Workspace.message_dir_cache_stats () in
+    Alcotest.(check int) "missing dir returns empty" 0 (List.length missing_msgs);
+    Alcotest.(check int) "missing dir evicts cache entry" 0 c_missing;
+    let missing_all = Workspace.get_all_messages_raw config ~since_seq:0 in
+    Alcotest.(check int) "get_all_messages_raw missing dir returns empty" 0
+      (List.length missing_all);
+    (* 2. Regular file at msgs_dir (non-dir): fails closed with Sys_error, does not cache. *)
+    Out_channel.with_open_bin msgs_dir (fun ch -> output_string ch "not a dir");
+    let raised_sys_error =
+      try
+        ignore (Workspace.get_messages_raw config ~since_seq:0 ~limit:5);
+        false
+      with Sys_error _ -> true
+    in
+    let _, _, c_nondir = Workspace.message_dir_cache_stats () in
+    Alcotest.(check bool) "regular file at msgs_dir fails closed with Sys_error"
+      true raised_sys_error;
+    Alcotest.(check int) "non-dir is never cached" 0 c_nondir;
+    Unix.unlink msgs_dir;
+    (* 3. Symlink to a real settled directory: reads uncached, never caches symlink. *)
+    let target_dir = Filename.concat (Filename.dirname msgs_dir) "messages-symlink-target" in
+    Unix.mkdir target_dir 0o755;
+    Fun.protect
+      ~finally:(fun () ->
+        (try Unix.unlink msgs_dir with Unix.Unix_error _ -> ());
+        (try
+           Array.iter
+             (fun name -> Unix.unlink (Filename.concat target_dir name))
+             (Sys.readdir target_dir);
+           Unix.rmdir target_dir
+         with Sys_error _ | Unix.Unix_error _ -> ());
+        (* Restore a clean empty messages dir so with_test_env cleanup succeeds. *)
+        (try Unix.mkdir msgs_dir 0o755 with Unix.Unix_error _ -> ()))
+      (fun () ->
+        ignore
+          (write_fixture_message ~template ~msgs_dir:target_dir
+             ~filename:"000000007_claude_broadcast.json" ~seq:7 ~from_agent:"claude"
+             ~content:"via-symlink");
+        Unix.symlink target_dir msgs_dir;
+        Unix.sleepf 0.08;
+        let sym_msgs = Workspace.get_messages_raw config ~since_seq:0 ~limit:5 in
+        let _, _, c_sym = Workspace.message_dir_cache_stats () in
+        Alcotest.(check (list int)) "symlink target still readable uncached" [ 7 ]
+          (List.map (fun (m : Masc_domain.message) -> m.seq) sym_msgs);
+        Alcotest.(check int) "symlink dir is never cached" 0 c_sym;
+        (* 4. Dangling symlink: returns [] cleanly without caching. *)
+        Unix.unlink msgs_dir;
+        Unix.symlink (Filename.concat (Filename.dirname msgs_dir) "does-not-exist") msgs_dir;
+        let dangling_msgs = Workspace.get_messages_raw config ~since_seq:0 ~limit:5 in
+        let _, _, c_dangling = Workspace.message_dir_cache_stats () in
+        Alcotest.(check int) "dangling symlink returns empty" 0 (List.length dangling_msgs);
+        Alcotest.(check int) "dangling symlink is never cached" 0 c_dangling))
 
 let () =
   Alcotest.run "Workspace raw message regression" [
@@ -624,5 +908,11 @@ let () =
         test_get_messages_matching_limit_bounds_matches;
       Alcotest.test_case "large directory metered yields and order" `Quick
         test_get_messages_raw_large_directory_metered_yields_and_order;
+      Alcotest.test_case "dir cache parity with uncached select_recent_message_names" `Quick
+        test_dir_cache_parity_with_select_recent_message_names;
+      Alcotest.test_case "dir cache hit on settled dir and mutation invalidation" `Quick
+        test_dir_cache_hit_and_mutation_invalidation;
+      Alcotest.test_case "dir cache missing non-dir and symlink eviction" `Quick
+        test_dir_cache_missing_nondir_and_symlink_eviction;
     ]);
   ]

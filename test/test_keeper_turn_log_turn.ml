@@ -10,6 +10,7 @@ module Recorder = Masc.Keeper_turn_log_recorder
 module Writer = Masc.Keeper_turn_log_writer
 module Turn = Masc.Keeper_turn_log_turn
 module Store = Masc.Keeper_checkpoint_store
+module Driver = Masc.Keeper_turn_driver_try_provider
 module Objects = Agent_core.Checkpoint_objects
 
 let session_id = "trace-1"
@@ -182,6 +183,28 @@ let failures site =
     Keeper_metrics.(to_string TurnLogAppendFailures)
     ~labels:[ "keeper", keeper_name; "site", site ]
     ()
+;;
+
+let open_close_failures () =
+  Masc.Otel_metric_store.metric_value_or_zero
+    Keeper_metrics.(to_string TurnLogOpenCloseFailures)
+    ~labels:[ "keeper", keeper_name ]
+    ()
+;;
+
+let open_messages (place : Recorder.place) =
+  match Masc.Keeper_turn_log_head.read ~session_dir:place.session_dir ~session_id:place.session_id with
+  | Ok head -> head.open_messages
+  | Error error -> fail (Masc.Keeper_checkpoint_store_session.checkpoint_load_error_to_string error)
+;;
+
+(* A save in the middle of turn [n], as the turn path makes it: the history
+   so far and the turn's two messages, left open, and the turn told of it. *)
+let open_save place turn n history =
+  let history = history @ turn_messages n in
+  save place ~boundary:Objects.Turn_continues ~turn_count:n history;
+  Turn.note_open_save turn;
+  history
 ;;
 
 let every_exit = [ Turn.Returned_ok; Returned_error; Raised; Cancelled ]
@@ -467,6 +490,211 @@ let test_every_way_out_writes_one_end =
     (log_text place)
 ;;
 
+(* A turn that saved in its middle and ended without its closing save, on
+   each way out. Its end closes what it saved: its line names those messages
+   as its own and the next turn's baseline lies after them. *)
+let test_an_end_without_a_closing_save_closes_what_the_turn_saved =
+  in_workspace
+  @@ fun place ->
+  let history = ref [] in
+  let (_ : (unit, string) result) =
+    turn place 1 (fun turn ->
+      history := open_save place turn 1 !history;
+      Error "the provider failed")
+  in
+  (match
+     turn place 2 (fun turn ->
+       history := open_save place turn 2 !history;
+       raise Turn_broke)
+   with
+   | (_ : (unit, string) result) -> fail "the exception did not leave"
+   | exception Turn_broke -> ());
+  (match
+     Eio.Cancel.sub (fun context ->
+       turn place 3 (fun turn ->
+         history := open_save place turn 3 !history;
+         Eio.Cancel.cancel context Turn_broke;
+         Eio.Fiber.check ();
+         Ok ()))
+   with
+   | (_ : (unit, string) result) -> fail "the cancellation did not leave"
+   | exception Eio.Cancel.Cancelled _ -> ());
+  check int "no message is left open" 0 (open_messages place);
+  let (_ : (unit, string) result) = turn place 4 (fun (_ : Turn.t) -> Ok ()) in
+  check string "each turn names what it saved, and the next one starts after it"
+    "started at 0\n\
+     opened 1 at 0\n\
+     closed errored at 2, before [], own [0+2]\n\
+     opened 2 at 2\n\
+     closed errored at 4, before [], own [0+2]\n\
+     opened 3 at 4\n\
+     closed cancelled at 6, before [], own [0+2]\n\
+     opened 4 at 6\n\
+     closed completed at 6, before [], own []"
+    (log_text place)
+;;
+
+(* Open messages the turn did not say it saved are not the turn's to close:
+   an input put there, by a writer that is not the turn, for a turn that has
+   yet to take it. *)
+let test_an_end_leaves_open_what_the_turn_did_not_save =
+  in_workspace
+  @@ fun place ->
+  save place ~boundary:Objects.Turn_continues ~turn_count:1 (turn_messages 1);
+  let (_ : (unit, string) result) = turn place 1 (fun (_ : Turn.t) -> Error "the provider failed") in
+  check int "the input is still open" 2 (open_messages place);
+  check string "the line names no message"
+    "started at 0\nopened 1 at 0\nclosed errored at 0, before [], own []" (log_text place)
+;;
+
+(* A chat operation can resume from its checkpoint, after a failure that
+   passes with time or in the process that starts next. The turn that resumes
+   opens after its input and may add no message, so whichever way such a turn
+   ends, its end leaves what it saved open. The closing save of the turn that
+   completes the operation names the messages as its own. *)
+let test_the_turn_of_an_operation_that_can_resume =
+  in_workspace
+  @@ fun place ->
+  let history = ref [] in
+  let (_ : (unit, string) result) =
+    turn place 1 (fun turn ->
+      Turn.note_resumable_operation turn;
+      history := open_save place turn 1 !history;
+      Error "the provider failed")
+  in
+  (match
+     turn place 2 (fun turn ->
+       Turn.note_resumable_operation turn;
+       history := open_save place turn 2 !history;
+       raise Turn_broke)
+   with
+   | (_ : (unit, string) result) -> fail "the exception did not leave"
+   | exception Turn_broke -> ());
+  check int "what the turns saved is still open" 4 (open_messages place);
+  let (_ : (unit, string) result) =
+    turn place 3 (fun turn ->
+      Turn.note_resumable_operation turn;
+      history := !history @ turn_messages 3;
+      save place ~boundary:Objects.Turn_closes ~turn_count:3 !history;
+      Turn.note_closing_save turn Saved;
+      Ok ())
+  in
+  check string "the turn that completes names the messages as its own"
+    "started at 0\n\
+     opened 1 at 0\n\
+     closed errored at 0, before [], own []\n\
+     opened 2 at 0\n\
+     closed errored at 0, before [], own []\n\
+     opened 3 at 0\n\
+     closed completed at 6, before [], own [0+6]"
+    (log_text place)
+;;
+
+(* The save at the turn's end cannot write its bundle: neither a new
+   directory of the object store nor a file in one it has. The turn's line
+   says its closing save failed, the failure is counted, and the messages
+   stay open for the next save that closes. *)
+let test_a_save_at_the_end_that_fails =
+  in_workspace
+  @@ fun place ->
+  let counted = open_close_failures () in
+  let objects = Filename.concat place.session_dir Masc.Keeper_checkpoint_object_store.dirname in
+  let set_mode mode =
+    Sys.readdir objects
+    |> Array.to_list
+    |> List.map (Filename.concat objects)
+    |> List.filter Sys.is_directory
+    |> List.iter (fun shard -> Unix.chmod shard mode);
+    Unix.chmod objects mode
+  in
+  let history = ref [] in
+  let answer =
+    Fun.protect
+      ~finally:(fun () ->
+        Unix.chmod objects 0o700;
+        set_mode 0o700)
+      (fun () ->
+         turn place 1 (fun turn ->
+           history := open_save place turn 1 !history;
+           set_mode 0o500;
+           Error "the provider failed"))
+  in
+  check (result unit string) "the turn's answer is the body's" (Error "the provider failed") answer;
+  check (float 0.0) "the failure is counted" (counted +. 1.0) (open_close_failures ());
+  check int "the messages are still open" 2 (open_messages place);
+  let (_ : (unit, string) result) =
+    turn place 2 (fun turn ->
+      save place ~boundary:Objects.Turn_closes ~turn_count:2 (!history @ turn_messages 2);
+      Turn.note_closing_save turn Saved;
+      Ok ())
+  in
+  check string "the turn that closes next names them as its own"
+    "started at 0\n\
+     opened 1 at 0\n\
+     closed save failed at 0, before [], own []\n\
+     opened 2 at 0\n\
+     closed completed at 4, before [], own [0+4]"
+    (log_text place)
+;;
+
+(* A turn whose admission the log could not take has no line, and its end
+   closes what it saved all the same: the log that starts next starts after
+   those messages. *)
+let test_a_turn_not_in_the_log_closes_what_it_saved =
+  in_workspace
+  @@ fun place ->
+  Fs_compat.save_file place.keepers_dir "not a directory";
+  let at_admission = failures "admission" in
+  let (_ : (unit, string) result) =
+    turn place 1 (fun turn ->
+      let (_ : Agent_core.Types.message list) = open_save place turn 1 [] in
+      Error "the provider failed")
+  in
+  check (float 0.0) "the admission is counted" (at_admission +. 1.0) (failures "admission");
+  check int "no message is left open" 0 (open_messages place);
+  Unix.unlink place.keepers_dir;
+  let (_ : (unit, string) result) = turn place 2 (fun (_ : Turn.t) -> Ok ()) in
+  check string "the log starts after them"
+    "started at 2\nopened 2 at 2\nclosed completed at 2, before [], own []" (log_text place)
+;;
+
+(* The driver reads where a request starts from these lines
+   ([Keeper_turn_driver_try_provider.turn_starts]). Turns that saved and
+   failed each end a unit after their messages, so the next turn's request
+   has only its own input above the boundary, however many turns failed
+   before it. *)
+let test_the_next_request_starts_after_the_failed_turns =
+  in_workspace
+  @@ fun place ->
+  let config = Masc.Workspace.default_config place.base_path in
+  let place : Recorder.place =
+    { place with keepers_dir = Masc.Workspace.keepers_runtime_dir config }
+  in
+  let boundary_after history =
+    let next = history @ [ message User "a asks again" ] in
+    match
+      (Driver.turn_starts ~config ~keeper_name ~trace_id:session_id ~messages:next).Driver.boundary
+    with
+    | Masc.Keeper_carried_front.Turn_boundary { end_atom } -> end_atom
+    | Masc.Keeper_carried_front.Turn_boundary_unknown { reason } ->
+      failf "the boundary is unknown: %s" reason
+  in
+  let atoms messages = snd (Runtime_model_input_tail_window.annotate messages) in
+  let fail_after_saving n history =
+    let saved = ref history in
+    let (_ : (unit, string) result) =
+      turn place n (fun turn ->
+        saved := open_save place turn n history;
+        Error "the provider failed")
+    in
+    !saved
+  in
+  let history = fail_after_saving 1 [] in
+  check int "after one failed turn" (atoms history) (boundary_after history);
+  let history = fail_after_saving 3 (fail_after_saving 2 history) in
+  check int "after three failed turns" (atoms history) (boundary_after history)
+;;
+
 (* The log cannot take the turn's lines. The turn runs, and its answer and
    its saves are what they would have been. *)
 let test_a_turn_the_log_cannot_take =
@@ -540,6 +768,17 @@ let () =
       , [ test_case "a turn that completes" `Quick test_a_turn_that_completes
         ; test_case "a turn names what woke it" `Quick test_a_turn_names_what_woke_it
         ; test_case "every way out writes one end" `Quick test_every_way_out_writes_one_end
+        ; test_case "an end without a closing save closes what the turn saved" `Quick
+            test_an_end_without_a_closing_save_closes_what_the_turn_saved
+        ; test_case "an end leaves open what the turn did not save" `Quick
+            test_an_end_leaves_open_what_the_turn_did_not_save
+        ; test_case "the turn of an operation that can resume" `Quick
+            test_the_turn_of_an_operation_that_can_resume
+        ; test_case "a save at the end that fails" `Quick test_a_save_at_the_end_that_fails
+        ; test_case "a turn not in the log closes what it saved" `Quick
+            test_a_turn_not_in_the_log_closes_what_it_saved
+        ; test_case "the next request starts after the failed turns" `Quick
+            test_the_next_request_starts_after_the_failed_turns
         ; test_case "a turn the log cannot take" `Quick test_a_turn_the_log_cannot_take
         ; test_case "a Keeper directory that was removed" `Quick
             test_a_keeper_directory_that_was_removed

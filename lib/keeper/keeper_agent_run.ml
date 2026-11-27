@@ -888,6 +888,15 @@ let run_turn
     ~succeeded:(fun (settlement : Keeper_agent_result.turn_settlement) ->
       Result.is_ok settlement.result)
   @@ fun turn_log ->
+  (* A chat operation can resume from its checkpoint, so the turn's end
+     leaves what it saved open for the turn that resumes it. A lane that
+     restarts its cycle starts a new turn, so its turn's end closes. *)
+  (match runtime_retry_deferral with
+   | Some
+       { Keeper_turn_driver.continuation = Resume_operation_checkpoint _
+       ; on_deferred = _
+       } -> Keeper_turn_log_turn.note_resumable_operation turn_log
+   | Some { Keeper_turn_driver.continuation = Restart_cycle; on_deferred = _ } | None -> ());
   let turn_start = Mtime_clock.now () in
   let seq_ref = Atomic.make 0 in
   let runtime_manifest_context =
@@ -1638,6 +1647,10 @@ let run_turn
                   outcome;
                 match save_result with
                 | Ok (Keeper_checkpoint_store.Saved { checkpoint = stored; _ }) ->
+                  (* This save leaves the turn's messages open
+                     ([Turn_continues]). The turn's end closes them when the
+                     turn does not reach its closing save. *)
+                  Keeper_turn_log_turn.note_open_save turn_log;
                   Keeper_checkpoint_cadence.record_persisted
                     checkpoint_cadence
                     ~stage

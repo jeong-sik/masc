@@ -166,7 +166,7 @@ type t =
   | WireCaptureRecordSkipped    (* counter: wire-capture record dropped — rotation name space exhausted or append guard refused *)
   | TurnBoundaryFailures        (* counter: a turn-boundary line (a turn's end line, or a restart line from a turn or a clear) was not built or not written *)
   | TurnLogAppendFailures       (* counter: a line in the turn log was not written (a turn's Opened at admission, its Closed at its end, the line of a process start); the turn or the start went on all the same *)
-  | TurnLogOpenCloseFailures    (* counter: a process start could not close the open messages of the turn the process had left open; the next turn's closing save closes them *)
+  | TurnLogOpenCloseFailures    (* counter: the open messages a turn left were not closed, by the end of a turn that made no closing save or by a process start for the turn the process had left open; the next save that closes takes them *)
   | HistoryFragmentFailures     (* counter: a history line (a turn's message or tool observation) was not built or not written *)
   | WorkingStateNotCarried      (* counter: an official client left the Librarian working state out, because carried in front of the range it would have displaced atoms it does not cover *)
   | WorkspaceMemoryBriefingBytes (* gauge: briefing summary bytes observed at the keeper turn boundary *)

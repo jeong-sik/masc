@@ -1,11 +1,12 @@
 (** Closing a head's open messages with one save before a line names them
     (RFC librarian-call-only-proposes §5.2).
 
-    A line names closed messages only. Two steps close the head's open
-    messages before they write: the process start step, when the log's last
-    [Opened] is open, and the function a product path shrinks a head through
-    ({!Keeper_turn_log_reset}). They differ only in what a failed save
-    means, and that is theirs to decide. *)
+    A line names closed messages only. Three steps close the head's open
+    messages before they write: the end of a turn that saved in its middle
+    and made no closing save ({!Keeper_turn_log_turn}), the process start
+    step, when the log's last [Opened] is open, and the function a product
+    path shrinks a head through ({!Keeper_turn_log_reset}). They differ only
+    in what a failed save means, and that is theirs to decide. *)
 
 type not_closed =
   | Head_unread of Keeper_checkpoint_store_decode.checkpoint_load_error

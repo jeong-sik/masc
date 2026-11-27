@@ -402,8 +402,11 @@ LateSave ==
     /\ budget' = [budget EXCEPT !.late = @ - 1]
     /\ UNCHANGED << lv, tv, gv, av, rvars, bad, up, pend, badPurge, droppedUnread, wit >>
 
-\* The turn ends and its Closed is appended. With no closing save before it
-\* (the save failed) the open messages stay open.
+\* The turn ends and its Closed is appended. A turn that ended without its
+\* closing save closes what it saved in its middle first: that is Save with no
+\* new message. With no closing save before it (the save failed, the turn saved
+\* nothing itself, or its operation resumes from its checkpoint) the open
+\* messages stay open.
 ExitOk ==
     /\ up
     /\ turn = "line"

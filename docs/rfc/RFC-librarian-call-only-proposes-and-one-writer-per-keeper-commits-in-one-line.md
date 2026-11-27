@@ -258,7 +258,7 @@ type turn_line =
 | 턴을 받아들인다. 앞선 `Opened` 는 모두 닫혔다 | `Opened {baseline = 지금 끝자리}` |
 | 턴을 받아들인다. 마지막 `Opened` 가 닫히지 않았다 | 한 번의 덧붙임으로 두 줄. `Closed {Close_missing}`, 그다음 `Opened`. 둘 다 들어가거나 둘 다 안 들어간다 |
 | 받아들일 때 덧붙임이 실패한다 | 줄 없이 턴이 돈다. 카운터 `turn_log_append_failed` 가 오른다. 턴은 거절하지 않는다 |
-| 턴이 끝난다(완료, 오류, 취소, 예외) | 닫는 저장을 한 뒤 `Closed {outcome; after = 지금 끝자리}`. 저장이 실패하면 `Save_failed`, 이 턴의 메시지가 이력에 없으면 `Stale_save` 다 |
+| 턴이 끝난다(완료, 오류, 취소, 예외) | 닫는 저장을 한 뒤 `Closed {outcome; after = 지금 끝자리}`. 완료된 턴은 run 이 닫는 저장을 한다. 도중 저장만 하고 끝난 턴은 턴의 끝이 head 의 열린 메시지를 닫는다(아래). 저장이 실패하면 `Save_failed`, 이 턴의 메시지가 이력에 없으면 `Stale_save` 다 |
 | 끝날 때 덧붙임이 실패한다 | 더 하지 않는다. 다음 턴이나 다음 프로세스 시작이 닫는다 |
 | `Opened` 를 못 쓴 턴이 끝난다 | 쓰지 않는다. 이 턴이 닫은 것은 다음 단위가 싣는다. 턴은 받아들일 때 쓴 `Opened` 의 offset 을 끝까지 들고 간다. 꼬리의 열린 `Opened` 가 그 offset 이 아니면 쓰지 않는다 |
 | 프로세스가 시작한다. checkpoint 꼬리 복구가 끝났고 마지막 `Opened` 가 닫히지 않았다 | head 의 열린 메시지를 닫고(아래) `Closed {Process_exited}` 를 쓴다. Keeper 턴이 시작하기 전에 한다 |
@@ -273,12 +273,23 @@ type turn_line =
   - 입력을 기다린 답의 저장(`keeper_input_wait_response.ml:191`).
 - 그 메시지는 받아들인 턴의 것이다. 그 턴의 닫는 저장이 닫고 그 턴의 `own` 에 든다. 받아들임이 닫으면 `baseline` 앞이 되어 Task 없이 실린다.
 - 턴이 남긴 열린 메시지도 같은 길로 간다. 다음 턴의 닫는 저장이 닫고 그 턴의 `own` 에 든다. 그 메시지는 다음 턴의 Task 와 함께 보인다. 그런 때는 넷이다.
-  - 턴의 닫는 저장이 실패했다. 그 턴의 줄이 `Save_failed` 라서 읽는 쪽은 그 사정을 안다.
+  - 턴의 닫는 저장이 실패했다. 턴의 끝이 한 닫는 저장이 실패한 것도 같다. 그 턴의 줄이 `Save_failed` 라서 읽는 쪽은 그 사정을 안다. 취소된 턴의 줄은 `Cancelled` 라서, 그때는 카운터 `turn_log_open_close_failed` 와 로그가 알린다.
   - 이력 지우기가 남길 메시지를 열린 채로 넣었다(§5.6).
   - `Opened` 를 못 쓴 턴이 도중에 저장하고 죽었다. 닫지 못한 `Opened` 가 없어서 프로세스 시작 단계가 닫지 않는다.
   - 프로세스 시작 단계의 닫는 저장이 실패했다. 카운터 `turn_log_open_close_failed` 가 오른다.
 - 닫지 못한 `Opened` 가 있었으면 `Closed {Close_missing}` 의 `own` 은 그 턴의 닫는 저장이 닫은 것이다. 닫는 저장도 없었으면 비어 있다.
-- 줄 앞에서 head 의 열린 메시지를 닫는 쪽은 둘이다. 마지막 `Opened` 가 닫히지 않았을 때의 프로세스 시작 단계와, head 를 줄이는 함수다. 열린 메시지가 있으면 닫는 저장(`Turn_closes`)을 한 번 하고 그 뒤에 끝자리를 읽는다. 없으면 저장하지 않는다.
+- 줄 앞에서 head 의 열린 메시지를 닫는 쪽은 셋이다. 도중 저장을 하고 닫는 저장 없이 끝난 턴의 끝, 마지막 `Opened` 가 닫히지 않았을 때의 프로세스 시작 단계, head 를 줄이는 함수다. 열린 메시지가 있으면 닫는 저장(`Turn_closes`)을 한 번 하고 그 뒤에 끝자리를 읽는다. 없으면 저장하지 않는다.
+- 턴의 끝은 그 턴이 도중 저장을 했을 때만 닫는다. 닫는 저장은 head 의 열린 메시지를 모두 닫는다. 그 턴이 저장한 것과 앞선 턴이 남긴 것이 함께 그 턴의 `Closed` 의 `own` 에 든다. 완료된 턴의 닫는 저장과 같다(2026-11-28, #55349).
+  - 완료된 턴만 run 의 닫는 저장에 닿는다. 이 걸음이 없으면 오류·취소·예외로 끝난 턴의 메시지가 열린 채 남는다. 끝자리가 그 앞에 서므로 다음 턴의 경계도 baseline 도 그 앞이고, 실패가 이어지면 턴마다 그만큼이 다음 요청에 쌓인다.
+  - run 은 Agent Core 의 도중 저장이 설치되면 턴에 알린다(`Keeper_turn_log_turn.note_open_save`). 알리지 않은 턴의 끝은 head 를 그대로 둔다. 턴 앞에 놓인 입력(위)은 그 턴이 닫는 저장으로 닫을 것이다.
+  - 도중 저장을 한 Agent Core 시도 뒤에 같은 턴이 다른 후보로 넘어가는 일은 없다. checkpoint 단계에 닿은 dispatch 는 그 run 안에서 다시 시도하지 않는다(`same_run_retry_allowed`). 그래서 이 걸음이 닫는 턴은 Agent Core 로 끝난 턴이고, 그 단위는 checkpoint 에서 읽는다(§5.3).
+  - 이 걸음은 주기를 다시 시작하는 lane 의 턴에만 있다(`Restart_cycle`). 그 lane 의 다음 턴은 새 입력으로 연다.
+  - 채팅 작업의 턴은 어떻게 끝났든 닫지 않는다(`note_resumable_operation`). 채팅 작업은 checkpoint 에서 이어 간다. 시간이 지나면 풀리는 실패 뒤에 넘겨지고(RFC last-path-resumes-after-progress 3.1), 프로세스가 멈출 때 돌던 작업은 다음 프로세스가 이어 받는다(RFC restart-resumes-running-chat-operations 4.3). 이어 가는 턴은 입력 뒤에 열리고 메시지를 더하지 않을 수 있다. 앞 턴이 입력을 닫으면 경계가 이력의 끝에 서서, 경계에서 시작하는 요청이 가장 새 atom 하나만 싣는다. 그래서 채팅 lane 에는 위의 쌓임이 그대로 남는다. 이어 가는 턴이 경계 아래의 자기 입력을 찾게 되면 이 턴도 닫을 수 있다(#55350).
+  - 채팅 작업이 이어 가기를 기다리는 동안 자율 주기의 턴이 slot 을 얻을 수 있다(`keeper_owner.mli` 의 slot 순서). 그 턴의 닫는 저장은 완료된 턴의 것이든 턴 끝의 것이든 채팅 작업이 남긴 입력도 닫는다. 완료된 턴은 전부터 그랬고, 실패한 턴이 여기에 더해졌다. 이것도 #55350 이 다룬다.
+  - 공식 클라이언트 턴이 거절한 도구 호출을 저장한 것(`Keeper_official_client_host.persist_pre_tool_rejects`)은 이 걸음이 닫지 않는다. 그 턴의 단위는 클라이언트 파일에서 읽는데, 줄 앞에서 닫으면 checkpoint 단위가 된다. 그 메시지는 다음 닫는 저장이 닫는다.
+  - `Opened` 를 못 쓴 턴의 끝도 닫는다. 줄은 쓰지 않고, 닫힌 메시지는 다음 단위가 싣는다.
+  - 이 저장이 실패해도 줄은 쓴다. 줄은 `Save_failed` 다(취소된 턴은 `Cancelled`). 카운터 `turn_log_open_close_failed` 가 오르고, 남은 것은 다음 닫는 저장이 닫는다.
+  - 이 저장은 프로세스가 쥔 이력 값(`Keeper_checkpoint_store_lineage`)을 갈지 않는다. 그래서 다음 턴의 첫 load 는 이력을 파일에서 읽는다. 그 시간은 재지 않았다.
 - 프로세스 시작 단계가 닫는 것은 죽은 턴이 저장한 메시지다. `Closed {Process_exited}` 의 `own` 에 든다.
 - head 를 줄이는 함수가 닫은 것은 `Reset` 줄의 `closed_before` 에 든다. 지우기와 recovering purge 가 버리는 메시지는 열려 있던 것까지 그 줄에 이름이 있다.
 - 프로세스 시작 단계는 이 저장이 실패해도 그대로 간다. 줄은 쓰고, 남은 것은 다음 턴의 닫는 저장이 닫는다.
@@ -1522,7 +1533,7 @@ provider 가 범위를 크다고 거절하면 Keeper 쪽에서 시작점을 당�
 - 미리 세는 provider 는 보내기 전 거절로 같은 단계에 닿는다.
 - 셋째 단계는 run 이 `Opened` 를 이번 턴의 입력보다 먼저 썼을 때만 있다(`Keeper_run_prompt.this_turn_opening`).
   - 이어 가는 턴은 셋이다: native resume, direct resume, HITL 답. 이어 받은 checkpoint 가 이번 턴의 입력을 이미 갖고 있다.
-  - baseline 은 닫힌 메시지 수다. 앞선 run 의 턴 끝 저장이나 다음 기동의 `close_open` 이 그 입력을 닫았으면(`Turn_closes`), 이 run 이 쓴 `Opened` 의 baseline 은 입력 뒤다.
+  - baseline 은 닫힌 메시지 수다. 앞선 run 의 턴 끝 저장이나 다음 기동의 `close_open` 이 그 입력을 닫았으면(`Turn_closes`), 이 run 이 쓴 `Opened` 의 baseline 은 입력 뒤다. 턴 끝 저장은 완료된 턴의 닫는 저장과, 닫는 저장 없이 끝난 턴의 끝이 한 저장이다(§5.2).
   - 그 baseline 에서 다시 보내면 이번 턴의 요청이 빠진다. 그래서 driver 는 이어 가는 턴에서 그 줄을 읽지 않고, 이 턴이 시작한 곳을 모르는 것으로 둔다.
 - 시작점의 출처 가운데 Librarian 것 다섯을 지운다(`Librarian_snapshot`, `Librarian_progress`, `Past_librarian_point`, `Turn_start_after_librarian_refusal`, `This_turn_start_after_librarian_refusal`). `Covered` 하나를 더한다.
 - 자리는 수와 끝자리로 적는다. 읽은 이력의 bundle digest 를 쓰지 않는다. 그래서 읽은 턴을 purge 해도 시작점이 풀린다.

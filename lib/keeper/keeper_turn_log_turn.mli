@@ -7,7 +7,19 @@
     returning, by raising, or by being cancelled. A line that cannot be
     written is counted ([TurnLogAppendFailures]) and the turn runs all the
     same. So is an end that finds the log no longer showing the turn open
-    (its file was replaced under the turn): nothing is written then. *)
+    (its file was replaced under the turn): nothing is written then.
+
+    A turn that completes on Agent Core closes its messages with its closing
+    save ({!note_closing_save}). A turn whose Agent Core run saved in its
+    middle ({!note_open_save}) and reached no closing save has the head's
+    open messages closed by {!around} before its [Closed], so the line names
+    them as the turn's own and the next turn's baseline lies after them.
+
+    Three ends leave open messages where they are: a turn whose closing save
+    was stale or failed, the turn of an operation that can resume from its
+    checkpoint ({!note_resumable_operation}), and a turn that said no save.
+    The last includes an official-client turn that stored the tool calls it
+    rejected ({!Keeper_official_client_host.persist_pre_tool_rejects}). *)
 
 (** A turn taken up. It carries whether its [Opened] is in the log. *)
 type t
@@ -21,6 +33,33 @@ type closing_save =
 (** Said by the turn at its closing save. A turn that ends before that save,
     or has none, says nothing. *)
 val note_closing_save : t -> closing_save -> unit
+
+(** Said by the turn when a save in the middle of its Agent Core run was
+    installed: the head now holds open messages of this turn. If the turn
+    ends without a closing save, and its operation is not one that can resume
+    ({!note_resumable_operation}), its end closes the head's open messages
+    with one save ({!Keeper_turn_log_closing.close_open}) before its [Closed]
+    is written. That save closes every open message of the head, as a turn's
+    closing save does: those of this turn and any an earlier turn left.
+    When that save fails the turn's [Closed] is labelled as a failed closing
+    save, the failure is logged and counted ([TurnLogOpenCloseFailures]), and
+    the messages stay open for the next save that closes.
+
+    A turn that never says this leaves the head as it found it: what is open
+    there is not the turn's. *)
+val note_open_save : t -> unit
+
+(** Said by the turn of an operation that can resume from its checkpoint: a
+    chat operation, which is handed on after a failure that passes with time
+    (RFC last-path-resumes-after-progress 3.1) and picked up by the process
+    that starts next when this one stops (RFC
+    restart-resumes-running-chat-operations 4.3). Whichever way such a turn
+    ends, its end leaves what it saved open: the turn that resumes opens
+    after its input and may add no message, so a request that starts at the
+    turn boundary carries that input only while the input is open. A lane
+    that restarts its cycle starts a new turn with a new input and says
+    nothing here. *)
+val note_resumable_operation : t -> unit
 
 (** How the turn's body ended. *)
 type exit =
@@ -53,8 +92,9 @@ val stimulus : Keeper_event_queue.stimulus -> Keeper_turn_log.stimulus
     so [Completed] also labels a turn that settled without an error and has
     more to do (held at a gate, deferred to another runtime).
 
-    The [Closed] is written even when the turn's fiber is cancelled. Nothing
-    the write does replaces the body's answer or its exception. *)
+    The [Closed] is written even when the turn's fiber is cancelled, and so
+    is the save that closes what the turn left open. Nothing the save or the
+    write does replaces the body's answer or its exception. *)
 val around
   :  place:Keeper_turn_log_recorder.place
   -> turn_ref:Ids.Turn_ref.t

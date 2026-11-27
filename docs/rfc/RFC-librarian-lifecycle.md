@@ -74,6 +74,8 @@ Librarian 이 읽지 못해도 Keeper 는 계속 돈다(I7). Librarian 이 어�
      - 상한을 모든 받아들여진 시작점에 넓히지 않는 이유. 턴 기록에서 읽은 시작점은 어느 규칙이 정했는지 남기지 않는다(`Turn_record`). Librarian 지점이 있는 새 턴에서 그 시작점 A 가 경계 B 와 이번 턴의 시작 S 사이에 있다고 하자(B < A ≤ S). 경계만 쓰면 A 는 B 로 돌아오고 [B, A) 가 실린다. `Int.max` 를 모든 시작점에 쓰면 A 가 그대로 남고, 거절도 없이 [B, A) 가 요청에서 빠진다. 그래서 넓힌 상한은 이번 턴이 8 로 잡은 앞머리에만 건다. 그 대가는 8 에 적었다.
      - 경계 재전송도 8 의 재전송도 이번 턴 입력은 늘 싣는다. 그래서 요약과 gap 블록만 있고 답할 입력이 없는 요청은 만들어지지 않는다. 매 턴 붙는 부분과 이번 턴 입력만으로 한도를 넘으면 gap 을 넓혀도 줄일 이력이 없고, 거절이 그대로 난다. 답할 입력 없는 요청보다 거절이 낫기 때문에 정한 결과다. 이 규칙을 깎아 시작점을 이번 턴 안으로 옮기지 않는다. 이 거절은 턴의 마지막 오류로 보인다.
   8. 6 이 바꿀 것이 없거나 6 으로 다시 보낸 요청도 typed 크기 거절(`is_size_refusal`)이면, 그리고 이번 턴의 시작이 거절된 요청의 시작점보다 엄격히 뒤면, 이번 턴의 시작부터 같은 후보에 한 번 더 보낸다(2026-11-06 개정). 이번 턴의 시작과 경계 사이에 있는 것은 두 턴 사이에 닫힌 메시지다(7). 1 은 그 구간을 이번 턴으로 보고 남긴다. 6 은 그 구간의 결과를 마커로 바꾼다. 그래도 넘치면 8 이 그 구간을 뺀다.
+     - 실패한 턴이 도중에 저장한 메시지는 그 턴의 끝이 닫고 그 턴의 `Closed` 줄이 싣는다(2026-11-28, RFC librarian-call-only-proposes §5.2, #55349). 그래서 경계는 실패한 턴 뒤에 서고, 그 메시지는 이 구간이 아니라 경계 아래에 있다. 끝난 턴의 결과처럼 마커로 실리고, 1 이 경계부터 다시 보낼 때 빠진다. 이 구간에 남는 것은 줄 없이 닫힌 메시지다. `Opened` 를 못 쓴 턴의 끝이 닫은 것이 그렇다. 아래 B1·B3 의 「실패한 턴의 atom」은 그 모양을 줄로 직접 쓴 것이다. 닫는 것은 주기를 다시 시작하는 lane 의 턴이다. 채팅 작업의 턴은 닫지 않는다. 이어 가는 턴이 메시지를 더하지 않을 수 있어서, 그 입력이 열려 있어야 경계가 입력 앞에 선다(#55350).
+       - 11-20(#53461)부터 11-28 까지는 실패한 턴의 메시지가 열린 채 남았다. 경계도 이번 턴의 시작도 그 앞에 서서 1 과 8 에 걸음이 없었다. 11-24~27 에 크기 거절로 끝난 345턴에서 8 은 한 번 돌았다(#55349 의 표).
      - 이번 턴의 시작은 7 의 그 값이다. driver 가 턴마다 한 번 턴 기록의 꼬리를 읽어 턴 경계와 같이 얻는다(`Keeper_turn_driver_try_provider.turn_starts`, `try_provider_ctx.this_turn_start`). 새로 저장하는 것은 없다. 시작을 모르면 이 걸음이 없다. 다음 요청 예측은 다음 턴이 아직 열리지 않았으므로 wake 줄을 붙이기 전 이력의 atom 수를 쓴다(`Keeper_next_request_forecast.read_range`).
      - 판정은 6 과 같은 typed 크기 거절 둘이다. 사유를 모르는 거절은 6 에서 이미 턴을 끝냈으므로 여기 오지 않는다.
      - 8 은 `this_turn_start_resend_sequence` 다. 1 과 6 의 사다리(`current_turn_demotion_sequence`)를 감싼다. 거절된 요청의 시작점은 마지막으로 보낸 요청의 `first_atom` 이다.
@@ -100,7 +102,7 @@ Librarian 이 읽지 못해도 Keeper 는 계속 돈다(I7). Librarian 이 어�
 
        시험이 잡지 않는 변형도 있다.
 
-       - 턴이 `Opened` 줄을 쓰는 것(`Keeper_turn_log_turn.around`)과 driver 가 그 줄을 읽는 것 사이의 연결. B1·B3 은 줄을 직접 써서 읽는 쪽만 본다. `run_turn` 이 `prompt_user_turn_record` 로 `this_turn_opening` 을 골라 driver 에 넘기는 것도 같다. B10 은 그 변환과 driver 쪽만 본다. 이 연결을 보려면 Agent Core 레인의 `Keeper_agent_run.run_turn` 을 가짜 공급자까지 돌려야 한다. 그 fixture 는 아직 없다. Agent Core 레인의 `run_turn` 시험은 prompt 를 만들기 전에 멈춘다(`test/test_keeper_checkpoint_stale_guard.ml`). `run_turn` 을 끝까지 도는 Codex app-server 시험은 공식 클라이언트 레인이라 7·8 을 쓰지 않는다.
+       - 턴이 `Opened` 줄을 쓰는 것(`Keeper_turn_log_turn.around`)과 driver 가 그 줄을 읽는 것 사이의 연결. B1·B3 은 줄을 직접 써서 읽는 쪽만 본다. `run_turn` 이 `prompt_user_turn_record` 로 `this_turn_opening` 을 골라 driver 에 넘기는 것도 같다. B10 은 그 변환과 driver 쪽만 본다. `around` 가 쓴 줄에서 driver 가 경계를 읽는 쪽은 `test/test_keeper_turn_log_turn.ml` 의 `the next request starts after the failed turns` 가 본다(2026-11-28). 나머지 연결을 보려면 Agent Core 레인의 `Keeper_agent_run.run_turn` 을 가짜 공급자까지 돌려야 한다. 그 fixture 는 아직 없다. Agent Core 레인의 `run_turn` 시험은 prompt 를 만들기 전에 멈춘다(`test/test_keeper_checkpoint_stale_guard.ml`). `run_turn` 을 끝까지 도는 Codex app-server 시험은 공식 클라이언트 레인이라 7·8 을 쓰지 않는다.
        - 예측이 wake 줄을 붙인 이력에서 시작을 읽거나 시작 없음을 넘기는 것. 예측은 턴 기록의 시작점만 보고 8 의 앞머리는 보지 않으므로, 그 값은 지금 예측 결과를 바꾸지 않는다.
 
        요청 사다리에는 TLA+ 모델이 없다. 만들면 생존 속성을 "이번 턴 입력과 매 턴 붙는 부분이 한도에 들면 언젠가 받아들여진다"로 둔다. `Next` 는 이를 지키고, 블록 결과 강등과 8 을 뺀 `NextBuggy` 는 msx 의 상태에서 어겨야 한다.

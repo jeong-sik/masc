@@ -90,6 +90,30 @@ let voice_not_configured_message =
    through. Say it in text instead. An operator can enable voice by adding a \
    [voice] section whose tts.endpoints lists one."
 
+(* The clip also goes into the attachment store as this Keeper's ephemeral
+   file, so keeper_surface_post can send it to Discord as a voice message by
+   the attachment_id this adds to the result. By then the utterance is spoken
+   or recorded, so a store failure is reported in the result as
+   attachment_error rather than failing the speak. The store reads the
+   format from the bytes. *)
+let with_clip_attachment ~base_dir ~keeper ~audio_file fields =
+  let field =
+    match Fs_compat.load_file audio_file with
+    | exception Sys_error detail ->
+      ("attachment_error", `String ("clip read failed: " ^ detail))
+    | bytes ->
+      let store = Attachment_store.create ~base_path:base_dir in
+      (match
+         Attachment_store.put ~filename:(Filename.basename audio_file)
+           ~origin:Attachment_store.Model_generated ~created_by:keeper
+           ~retention:(Attachment_store.Ephemeral { keeper }) store ~bytes
+       with
+       | Ok (stored : Attachment_store.meta) -> ("attachment_id", `String stored.id)
+       | Error error ->
+         ("attachment_error", `String (Attachment_store.put_error_to_string error)))
+  in
+  `Assoc (fields @ [ field ])
+
 let handle_speak_with_outcome
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
@@ -155,6 +179,14 @@ let handle_speak_with_outcome
           in
           Keeper_chat_store.append_assistant_message
             ~base_dir ~keeper_name:meta.name ~content:message ~surface ?audio:clip ();
+          let json =
+            match json, Json_util.get_string json "audio_file" with
+            | `Assoc fields, Some audio_file ->
+              with_clip_attachment ~base_dir ~keeper:meta.name ~audio_file fields
+            | `Assoc _, None
+            | ( `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _
+              | `List _ ), _ -> json
+          in
           Keeper_tool_execution.success (Yojson.Safe.to_string json)
         | Ok
             { Voice_bridge.completion = Voice_bridge.Dedup_skipped

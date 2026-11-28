@@ -315,6 +315,15 @@ let with_transaction db ~begin_sql f =
     raise exn
 ;;
 
+(* The writer creates this file with this journal and readers open it with it. *)
+let sqlite_journal = Sqlite_file.Wal
+
+let set_journal db =
+  Sqlite_file.set_journal db sqlite_journal
+  |> Result.map_error (fun error ->
+    Sqlite_error { operation = "pragma_wal"; detail = Sqlite_file.journal_error_to_string error })
+;;
+
 let init_schema db ~path =
   let* () = exec_sql db "pragma_busy" "PRAGMA busy_timeout=5000;" in
   let* () = exec_sql db "pragma_fk" "PRAGMA foreign_keys=ON;" in
@@ -328,11 +337,13 @@ let init_schema db ~path =
        inside a transaction. The tables and the version are written under one
        write lock, so a second process never reads the tables at version 0. *)
     let* () = exec_sql db "pragma_auto_vacuum" "PRAGMA auto_vacuum=INCREMENTAL;" in
-    let* () = exec_sql db "pragma_wal" "PRAGMA journal_mode=WAL;" in
+    let* () = set_journal db in
     with_transaction db ~begin_sql:"BEGIN IMMEDIATE;" (fun () ->
       create_schema_in_tx db ~path)
 ;;
 
+(* HIGH-RISK-UNREVIEWED: a read opens through Sqlite_file.open_reader with the
+   journal the writer sets (#36195). *)
 let with_db ~create ~keepers_dir ~keeper_id f =
   let path = db_path ~keepers_dir ~keeper_id in
   Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
@@ -342,12 +353,13 @@ let with_db ~create ~keepers_dir ~keeper_id f =
       if create then Fs_compat.mkdir_p keepers_dir;
       match
         if create
-        then Sqlite3.db_open path
-        else Sqlite3.db_open ~mode:`READONLY path
+        then (
+          try Ok (Sqlite3.db_open path) with
+          | Sqlite3.Error detail | Sqlite3.SqliteError detail -> Error detail)
+        else Sqlite_file.open_reader (Sqlite_file.Owned sqlite_journal) path
       with
-      | exception (Sqlite3.Error detail | Sqlite3.SqliteError detail) ->
-        Error (Sqlite_error { operation = "db_open"; detail })
-      | db ->
+      | Error detail -> Error (Sqlite_error { operation = "db_open"; detail })
+      | Ok db ->
         Fun.protect
           ~finally:(fun () ->
             try ignore (Sqlite3.db_close db : bool) with
@@ -357,7 +369,6 @@ let with_db ~create ~keepers_dir ~keeper_id f =
                if create
                then init_schema db ~path
                else
-                 let* () = exec_sql db "pragma_busy_ro" "PRAGMA busy_timeout=5000;" in
                  let* (`Absent | `Current) = schema_state db ~path in
                  Ok ()
              in
@@ -1707,17 +1718,17 @@ let decode_live_blob_references_json path =
        | Ok false ->
          Error "empty canonical turns database with present sqlite companions")
     | _ ->
-      (match Sqlite3.db_open ~mode:`READONLY path with
-       | exception (Sqlite3.Error detail | Sqlite3.SqliteError detail) ->
+      (* HIGH-RISK-UNREVIEWED: opens through Sqlite_file.open_reader (#36195). *)
+      (match Sqlite_file.open_reader (Sqlite_file.Owned sqlite_journal) path with
+       | Error detail ->
          Error (Printf.sprintf "canonical turns sqlite db_open failed: %s" detail)
-       | db ->
+       | Ok db ->
          Fun.protect
            ~finally:(fun () ->
              try ignore (Sqlite3.db_close db : bool) with
              | Sqlite3.Error _ | Sqlite3.SqliteError _ -> ())
            (fun () ->
               let res =
-                let* () = exec_sql db "pragma_busy_ro" "PRAGMA busy_timeout=5000;" in
                 with_transaction db ~begin_sql:"BEGIN DEFERRED;" (fun () ->
                   let* present = table_exists db "canonical_turns" in
                   if not present

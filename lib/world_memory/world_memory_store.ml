@@ -126,6 +126,9 @@ let with_read_tx db f =
     raise exn
 ;;
 
+(* The writer creates this file with this journal and readers open it with it. *)
+let sqlite_journal = Sqlite_file.Wal
+
 let init_schema db =
   let* () = exec_ok db "pragma busy_timeout" "PRAGMA busy_timeout=5000;" in
   let* () = exec_ok db "pragma foreign_keys" "PRAGMA foreign_keys=ON;" in
@@ -134,7 +137,11 @@ let init_schema db =
   if ready
   then ensure_change_evidence_table db
   else (
-    let* () = exec_ok db "pragma journal_mode" "PRAGMA journal_mode=WAL;" in
+    let* () =
+      Sqlite_file.set_journal db sqlite_journal
+      |> Result.map_error (fun error ->
+        Db_unavailable ("pragma journal_mode: " ^ Sqlite_file.journal_error_to_string error))
+    in
     with_write_tx db (fun db ->
       let* () =
         exec_ok db "create world_meta"
@@ -219,6 +226,8 @@ let init_schema db =
          fts5(entry_type UNINDEXED, target_id UNINDEXED, title, body, facets, tokenize='trigram');"))
 ;;
 
+(* HIGH-RISK-UNREVIEWED: a read opens through Sqlite_file.open_reader with the
+   journal the writer sets (#36195). *)
 let open_db ~create_if_missing ~base_path f =
   let path = db_path ~base_path in
   if not create_if_missing
@@ -226,11 +235,10 @@ let open_db ~create_if_missing ~base_path f =
     if not (db_file_present path)
     then Ok None
     else (
-      match Sqlite3.db_open ~mode:`READONLY path with
-      | exception Sqlite3.Error detail -> Error (Db_unavailable detail)
-      | db ->
+      match Sqlite_file.open_reader (Sqlite_file.Owned sqlite_journal) path with
+      | Error detail -> Error (Db_unavailable detail)
+      | Ok db ->
         with_db db (fun db ->
-          let* () = exec_ok db "pragma busy_timeout_ro" "PRAGMA busy_timeout=5000;" in
           let* ready = schema_initialized db in
           if not ready
           then Ok None

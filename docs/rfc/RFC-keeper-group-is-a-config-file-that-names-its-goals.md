@@ -10,7 +10,7 @@ related: ["config-field-kind-is-a-closed-type"]
 
 # RFC keeper-group-is-a-config-file-that-names-its-goals: Keeper 그룹을 이름표에서 설정 파일로 올리고, 그룹 파일이 Goal 을 가리킨다
 
-- 상태: **초안.** 운영자가 「그룹 목표 RFC」를 골랐다(2026-11-28). 승인 전에는 구현하지 않는다.
+- 상태: **초안.** 운영자가 「그룹 목표 RFC」를 골랐다(2026-11-28). §6 의 세 선택은 운영자가 추천안으로 정했다(2026-11-28, 「휴리스틱 워크어라운드가 아니고 괴랄한 제약이 아니면 된다」). 승인 전에는 구현하지 않는다.
 - 계기: 운영자 요청 「Keeper "회사" 를 그룹으로 바꾸고, 그룹을 만들고 고치고 지우고, 그룹 설정과 목표를 둔다」.
 - 코드 좌표는 `origin/main` `99eea6d98bdc9` 에서 읽었다.
 
@@ -77,9 +77,8 @@ related: ["config-field-kind-is-a-closed-type"]
 ### D1. 그룹은 설정 파일 하나다
 
 ```toml
-# <base-path>/.masc/config/groups/review.toml
+# <base-path>/.masc/config/groups/review.toml   (id 는 파일 이름 review)
 [group]
-id = "review"                 # 파일 이름과 같다
 name = "리뷰 팀"
 description = "PR 을 읽고 판정을 남긴다"
 instructions = """
@@ -88,7 +87,7 @@ instructions = """
 goals = ["goal-0193...", "goal-0194..."]
 ```
 
-- id 는 소문자·숫자·`-` 로 된 slug 다. 파일 이름과 다르면 읽기를 거절한다.
+- id 는 파일 이름이다. 소문자·숫자·`-` 로 된 slug 만 받는다. 파일 안에 `id` 키를 따로 두지 않는다. 두 곳에 적으면 서로 다를 수 있고, 그 차이를 잡는 검사가 따로 필요해진다.
 - 읽을 때 모르는 키를 거절한다(헌법 `strict_parse_no_default`, `docs/constitution.xml:202-206`).
 - `instructions` 는 여러 줄 글이다. 설정 화면은 RFC `config-field-kind-is-a-closed-type` 의 `Text` 종류로 연다.
 - 그룹 타입은 `lib/types/keeper_group.ml(i)` 에 둔다. 서버만 파일을 읽고 쓴다.
@@ -99,12 +98,23 @@ goals = ["goal-0193...", "goal-0194..."]
   - 장점: 소속을 두 곳에 적지 않는다. 두 파일이 서로 다른 말을 할 수 없다.
   - 단점: 「이 그룹의 구성원」은 Keeper 파일을 모두 읽어 구한다. Keeper 가 수십 개라 읽는 양은 작다.
 - `keeper.group` 값은 그룹 id 다. 없는 id 를 저장하려 하면 서버가 거절한다.
-- 이미 저장된 파일이 없는 id 를 가리키면(그룹 파일을 손으로 지운 경우) Keeper 는 뜨지 않는다. Keeper 상태에 「없는 그룹 `<id>`」를 이유로 보인다. 그룹 지시문이 말없이 빠진 채 Keeper 가 도는 것을 막는다.
+- 이미 저장된 파일이 없는 id 를 가리키면(그룹 파일을 손으로 지운 경우) Keeper 는 그대로 돈다. 소속은 닫힌 타입으로 읽는다.
+
+  ```ocaml
+  type membership =
+    | No_group
+    | Member of Keeper_group.t
+    | Missing_group of Keeper_group.id   (* 파일이 가리키는 그룹 파일이 없다 *)
+  ```
+
+  - `Missing_group` 인 Keeper 의 프롬프트에는 그룹 블록도 「우리 그룹」 표시도 없다.
+  - Keeper 행과 shell 은 `group: {"missing": "<id>"}` 로 보내고, 대시보드와 TUI 는 그 Keeper 에 「없는 그룹 `<id>`」를 표시한다. 운영자는 그룹을 다시 만들거나 소속을 바꾼다.
+  - Keeper 를 멈추지 않는 이유: 헌법은 하드 게이팅을 기본으로 두지 않는다(`docs/constitution.xml:428`). 그룹은 권한도 실행 조건도 아니라서, 그룹 파일이 없다고 Keeper 일을 막을 근거가 없다.
 - 지금 `keeper.group` 을 쓰는 Keeper 가 없으므로(§1.1) 옛 이름표를 옮기는 코드는 만들지 않는다.
 
 ### D3. 「그룹 없음」은 값이 없는 것 하나다
 
-- 서버 응답의 Keeper 행은 `group: "<id>" | null` 이다.
+- 서버 응답의 Keeper 행은 `group: {"id": "<id>"} | {"missing": "<id>"} | null` 이다.
 - shell 은 `groups: [{id, name, keepers}]` 와 `ungrouped_keepers: [...]` 를 따로 보낸다. `"ungrouped"` 라는 이름은 없앤다.
 - 대시보드의 `'General'`, TUI 의 `"Other"` 와 이름 앞부분 추정, #55334 의 이름 비교를 지운다. 화면은 `null` 을 「그룹 없음」으로 그린다.
 
@@ -118,7 +128,7 @@ goals = ["goal-0193...", "goal-0194..."]
   ```
 
 - 다른 Goal 을 숨기지 않는다. 모든 Keeper 는 지금처럼 모든 Goal 을 본다. 무엇을 할지는 Keeper 가 고른다.
-- 그룹 파일이 없는 Goal id 를 가리키면 그룹 읽기를 거절하지 않는다. 그 id 를 「없는 Goal」로 보여 준다. Goal 은 지우지 않고 Drop 하므로 이 경우는 Goal 파일이 손상됐을 때만 생긴다.
+- 그룹 설정을 저장할 때 없는 Goal id 는 거절한다. 이미 저장된 그룹 파일이 없는 Goal id 를 가리키면 그룹 읽기를 거절하지 않는다. 그 id 를 「없는 Goal」로 보여 준다. Goal 은 지우지 않고 Drop 하므로 이 경우는 Goal 파일이 손상됐을 때만 생긴다.
 
 ### D5. 그룹 지시문은 프롬프트 블록 하나다
 
@@ -158,8 +168,8 @@ goals = ["goal-0193...", "goal-0194..."]
 
 ## 5. 단계와 확인 방법
 
-1. `Keeper_group` 타입·읽기·쓰기 → 확인: id 와 파일 이름이 다르거나 모르는 키가 있으면 거절하는 시험. 왕복 시험.
-2. `keeper.group` 이 그룹 id 인지 검사 → 확인: 없는 id 저장은 거절된다. 손으로 지운 그룹을 가리키는 Keeper 는 뜨지 않고 상태에 이유가 뜬다.
+1. `Keeper_group` 타입·읽기·쓰기 → 확인: slug 가 아닌 파일 이름과 모르는 키를 거절하는 시험. 왕복 시험.
+2. `keeper.group` 이 그룹 id 인지 검사 → 확인: 없는 id 저장은 거절된다. 손으로 지운 그룹을 가리키는 Keeper 는 돌고, 응답에 `{"missing": "<id>"}` 가 오고, 프롬프트에 그룹 블록이 없다.
 3. API 와 설정 스키마 `target=group:<id>` → 확인: 만들기·이름 바꾸기·지우기 시험. 구성원이 있으면 409.
 4. 프롬프트: `Group_instructions` 블록과 Active Goals 의 「우리 그룹」 표시 → 확인: 구성원의 조립 결과에 블록이 있고 비구성원에게는 없다. 턴 기록 digest 가 지시문 변경을 따라간다.
 5. shell·Keeper 행의 `group` 과 `ungrouped_keepers` → 확인: `"ungrouped"` 문자열이 응답에 없다.
@@ -168,11 +178,11 @@ goals = ["goal-0193...", "goal-0194..."]
 - 1~5 는 서버 stack, 6 은 대시보드·TUI stack 이다. 5 와 6 은 응답 모양이 바뀌므로 같이 병합한다.
 - PR #55334 의 그룹 막대는 D3·D6 에 맞춰 다시 쓰는 것이 낫다. 그 PR 작성자와 순서를 맞춘다.
 
-## 6. 운영자가 정할 것
+## 6. 운영자 결정 (2026-11-28)
 
-1. 그룹 Goal 이 아닌 Goal 을 구성원 프롬프트에서 숨길지(§4 D 안). 추천은 숨기지 않기다. Goal 이 공유 목표라는 헌법 문장을 바꾸지 않는다.
-2. 없는 그룹을 가리키는 Keeper 를 띄우지 않을지(D2). 추천은 띄우지 않기다. 그룹 지시문 없이 도는 Keeper 를 운영자가 모르는 채 두지 않는다.
-3. 그룹 지시문을 Keeper 지시문 뒤의 별도 블록으로 둘지(D5). 추천은 별도 블록이다. 어느 지시문이 어느 턴에 바뀌었는지 따로 보인다.
+1. 그룹 Goal 이 아닌 Goal 도 구성원 프롬프트에 그대로 싣는다(§4 D 안을 고르지 않음). Goal 이 공유 목표라는 헌법 문장을 바꾸지 않는다.
+2. 없는 그룹을 가리키는 Keeper 는 그대로 돌고, 「없는 그룹」을 상태로 보인다(D2). 처음 추천은 Keeper 를 띄우지 않는 것이었다. 그룹은 권한도 실행 조건도 아니라 Keeper 를 멈추는 것은 필요 없는 하드 게이트라서 거뒀다.
+3. 그룹 지시문은 Keeper 지시문 뒤의 별도 블록이다(D5). 어느 지시문이 어느 턴에 바뀌었는지 따로 보인다.
 
 ## 7. 범위 밖
 

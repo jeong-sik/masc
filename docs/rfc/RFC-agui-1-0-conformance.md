@@ -127,7 +127,10 @@ related: []
 - 끝 이벤트:
   - 실패: settle 이 journal 에 `Event_error` 를 쓰고 그 seq 로 `RUN_ERROR` 를 보낸다(`synthesize_wire_terminal_on_settle`, `:3409`). seq 없이 보내면 live 클라이언트와 이어 받는 클라이언트가 어긋난다(같은 곳 주석, #41687).
   - 성공: 마지막 턴의 `Run_finished` 가 끝이다. connector 길은 전달이 끝날 때까지 wire `RUN_FINISHED` 를 잡아 둔다(`:2940`).
-  - 큐에서 취소: `cancel_queued` 는 journal 에 쓰지 않는다. 재접속 보정(`missed_terminal`)은 `Failed` 에만 `RUN_ERROR` 를 만든다(`:3605`). heartbeat 가 끝 frame 없이 stream 을 닫는다.
+  - 큐에서 취소: `cancel_queued` 는 journal 에 쓰지 않는다.
+- 끝을 보충하는 곳:
+  - 재생 뒤 보충(`operation_terminal_after_replay`, `:3589`)은 operation 기록이 `Failed` 이고 그 끝을 아직 보내지 않았을 때만 `RUN_ERROR` 를 만든다. seq 는 없고 timestamp 는 기록의 `completed_at` 이다.
+  - heartbeat(`operation_heartbeat_decision`, `:3539`)는 stream 이 조용할 때 기록을 읽는다. 기록이 끝 상태면 끝 frame 없이 stream 을 닫는다.
 - 묶인 턴: `Keeper_chat_operation_batch.event_for_member` 가 member operation 마다 runId 를 바꿔 각자의 journal 에 쓴다. 지금도 run 은 operation 마다다.
 - masc 클라이언트는 `RUN_STARTED` 를 「턴이 시작됐다」로 읽는다. Dashboard `lib/keeper-response-state.ts` 의 `started` 와 TUI `fleet_store.ml` 의 `Chunk_run_started` 처리(text·thinking·대기 도구를 비운다)다.
 
@@ -177,25 +180,34 @@ related: []
 
 #### run 의 끝
 
-- run 의 끝은 operation 의 끝이다. operation 이 끝 상태가 되면 journal 에 끝 이벤트 하나를 쓰고, wire 는 그것을 projection 한다.
+- run 의 끝은 operation 의 끝이다. 끝 상태는 operation 기록이 정한다. settle 할 결과도 기록을 읽어 고른다(`operation_execution_of_outcome_with_ref`, `server_routes_http_keeper_stream.ml:2821`). journal 형식은 바꾸지 않는다.
 
-| operation 의 끝 | journal 끝 이벤트 | wire |
+| operation 기록 | wire | seq |
 |---|---|---|
-| 성공 | 새 `Operation_succeeded` | `RUN_FINISHED`, outcome `success` |
-| 취소 | 새 `Operation_cancelled` | `RUN_FINISHED`, outcome `cancelled`(`lifecycle.md`: 실패가 아닌 이유로 멈춘 run 은 MUST) |
-| 실패 | 지금의 `Event_error` | `RUN_ERROR` |
+| `Succeeded` | `RUN_FINISHED`, outcome `success` | 없음 |
+| `Cancelled` | `RUN_FINISHED`, outcome `cancelled`(`lifecycle.md`: 실패가 아닌 이유로 멈춘 run 은 MUST) | 없음 |
+| `Failed` | `RUN_ERROR`. 지금처럼 settle 이 journal 에 쓴 `Event_error` 를 보낸다 | 있음. journal 에 쓰지 못했으면 없음 |
 
-- 쓰는 곳:
-  - 성공과 실패는 settle hook(`on_operation_execution_settled`)이 쓴다. 이 hook 이 불릴 때 턴과 그 publisher 는 이미 끝났다(`:3395` 주석). writer 는 하나다.
-  - 큐에서 취소는 HTTP cancel 길과 도구 길 모두 `cancel_queued` 가 성공한 뒤 쓴다. claim 전이라 publisher 가 없다.
-- 한 journal 에 끝 이벤트는 하나다. `record_terminal_error` 가 이미 있는 끝을 돌려주는 방식(`Existing_terminal_error`)을 세 끝에 넓힌다. 같은 settle 이 다시 불려도 두 번 쓰지 않는다.
-- operation 은 끝났는데 journal 에 끝이 없으면 재시작 정산이 그 끝을 쓴다. operation 을 저장한 뒤 journal 에 쓰기 전에 프로세스가 죽은 경우다.
-- stream 은 끝 이벤트를 보내고 닫는다. 턴의 `Run_finished` 로는 닫지 않는다.
-- 끝을 journal 에 쓰는 이유:
-  - 이어 받기와 live 중복 제거가 journal seq 로 맞춘다. seq 없는 끝은 두 길을 어긋나게 한다(#41687).
-  - wire 가 journal 의 함수가 되어, 순서 시험을 journal 녹화로 돌릴 수 있다.
-  - 단점: 내부 이벤트가 둘 늘고, 취소 길에 journal 쓰기가 생긴다. 끝을 그때그때 operation 기록에서 만들면 둘 다 없지만, 끝에 seq 가 없다.
-- 업그레이드 전 journal 에는 성공·취소 끝이 없다. 재생하면 끝 없는 run 이 되고, heartbeat 가 operation 기록을 보고 stream 을 닫는다. 지금 「끝 frame 없이 닫힌 stream」과 같은 경우다. 옛 journal 을 위한 reader 는 더하지 않는다.
+- seq 없는 끝은 기록으로 만든다. timestamp 는 기록의 `completed_at` 이다. 지금 `Failed` 보충과 같은 꼴이다.
+- 끝을 보내는 길은 셋이다. 셋 다 operation 기록을 읽는다.
+  - live: settle hook(`on_operation_execution_settled`)이 `Succeeded` 끝을, 큐 취소 길이 `Cancelled` 끝을 `publish_operation_live_event` 로 보낸다. 큐 취소는 HTTP cancel 길과 도구 길 모두 `cancel_queued` 가 성공한 뒤다. 묶음 실행은 `cancel_queued` 가 member 까지 정산하므로 member operation 마다 보낸다.
+  - heartbeat: 기록이 끝 상태면 그 끝 frame 을 보내고 닫는다. 지금은 frame 없이 닫는다.
+  - 재생 뒤 보충: `operation_terminal_after_replay` 를 `Succeeded`·`Cancelled` 로 넓힌다.
+- 셋이 같은 끝을 만들 수 있다. pump 는 첫 끝을 `Send_last` 로 보내고 닫으므로 한 응답에 끝은 하나다.
+- 순서: 셋 다 그 operation 의 journal 이벤트 뒤에 온다.
+  - settle hook 은 턴과 그 publisher 가 끝난 뒤 불린다(`:3395` 주석).
+  - heartbeat 는 stream 이 조용할 때만 기록을 읽는다.
+  - 재생 뒤 보충은 재생 중에 쌓인 live 이벤트 뒤에 들어간다(`serve_accepted_chat` 주석, `:3680`).
+- 이 셋으로 끝이 빠지는 창이 닫힌다.
+  - 기록을 commit 한 뒤 settle hook 이 보내기 전에 heartbeat 가 온 경우: heartbeat 가 보낸다.
+  - live 로 보내지 못한 경우(연결 전, 큐 취소 직후 프로세스가 죽음): 다시 붙으면 재생 뒤 보충이 보낸다.
+  - `Failed` 의 journal 쓰기가 실패한 경우: 지금은 broadcast 를 건너뛰고 frame 없이 닫힌다. heartbeat 가 기록의 `RUN_ERROR` 를 보낸다.
+- stream 은 끝 frame 을 보내고 닫는다. 턴의 `Run_finished` 로는 닫지 않는다.
+- 끝을 journal 에 쓰지 않는 이유:
+  - 기록과 journal 두 곳이 끝을 가지면, 두 쓰기 사이의 창마다 기록 보충이 어차피 필요하다.
+  - 시작 복구 대상, journal codec 의 새 태그, 옛 바이너리로 되돌릴 때의 재생이 새 문제가 된다.
+  - 단점: `Succeeded`·`Cancelled` 끝에는 seq 가 없다. `since_seq` 로 다시 붙은 클라이언트는 재생 뒤 보충으로 끝을 받는다. 순서 시험은 journal 녹화에 operation 기록의 끝 상태를 더해서 돌린다.
+- 업그레이드 전 journal 도 같은 길로 끝을 받는다. 옛 journal 을 위한 reader 는 더하지 않는다.
 
 #### frame 모양
 
@@ -338,9 +350,9 @@ related: []
 2. **wire 를 1.0 모양으로**
    - 층마다 서버, masc 클라이언트 셋, fixture 를 같이 바꾼다. 각 층의 CI 가 깨지지 않게 하기 위해서다.
    - 층 2-a: timestamp, `metadata.masc`, id, role.
-   - 층 2-b: 응답 머리, 턴 CUSTOM, journal 끝 이벤트, CUSTOM 이름과 생성기의 `.`, thinking, usage, smoke 스크립트.
+   - 층 2-b: 응답 머리, 턴 CUSTOM, 기록으로 만드는 끝과 그 세 길, CUSTOM 이름과 생성기의 `.`, thinking, usage, smoke 스크립트.
    - 층 2-c: fixture 를 생성자마다 채우고 frame 시험과 순서 시험을 켠다.
-   - 확인: 두 시험 통과, Dashboard·TUI 기존 시험 통과, 네이티브 생성물 decode 시험 통과, smoke 스크립트 로컬 실행.
+   - 확인: 두 시험 통과, 끝을 보내는 세 길마다 시험(성공 직후 heartbeat, 큐 취소 live, 끝난 뒤 다시 붙기), Dashboard·TUI 기존 시험 통과, 네이티브 생성물 decode 시험 통과, smoke 스크립트 로컬 실행.
 3. **`RunAgentInput` 길**
    - 확인: 입력 해석 표의 행마다 시험, 중복 전송 표의 행마다 시험, `MESSAGES_SNAPSHOT` 을 포함한 응답이 순서 시험을 통과.
 4. **외부 클라이언트 확인**(D4)

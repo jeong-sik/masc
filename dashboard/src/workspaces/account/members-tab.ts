@@ -5,6 +5,7 @@
  * - `GET /api/v1/auth/members`
  * - `POST /api/v1/auth/members/:id/disable`
  * - `POST /api/v1/auth/members/:id/enable`
+ * - `POST /api/v1/auth/members/:id/grant-admin`
  * - `POST /api/v1/auth/members/:id/revoke-admin` (strict closed-sum `cause: 'security_incident' | 'operational'`)
  * - `DELETE /api/v1/auth/members/:id`
  */
@@ -18,6 +19,7 @@ import {
   REVOKE_ADMIN_CAUSES,
   deleteMember,
   disableMember,
+  grantAdminMember,
   enableMember,
   formatIdentity,
   listMembers,
@@ -179,6 +181,18 @@ export function MembersTab(): VNode {
                                   </button>
                                 `
                               : null}
+
+                          ${member.role === 'member' && member.status === 'active' && member.held.length === 0 && html`
+                            <button
+                              type="button"
+                              class="btn-ghost"
+                              disabled=${busy}
+                              data-action="grant-admin"
+                              onClick=${() => { void runAction(member.userId, 'Make Admin', () => grantAdminMember(member.userId)) }}
+                            >
+                              Make Admin
+                            </button>
+                          `}
 
                           ${member.role === 'admin' && html`
                             <button

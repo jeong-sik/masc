@@ -16,6 +16,7 @@ import {
   decodeInvitesList,
   decodeMembersList,
   decodePatsList,
+  grantAdminMember,
   revokeAdminMember,
 } from './wire'
 
@@ -114,6 +115,14 @@ describe('Unified /account wire parsers & workspace surface', () => {
     expect(init?.method).toBe('POST')
     expect(init?.body).toBe(JSON.stringify({ cause: 'security_incident' }))
     expect((init?.headers as Record<string, string>)['x-masc-csrf-token']).toBe('csrf-xyz')
+
+    const grantMock = vi.fn<typeof fetch>(async () => jsonResp({ user_id: 'u-3', role: 'admin' }))
+    const granted = await grantAdminMember('u-3', grantMock)
+    expect(granted.ok).toBe(true)
+    const [grantUrl, grantInit] = grantMock.mock.calls[0]!
+    expect(grantUrl).toBe('/api/v1/auth/members/u-3/grant-admin')
+    expect(grantInit?.method).toBe('POST')
+    expect((grantInit?.headers as Record<string, string>)['x-masc-csrf-token']).toBe('csrf-xyz')
   })
 
   it('renders CSP-safe top-level sign-in navigation link in multi_account_signed_out mode (zero form POSTs)', async () => {

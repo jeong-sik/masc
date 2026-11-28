@@ -112,7 +112,7 @@ reconcile 은 그 선언을 다르게 다룬다. Shared 선언은 운영자 권�
 
 ### 3.2 권한 표
 
-권한은 파일 바이트만으로 정한다(`declared_authority`, #55493 `lane_addon_runtime.ml:3620`). 저장 뒤에 바뀌는 것은 근거로 쓰지 않는다.
+권한은 파일 바이트만으로 정한다(`declared_authority`, #55493 `lane_addon_runtime.ml:3635`). 저장 뒤에 바뀌는 것은 근거로 쓰지 않는다.
 
 | 표시 | visibility | 실행 권한 | 읽기 권한 |
 |---|---|---|---|
@@ -120,18 +120,22 @@ reconcile 은 그 선언을 다르게 다룬다. Shared 선언은 운영자 권�
 | 있음 | Shared, Operator_only | 운영자 | 운영자 |
 | 없음 | Keeper_only k, 선언이 직접 읽는 Fusion run 에 k 의 것이 있음 | Keeper k | Keeper k |
 | 없음 | Keeper_only k, 위층 Lane 출력에서만 물려받음 | 거절 | 거절 |
+| 없음 | Keeper_only k, 직접 읽는 Fusion run 이 모두 다른 Keeper 의 것 | 거절 | 거절 |
 | 없음 | Shared | 인증 없음 | 인증 없음 |
 | 없음 | Operator_only | 거절 | 거절 |
 
 - 표시 없는 파일은 그 바이트를 저장할 수 있는 누구나 썼을 수 있다.
 - Shared 는 인증 없는 호출자도 저장할 수 있다. 그래서 그 권한을 준다. Shared 바인딩에는 인증 없는 호출자가 못 읽는 소스가 없다. Fusion 소스가 있으면 Keeper_only 가 되기 때문이다(`lane_addon_runtime.ml:3407-3408`).
 - Keeper_only k 에 k 권한을 주는 근거는 선언이 직접 읽는 k 의 Fusion run 이다.
-  - run 의 주인은 등록할 때 정해지고 바뀌지 않는다(`lib/fusion_core/fusion_run_registry.ml:232`).
+  - run 의 주인은 등록부가 정한다(`lib/fusion_core/fusion_run_registry.ml:232`). 같은 run id 를 다시 등록하면 주인이 바뀐다(§8).
   - 저장 경로는 호출자가 그 run 의 주인일 때만 받는다(`lane_addon_sources.ml:274-282`). 그래서 k 나 운영자만 그 바이트를 쓸 수 있다.
 - 위층 Lane 출력에서만 물려받은 Keeper_only k 는 거절한다.
   - 위층의 visibility 는 저장 뒤에 바뀐다. Keeper j 가 Shared 위층을 읽는 선언을 저장한 뒤, k 나 운영자가 위층을 k 전용으로 바꿀 수 있다.
   - 그러면 그 선언은 k 의 visibility 가 된다. 여기에 k 권한을 주면 j 가 고른 package 가 k 의 출력을 k 권한으로 읽는다.
   - 저장 경로도 같은 선언을 쓰기 전에 거절한다. k 자신의 저장도 거절된다. k 의 Fusion run 을 직접 읽지 않는 바인딩이 k 권한을 받으려면 운영자가 표시한다.
+- 직접 읽는 Fusion run 이 모두 k 가 아닌 Keeper 의 것이면 거절한다.
+  - visibility 를 전에 돌던 worker 의 기록에서 가져왔는데, 등록부는 그 run 의 주인을 다른 Keeper 로 알려 주는 경우다.
+  - 표시한 파일도 k 로 읽으니 그 run 을 읽을 수 없다. 그래서 이 거절 문구는 표시를 말하지 않는다.
 - Operator_only 는 운영자만 저장할 수 있다. 표시가 없으면 운영자가 썼다는 근거가 없으니 붙이지 않는다.
 - 표시 있는 Keeper_only 는 실행만 운영자 권한이다. 읽기를 운영자 권한으로 하면 k 만 보는 출력에 운영자 데이터가 섞인다. 그래서 표시해도 기록 grant 와 workspace 밖 snapshot 은 거절된다.
 
@@ -139,12 +143,12 @@ reconcile 은 그 선언을 다르게 다룬다. Shared 선언은 운영자 권�
 
 선언마다 이 순서로 본다.
 
-1. **표시가 허락한 일을 먼저 거둔다.** 표시가 없는데 돌던 worker 가 표시만 허락하는 일을 하면 내린다(`operator_held`, #55493 `:3660`, `4827-4840`). `host_process` 실행과 운영자 권한 읽기가 그 일이다. `host_process` 면 issue 도 남긴다.
+1. **표시가 허락한 일을 먼저 거둔다.** 표시가 없는데 돌던 worker 가 표시만 허락하는 일을 하면 내린다(`operator_held`, #55493 `:3677`, `4844-4857`). `host_process` 실행과 운영자 권한 읽기가 그 일이다. `host_process` 면 issue 도 남긴다.
    - 이 검사는 다른 어떤 검사보다 먼저다. 표시는 revision 밖이다. 그래서 같은 바퀴에 선언을 적용하지 못해도 멈춘다. 읽지 못하는 기록, 문서 소유, 영속 상태, 연결 순환이 그런 경우다.
 2. **문서 소유를 visibility 에 맞춘다**(`retain_configured_document_owner`). 이것은 「누가 이 문서를 읽나」의 일이다. 권한 표보다 먼저 한다. 거절될 선언도 그 소스를 읽을 수 있는 사람만 문서를 읽어야 하기 때문이다. 표시 없는 Operator_only 선언은 소유를 거둔 뒤 거절된다.
 3. **권한 표를 적용한다.** 표가 거절하면 issue 를 남기고 돌던 worker 를 내린다.
 4. **돌던 worker 를 비교한다.** revision 이 같고 읽기 권한이 표와 같으면 그대로 둔다. 아니면 내리고 다음 바퀴에 표의 권한으로 붙인다. 실행 권한은 1 이 이미 봤다. 같은 revision 은 같은 package 를 돌린다.
-5. **붙이기 전에 붙일 parse 로 검사한다**(`admit_declared`, #55493 `:3647`). 실행 방식(`authorize_execution`), 소스(`Lane_addon_sources.authorize`), 기록 grant(`Lane_addon_records.grants`)를 본다. 실패하면 그 선언의 issue 가 된다.
+5. **붙이기 전에 붙일 parse 로 검사한다**(`admit_declared`, #55493 `:3664`). 실행 방식(`authorize_execution`), 소스(`Lane_addon_sources.authorize`), 기록 grant(`Lane_addon_records.grants`)를 본다. 실패하면 그 선언의 issue 가 된다.
    - 표시 없는 선언의 issue 에는, 같은 검사가 표시 있는 권한으로는 통과할 때만 그 줄을 쓰면 풀린다는 말을 붙인다. 표시 있는 Keeper_only 의 기록 grant 처럼 표시로 풀리지 않는 거절에는 붙이지 않는다.
 
 읽지 못한 선언의 worker 를 지키는 규칙(`:4693-4701`)은 그대로다. 파싱 실패나 중복 id 로 선언을 읽지 못하면 표시도 읽을 수 없어서 1 도 하지 않는다. 운영자가 표시를 지우면서 파일을 깨뜨리면 그 worker 는 파일을 고칠 때까지 돈다. Keeper 는 저장 경로로 그런 파일을 쓸 수 없다(§1.1).
@@ -159,8 +163,8 @@ reconcile 은 그 선언을 다르게 다룬다. Shared 선언은 운영자 권�
 ### 3.5 표시 있는 파일은 운영자 것이다
 
 - 표시는 운영자가 그 바이트를 보증한다는 뜻이다. 다른 사람이 그 파일을 바꾸면, 아래층 선언은 운영자가 보증한 Lane 이라고 믿고 그 출력을 계속 읽는다.
-- Keeper 와 인증 없는 호출자는 표시 있는 파일 위에 저장하지 못한다(`change_declaration_file`, #55493 `:3669`). 지금 파일의 표시를 읽어 `Invalid_request` 로 거절한다. TOML 표로 읽히지 않는 파일은 표시를 읽을 수 없으니 기존 문서 검사가 정한다.
-- Keeper 와 인증 없는 호출자의 Detach 는 그 instance 의 선언 파일에 표시가 있으면 거절한다(#55493 `:3900-3916`). 지우기 직전에 옮겨 둔 파일을 다시 읽고 표시를 다시 본다(`:3940-3971`). 표시는 revision 밖이라 revision 비교로는 알 수 없다.
+- Keeper 와 인증 없는 호출자는 표시 있는 파일 위에 저장하지 못한다(`change_declaration_file`, #55493 `:3686`). 지금 파일의 표시를 읽어 `Invalid_request` 로 거절한다. TOML 표로 읽히지 않는 파일은 표시를 읽을 수 없으니 기존 문서 검사가 정한다.
+- Keeper 와 인증 없는 호출자의 Detach 는 그 instance 의 선언 파일에 표시가 있으면 거절한다(#55493 `:3917-3930`). 지우기 직전에 옮겨 둔 파일을 다시 읽고 표시를 다시 본다(`:3957-3988`). 표시는 revision 밖이라 revision 비교로는 알 수 없다.
 - 운영자의 저장과 Detach 는 그대로다.
 
 ## 4. 운영자가 할 일
@@ -210,11 +214,17 @@ reconcile 은 그 선언을 다르게 다룬다. Shared 선언은 운영자 권�
 
 `host_process` 나 기록 grant 를 reconcile 로 붙이는 기존 시험의 선언에는 표시를 더한다(composition, exact_native, native_runtime, reconcile, host_cycle).
 
+위층 출력에서만 Keeper 의 visibility 를 물려받는 composition 시험의 선언에도 표시를 더한다(Fusion 보고서 체인, visibility 그래프). composition 의 재시작 시험은 같은 run 을 다른 Keeper 가 다시 등록하면 선언이 거절되고, 그 거절이 표시를 말하지 않는지 본다.
+
 ## 8. 남는 한계
 
 - 이 설계는 설정 폴더(`<config root>/lane-addons/`)에 운영자와 저장 경로만 쓴다고 본다. Keeper 가 그 폴더에 직접 쓸 수 있으면 어떤 표시도 믿을 수 없다.
 - Keeper 가 base path 안의 파일을 실제로 바꿀 수 있는지는 확인하지 않았다. 이 RFC 는 바꿀 수 있다고 보고 막는다.
 - 표시는 선언이 가리키는 파일까지 믿는다는 뜻이다. Keeper 가 표시 있는 선언의 manifest 나 snapshot 을 고칠 수 있으면, 그 worker 를 Keeper 가 정한다. 운영자는 Keeper 가 못 쓰는 파일을 가리키는 선언에만 표시한다. §1.5 의 다섯 선언이 가리키는 파일을 Keeper 가 쓸 수 있는지는 확인하지 않았다.
 - 표시 없는 Keeper_only 선언의 권한은 Fusion run 의 주인을 등록부에서 찾아 정한다. 등록부는 끝난 run 을 로그에서 다시 읽는다(`fusion_run_registry.ml:306-310`). 로그에도 없으면 권한을 정할 수 없다. 그 선언은 issue 가 되고 돌던 worker 도 내린다. 그때는 Fusion 소스도 읽을 수 없다.
+- 같은 run id 를 다시 등록하면 등록부의 주인이 바뀐다(`lib/run_registry_core/run_registry_core.ml:480-509`).
+  - 전에 돌던 worker 의 기록이 있는 선언은 거절된다(§3.2).
+  - 기록이 없는 선언은 바이트를 누가 저장했든 새 주인의 권한으로 붙는다.
+  - 누가 같은 run id 를 다시 등록할 수 있는지는 확인하지 않았다. 다시 등록을 막는 일은 이 RFC 밖이다.
 - snapshot 과 manifest 는 realpath 로 확인한 뒤 경로로 다시 연다(`lane_addon_sources.ml:291`, `372`; `lane_addon_config.ml:186`; `lib/lane_addon/lane_addon_manifest.ml:127-128`). 그 사이에 링크를 바꾸면 workspace 밖을 읽을 수 있다. 버린 방법도 같고, 이 RFC 밖이다.
 - manifest 를 열 때 일반 파일인지 보지 않는다. FIFO 면 reconcile 이 잠금을 잡은 채 멈춘다. 이 RFC 밖이다.

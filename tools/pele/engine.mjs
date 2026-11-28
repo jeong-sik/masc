@@ -253,6 +253,16 @@ function rasterWindow(svg, raster, natural) {
   return new XMLSerializer().serializeToString(document);
 }
 
+// A Resvg built from source loads every installed font. Its tree already holds
+// the text as glyph outlines, so the downscaled copy is built from that tree
+// and loads no fonts, the way the raster window below is.
+function fitToWidth(original, background, width) {
+  if (original.imagesToResolve().length) throw new Error('Diagram contains unresolved images');
+  return new Resvg(original.toString(), {
+    background, fitTo: { mode: 'width', value: width }, font: { loadSystemFonts: false },
+  });
+}
+
 export function renderDocument(request) {
   if (typeof request?.source !== 'string') throw new TypeError('source must be a string');
   positiveInteger(request.maxWidth, 'maxWidth');
@@ -294,27 +304,27 @@ export function renderDocument(request) {
       svg = retainedSvg(request.source);
       const original = new Resvg(svg, { background });
       result = { width: original.width, height: original.height };
-      renderer = raster !== undefined || original.width <= request.maxWidth ? original : new Resvg(svg, {
-        background, fitTo: { mode: 'width', value: request.maxWidth },
-      });
+      renderer = raster !== undefined || original.width <= request.maxWidth
+        ? original
+        : fitToWidth(original, background, request.maxWidth);
       break;
     }
     case 'graph': {
       svg = retainedSvg(renderGraphSvg(request.source, { colors: request.colors }));
       const original = new Resvg(svg, { background });
       result = { width: original.width, height: original.height };
-      renderer = raster !== undefined || original.width <= request.maxWidth ? original : new Resvg(svg, {
-        background, fitTo: { mode: 'width', value: request.maxWidth },
-      });
+      renderer = raster !== undefined || original.width <= request.maxWidth
+        ? original
+        : fitToWidth(original, background, request.maxWidth);
       break;
     }
     case 'chart': {
       svg = retainedSvg(renderChartSvg(request.source, { colors: request.colors, maxWidth: request.maxWidth }));
       const original = new Resvg(svg, { background });
       result = { width: original.width, height: original.height };
-      renderer = raster !== undefined || original.width <= request.maxWidth ? original : new Resvg(svg, {
-        background, fitTo: { mode: 'width', value: request.maxWidth },
-      });
+      renderer = raster !== undefined || original.width <= request.maxWidth
+        ? original
+        : fitToWidth(original, background, request.maxWidth);
       break;
     }
     default:

@@ -616,8 +616,7 @@ let ask_jev ~clock prepared =
       | Typesafeai_config.Host_account_not_shared | Typesafeai_config.No_armed_destination
       | Typesafeai_config.Board_attention_disabled
       | Typesafeai_config.Context_review_disabled | Typesafeai_config.Skill_applicability_disabled
-      | Typesafeai_config.Workspace_memory_selection_disabled
-      | Typesafeai_config.Memory_recall_disabled ) ->
+      | Typesafeai_config.Workspace_memory_selection_disabled ) ->
     Jev_off
   | Ok destinations ->
     (

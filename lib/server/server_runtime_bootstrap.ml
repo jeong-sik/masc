@@ -1616,8 +1616,6 @@ let start_post_ready_owner_lanes
     ~run:(fun () -> Server_runtime_startup_maintenance.startup_sweep_orphan_hygiene state);
   Server_runtime_startup_maintenance.report_unknown_typesafeai_exclusions
     ~base_path:(Mcp_server.workspace_config state).base_path;
-  Server_runtime_startup_maintenance.report_unknown_memory_recall_keepers
-    ~base_path:(Mcp_server.workspace_config state).base_path;
   Server_runtime_startup_maintenance.report_unarmed_typesafeai_destinations ();
   Server_bootstrap_loops.start_background_maintenance ~sw ~clock ~env state
 

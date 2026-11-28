@@ -32,6 +32,7 @@ type context_subtab =
   | Ctx_exact_input
   | Ctx_input_map
   | Ctx_response
+  | Ctx_prompt_blocks
 
 type logs_subview =
   | Logs_metrics
@@ -77,6 +78,9 @@ type keeper_state = {
   absent_cache_outcome_ref : string option;
   next_request : Wire_keeper_context.next_request_forecast Observed.t;
   next_request_absent : bool;
+  last_prompt : Wire_keeper_context.last_prompt_capture Observed.t;
+  last_prompt_absent : bool;
+  selected_block_idx : int;
   turn_transcript : (string * Wire_keeper_context.turn_transcript) Observed.t;
   absent_transcript_ref : string option;
   call_evidence : (string * Wire_keeper_context.tool_call_entry list) Observed.t;
@@ -146,6 +150,9 @@ let empty_keeper_state =
     absent_cache_outcome_ref = None;
     next_request = Observed.unreported;
     next_request_absent = false;
+    last_prompt = Observed.unreported;
+    last_prompt_absent = false;
+    selected_block_idx = 0;
     turn_transcript = Observed.unreported;
     absent_transcript_ref = None;
     call_evidence = Observed.unreported;
@@ -269,11 +276,19 @@ let subtab_rank = function
   | Ctx_exact_input -> 2
   | Ctx_input_map -> 3
   | Ctx_response -> 4
+  | Ctx_prompt_blocks -> 5
 
 let equal_context_subtab a b = Int.equal (subtab_rank a) (subtab_rank b)
 
 let all_context_subtabs =
-  [ Ctx_composition; Ctx_flow; Ctx_exact_input; Ctx_input_map; Ctx_response ]
+  [
+    Ctx_composition;
+    Ctx_flow;
+    Ctx_exact_input;
+    Ctx_input_map;
+    Ctx_response;
+    Ctx_prompt_blocks;
+  ]
 
 let context_subtab_label = function
   | Ctx_composition -> Say.make ~ko:"구성 · 예측" ~en:"Composition"
@@ -281,13 +296,15 @@ let context_subtab_label = function
   | Ctx_exact_input -> Say.make ~ko:"원문 입력 · 캐시" ~en:"Exact Input"
   | Ctx_input_map -> Say.make ~ko:"입력 증명표" ~en:"Input Map"
   | Ctx_response -> Say.make ~ko:"응답 · 도구" ~en:"Response"
+  | Ctx_prompt_blocks -> Say.make ~ko:"프롬프트 블록" ~en:"Prompt Blocks"
 
 let next_context_subtab = function
   | Ctx_composition -> Ctx_flow
   | Ctx_flow -> Ctx_exact_input
   | Ctx_exact_input -> Ctx_input_map
   | Ctx_input_map -> Ctx_response
-  | Ctx_response -> Ctx_composition
+  | Ctx_response -> Ctx_prompt_blocks
+  | Ctx_prompt_blocks -> Ctx_composition
 
 let selected_turn_entry ks =
   match Observed.to_option ks.turn_records with
@@ -317,6 +334,63 @@ let selected_provider_part ks =
         Store_scroll.clamp_index (List.length mf.parts) ks.selected_part_idx
       in
       List.nth_opt mf.parts idx
+
+let selected_prompt_block ks =
+  match selected_turn_entry ks with
+  | None -> None
+  | Some entry ->
+      let blocks = entry.record.blocks in
+      List.nth_opt blocks
+        (Store_scroll.clamp_index (List.length blocks) ks.selected_block_idx)
+
+type block_text =
+  | Block_text of string
+  | Block_text_differs
+  | Block_text_not_captured
+
+(* A turn record keeps each block's sha256, never its text; the capture keeps
+   the text of the keeper's last assembly. A block's text is the captured text
+   with the same id and the same digest, so an earlier turn whose block did
+   not change shows it too, and a turn whose block changed never shows
+   another turn's text. A captured text with secrets redacted has another
+   digest and reads as different. *)
+let block_text_in_capture (capture : Wire_keeper_context.last_prompt_capture)
+    (block : Turn_record.prompt_block) =
+  let same_id =
+    List.filter
+      (fun (c : Wire_keeper_context.captured_block) ->
+        Prompt_block_id.equal c.cb_id block.block)
+      capture.lp_blocks
+  in
+  match
+    List.find_opt
+      (fun (c : Wire_keeper_context.captured_block) ->
+        String.equal c.cb_sha256 block.digest)
+      same_id
+  with
+  | Some c -> Block_text c.cb_text
+  | None -> (
+      match same_id with
+      | [] -> Block_text_not_captured
+      | _ :: _ -> Block_text_differs)
+
+(* The block list and the text beside it, or above it when narrow; the view
+   draws with it and the scroll keys bound the text with it. *)
+let prompt_blocks_split (area : Rect.t) =
+  if area.w >= 72 then
+    match
+      Masc_tui_ui.Layout.split_h ~gap:2 area
+        [ Masc_tui_ui.Layout.Ratio 0.44; Masc_tui_ui.Layout.Flex 1 ]
+    with
+    | [ l; r ] -> (l, r)
+    | _ -> (area, Rect.empty)
+  else
+    match
+      Masc_tui_ui.Layout.split_v ~gap:1 area
+        [ Masc_tui_ui.Layout.Ratio 0.48; Masc_tui_ui.Layout.Flex 1 ]
+    with
+    | [ t; b ] -> (t, b)
+    | _ -> (area, Rect.empty)
 
 let part_content_for_selected ks =
   match
@@ -535,6 +609,7 @@ let step_turn ~keeper ~delta t =
             ks with
             selected_turn_idx = next_idx;
             selected_part_idx = 0;
+            selected_block_idx = 0;
             scroll_offset = 0;
           })
     t
@@ -564,6 +639,21 @@ let move_part_selection ~keeper ~delta t =
         match part_content_for_selected next_ks with
         | Some _ -> next_ks
         | None -> { next_ks with part_content = Observed.unreported })
+    t
+
+let move_block_selection ~keeper ~delta t =
+  update_keeper ~keeper
+    (fun ks ->
+      let total =
+        match selected_turn_entry ks with
+        | Some entry -> List.length entry.record.blocks
+        | None -> 0
+      in
+      let next_idx =
+        Store_scroll.clamp_index total (ks.selected_block_idx + delta)
+      in
+      if Int.equal next_idx ks.selected_block_idx then ks
+      else { ks with selected_block_idx = next_idx; scroll_offset = 0 })
     t
 
 let move_call_selection ~keeper ?(viewport_rows = 12) ~delta t =
@@ -763,6 +853,11 @@ let mark_next_request_absent ~keeper t =
     (fun ks -> { ks with next_request = Observed.absent; next_request_absent = true })
     t
 
+let mark_last_prompt_absent ~keeper t =
+  update_keeper ~keeper
+    (fun ks -> { ks with last_prompt = Observed.absent; last_prompt_absent = true })
+    t
+
 let mark_tool_calls_absent ~keeper t =
   update_keeper ~keeper
     (fun ks -> { ks with tool_calls = Observed.absent; tool_calls_absent = true })
@@ -875,6 +970,16 @@ let apply_next_request ~observed_at ~keeper forecast t =
         ks with
         next_request = Observed.value ~observed_at forecast;
         next_request_absent = false;
+      })
+    t
+
+let apply_last_prompt ~observed_at ~keeper capture t =
+  update_keeper ~keeper
+    (fun ks ->
+      {
+        ks with
+        last_prompt = Observed.value ~observed_at capture;
+        last_prompt_absent = false;
       })
     t
 
@@ -1248,6 +1353,8 @@ let mark_stale_all t =
             part_content = Observed.mark_stale ks.part_content;
             cache_outcome = Observed.mark_stale ks.cache_outcome;
             next_request = Observed.mark_stale ks.next_request;
+            last_prompt = Observed.mark_stale ks.last_prompt;
+            last_prompt_absent = false;
             turn_transcript = Observed.mark_stale ks.turn_transcript;
             call_evidence = Observed.mark_stale ks.call_evidence;
             call_evidence_auth_denied = false;
@@ -1285,6 +1392,8 @@ let mark_keeper_context_stale ~keeper t =
         turn_records = Observed.mark_stale ks.turn_records;
         next_request = Observed.mark_stale ks.next_request;
         next_request_absent = false;
+        last_prompt = Observed.mark_stale ks.last_prompt;
+        last_prompt_absent = false;
         turn_flow = Observed.mark_stale ks.turn_flow;
         absent_turn_flow_ref = None;
         checkpoints =

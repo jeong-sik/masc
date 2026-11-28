@@ -297,6 +297,8 @@ let purge_disallowed_state ~(session : Rbac.auth_session) (m : Model.t) :
           call_evidence = Observed.unreported;
           next_request = Observed.unreported;
           next_request_absent = false;
+          last_prompt = Observed.unreported;
+          last_prompt_absent = false;
           checkpoints = Observed.unreported;
           last_purge_preview = None;
           tool_calls = Observed.unreported;
@@ -4380,6 +4382,37 @@ let apply_http_reply ~now (m : Model.t) reply =
               { m with keeper_context = { m.keeper_context with by_keeper } })
             ~source:(Health.Source_keeper keeper) ~ko:"다음 요청 예측 조회"
             ~en:"Next request forecast fetch" err)
+  | Msg.Reply_keeper_last_prompt { keeper; result = Ok capture } ->
+      ( {
+          m with
+          keeper_context =
+            Keeper_context_store.apply_last_prompt ~observed_at:now ~keeper
+              capture m.keeper_context;
+        }
+      , [] )
+  | Msg.Reply_keeper_last_prompt { keeper; result = Error err } -> (
+      match err with
+      | Msg.Http_error { status = 404; _ } ->
+          ( {
+              m with
+              keeper_context =
+                Keeper_context_store.mark_last_prompt_absent ~keeper
+                  m.keeper_context;
+            }
+          , [] )
+      | Msg.Http_error _ | Msg.Transport _ | Msg.Workspace_mismatch _
+      | Msg.Decode_error _ ->
+          err_reply
+            ~fail:(fun m ->
+              let st = Keeper_context_store.get_keeper ~keeper m.keeper_context in
+              let by_keeper =
+                Keeper_context_store.String_map.add keeper
+                  { st with last_prompt = failed_slot err st.last_prompt }
+                  m.keeper_context.by_keeper
+              in
+              { m with keeper_context = { m.keeper_context with by_keeper } })
+            ~source:(Health.Source_keeper keeper) ~ko:"프롬프트 블록 조회"
+            ~en:"Last prompt fetch" err)
   | Msg.Reply_keeper_turn_transcript { keeper; turn_ref; result = Ok tr } ->
       ( {
           m with

@@ -62,6 +62,7 @@ let route_access_of_get_request : Cmd.get_request -> Rbac.route_access =
   | Cmd.Get_keeper_tool_result _
   | Cmd.Get_chat_operation_events _
   | Cmd.Get_keeper_next_request _
+  | Cmd.Get_keeper_last_prompt _
   | Cmd.Get_oauth_attempt_status _
   | Cmd.Get_goal_confirmation _
   | Cmd.Get_verification_evidence _

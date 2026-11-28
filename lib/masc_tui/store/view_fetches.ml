@@ -150,6 +150,12 @@ let fetches_for_keeper_context ?(include_cache_outcome = false) ~force ~name
           && needs_fetch ~force ks.next_request)
          (Cmd.Get_keeper_next_request { keeper = name })
     |> add_if
+         (Keeper_context_store.equal_context_subtab ks.subtab
+            Keeper_context_store.Ctx_prompt_blocks
+          && (force || not ks.last_prompt_absent)
+          && needs_fetch ~force ks.last_prompt)
+         (Cmd.Get_keeper_last_prompt { keeper = name })
+    |> add_if
          ((force || (not ks.checkpoints_auth_denied && not ks.checkpoints_absent))
           && needs_fetch ~force ks.checkpoints)
          (Cmd.Get_keeper_checkpoints { keeper = name })
@@ -204,6 +210,7 @@ let fetches_for_keeper_context ?(include_cache_outcome = false) ~force ~name
           | Keeper_context_store.Ctx_exact_input -> (true, true, false, false)
           | Keeper_context_store.Ctx_input_map -> (true, false, false, false)
           | Keeper_context_store.Ctx_response -> (false, false, true, true)
+          | Keeper_context_store.Ctx_prompt_blocks -> (false, false, false, false)
       in
       base
       |> add_if

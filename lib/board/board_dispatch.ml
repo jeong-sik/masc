@@ -408,11 +408,13 @@ let started_backend () =
           ensure_flusher_actor store;
           store
 
-(* task-4036, #55449: a Board source refused because another writer moved its
-   file, or because a read met that writer's lock, is read again here before
-   the caller's operation. Every Dispatch operation takes the store here, some
-   more than once, so no operation has to be listed as one that reads again; a
-   call that finds nothing due looks at the store's fields and returns. The
+(* task-4036, #55449, #55465: a Board source refused because another writer
+   moved its file, or because a read met that writer's lock, is read again
+   here before the caller's operation; one refused for any other cause is read
+   again once its file has changed. Every Dispatch operation takes the store
+   here, some more than once, so no operation has to be listed as one that
+   reads again; a call that finds no source refused looks at the store's
+   fields and returns, and a refused source adds one [lstat]. The
    flusher and [flush] take the store without it. It is called outside every
    Board lock: nothing outside [lib/board] holds one, and no callback run
    under one calls back into Dispatch. *)

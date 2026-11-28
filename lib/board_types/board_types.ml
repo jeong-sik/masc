@@ -1345,11 +1345,89 @@ type votes_source_state =
     until model publication is acknowledged. Unknown writes and unfinished
     publication require a fresh store; an ordinary reload cannot clear them. *)
 
+module Source_file = struct
+  type entry =
+    | Absent
+    | Present of { device : int; inode : int; size : int; modified : float; links : int }
+    | Uninspected
+
+  type seen =
+    | Never
+    | Seen of entry
+
+  let never_seen = Never
+
+  let inspect path =
+    Fs_compat.Systhread_host.run ~label:"board-source-file" (fun () ->
+      match Unix.lstat path with
+      | stat ->
+        Present
+          { device = stat.Unix.st_dev
+          ; inode = stat.Unix.st_ino
+          ; size = stat.Unix.st_size
+          ; modified = stat.Unix.st_mtime
+          ; links = stat.Unix.st_nlink
+          }
+      | exception Unix.Unix_error (error, _, _) ->
+        if error = Unix.ENOENT then Absent else Uninspected)
+
+  (* An entry that could not be inspected equals none, itself included: the
+     read that follows meets whatever stopped the [lstat] and reports it. *)
+  let same left right =
+    match left, right with
+    | Absent, Absent -> true
+    | Present left, Present right ->
+      Int.equal left.device right.device
+      && Int.equal left.inode right.inode
+      && Int.equal left.size right.size
+      && Float.equal left.modified right.modified
+      && Int.equal left.links right.links
+    | Uninspected, (Absent | Present _ | Uninspected)
+    | Absent, (Present _ | Uninspected)
+    | Present _, (Absent | Uninspected) -> false
+
+  (* Errors that say what the file is. Every other error ended the read before
+     the file's bytes were returned. *)
+  let rec describes_file = function
+    | Fs_compat.Incomplete_transaction_tail _ | Ambiguous_transaction_file_identity _
+    | Unexpected_transaction_file_kind _ -> true
+    | Transaction_settlement_failed { primary = Transaction_failed error; _ } ->
+      describes_file error
+    | Cursor_mismatch _ | Transaction_content_changed _ | Transaction_path_binding_changed _
+    | Stable_lock_contended _ | Unexpected_stable_lock_permissions _
+    | Invalid_stable_lock_state _ | Invalid_transaction_suffix
+    | Private_jsonl_operation_failed _ | Rewrite_stage_failed _
+    | Rewrite_published_durability_unknown _
+    | Transaction_settlement_failed { primary = Transaction_succeeded _; _ }
+    | Transaction_append_failed _ -> false
+
+  let around_read seen ~path read =
+    let before = inspect path in
+    let result = read () in
+    let seen =
+      match result with
+      | Ok _ -> Seen before
+      | Error error -> if describes_file error then Seen before else seen
+    in
+    seen, result
+
+  let changed_since seen ~path =
+    match seen with
+    | Never -> true
+    | Seen before -> not (same before (inspect path))
+end
+
 type store = {
   (** Canonical posts observation/refusal/uncertainty, owned by persist_mutex.
       Successful loads and writes advance it; dirty cards need not equal its bytes. *)
   mutable posts_source : posts_source_state;
   posts_source_io : posts_source_io;
+  (** The entry each source's last read saw, owned by persist_mutex. *)
+  mutable posts_source_seen : Source_file.seen;
+  mutable comments_source_seen : Source_file.seen;
+  mutable sub_boards_source_seen : Source_file.seen;
+  mutable votes_source_seen : Source_file.seen;
+  mutable reactions_source_seen : Source_file.seen;
   (** Source authority is owned by persist_mutex. *)
   mutable comments_source : comments_source_state;
   comments_source_io : Fs_compat.private_jsonl_transaction_io_for_testing option;

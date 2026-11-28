@@ -680,6 +680,224 @@ let test_reload_deduplicates_comments_and_skips_blank_lines () =
    | None -> Alcotest.fail "second comment missing after reload")
 ;;
 
+(* #55465: a source refused for what its file is (a torn last line, a second
+   hard link) stayed refused until a restart, also after the file was
+   repaired. [Board.reobserve] is what every Board operation runs when it
+   takes the store. It reads a refused source again once its file is no longer
+   the one the store last read, and not while the file stays as it is. *)
+module Paths = Masc_board_handlers.Board_paths
+
+type refused_source =
+  { name : string
+  ; file : Paths.persisted_file
+  ; path : Board.store -> string
+  ; create :
+      base_path:string
+      -> io:Fs_compat.private_jsonl_transaction_io_for_testing
+      -> unit
+      -> Board.store
+  ; readable : Board.store -> bool
+  }
+
+let refused_sources =
+  [ { name = "posts"
+    ; file = Paths.Posts
+    ; path = Board.persist_path
+    ; create =
+        (fun ~base_path ~io () ->
+          Board.create_store_with_source_io_for_testing ~base_path ~io:{ posts = Some io } ())
+    ; readable =
+        (fun store ->
+          match store.Board.posts_source with
+          | Board.Posts_readable _ -> true
+          | Board.Posts_unobserved | Board.Posts_refused _ | Board.Posts_unsettled _ -> false)
+    }
+  ; { name = "comments"
+    ; file = Paths.Comments
+    ; path = Board.comments_path
+    ; create = Board.create_store_with_comments_io_for_testing
+    ; readable =
+        (fun store ->
+          match store.Board.comments_source with
+          | Board.Comments_readable _ -> true
+          | Board.Comments_unobserved | Board.Comments_publishing _
+          | Board.Comments_recovered _ | Board.Comments_refused _
+          | Board.Comments_unsettled _ -> false)
+    }
+  ; { name = "votes"
+    ; file = Paths.Votes
+    ; path = Board.vote_log_path
+    ; create = Board.create_store_with_votes_io_for_testing
+    ; readable =
+        (fun store ->
+          match store.Board.votes_source with
+          | Board.Votes_readable _ -> true
+          | Board.Votes_unobserved | Board.Votes_publishing _ | Board.Votes_refused _
+          | Board.Votes_unsettled _ -> false)
+    }
+  ; { name = "reactions"
+    ; file = Paths.Reactions
+    ; path = Board.reactions_path
+    ; create = Board.create_store_with_reactions_io_for_testing
+    ; readable =
+        (fun store ->
+          match store.Board.reactions_source with
+          | Board.Reactions_readable _ -> true
+          | Board.Reactions_unobserved | Board.Reactions_publishing _
+          | Board.Reactions_refused _ | Board.Reactions_unsettled _ -> false)
+    }
+  ; { name = "sub-boards"
+    ; file = Paths.Sub_boards
+    ; path = Board.sub_boards_path
+    ; create = Board.create_store_with_sub_boards_io_for_testing
+    ; readable =
+        (fun store ->
+          match store.Board.sub_boards_source with
+          | Board.Policy_readable _ -> true
+          | Board.Policy_unobserved | Board.Policy_publishing _ | Board.Policy_refused _
+          | Board.Policy_unsettled _ -> false)
+    }
+  ]
+;;
+
+(* [damage] leaves a file a read refuses, [damage_again] changes that file and
+   leaves it refused, [repair] leaves an empty file a read accepts. *)
+type damaged_file =
+  { cause : string
+  ; damage : string -> unit
+  ; damage_again : string -> unit
+  ; repair : string -> unit
+  }
+
+let write_file path text = Out_channel.with_open_bin path (fun out -> output_string out text)
+
+let torn_last_line (_ : string) =
+  { cause = "a torn last line"
+  ; damage = (fun path -> write_file path "{torn")
+  ; damage_again = (fun path -> write_file path "{torn again")
+  ; repair = (fun path -> write_file path "")
+  }
+;;
+
+(* Removing the links changes neither the file's bytes nor its modification
+   time: only its link count tells the repaired file from the refused one. *)
+let second_hard_link dir =
+  let link n = Filename.concat dir (Printf.sprintf "second-link-%d" n) in
+  { cause = "a second hard link"
+  ; damage = (fun path -> write_file path ""; Unix.link path (link 1))
+  ; damage_again = (fun path -> Unix.link path (link 2))
+  ; repair = (fun (_ : string) -> Unix.unlink (link 1); Unix.unlink (link 2))
+  }
+;;
+
+let test_refused_source_is_read_again_when_its_file_changes source damaged () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let previous = Sys.getenv_opt "MASC_BASE_PATH" in
+  let dir = fresh_test_base_path () in
+  Fun.protect ~finally:(fun () ->
+    Unix.putenv "MASC_BASE_PATH" (Option.value ~default:"" previous);
+    if Sys.file_exists dir then Fs_compat.remove_tree dir) (fun () ->
+    let damaged = damaged dir in
+    (* Every descriptor this source's file transactions close passes here, so
+       an unchanged count means the source did no file IO. *)
+    let closes = ref 0 in
+    let io : Fs_compat.private_jsonl_transaction_io_for_testing =
+      { before_sync_parent = (fun _ -> ())
+      ; close_fd = (fun fd -> incr closes; Unix.close fd)
+      }
+    in
+    let store = source.create ~base_path:dir ~io () in
+    let path = source.path store in
+    Fs_compat.mkdir_p (Filename.dirname path);
+    damaged.damage path;
+    Alcotest.(check bool) "the load reports the damaged source" true
+      (Result.is_error (Board.initialize_store store));
+    Alcotest.(check bool) "the damaged source is refused" false (source.readable store);
+    let still_refused () =
+      List.exists
+        (fun (file, (_ : Board.board_error)) -> file = source.file)
+        (Board.reobserve store)
+    in
+    let loaded = !closes in
+    Alcotest.(check bool) "an unchanged file is not due" false (still_refused ());
+    Alcotest.(check int) "an unchanged file is not read again" loaded !closes;
+    damaged.damage_again path;
+    Alcotest.(check bool) "a changed file that is still damaged stays refused" true
+      (still_refused ());
+    let changed = !closes in
+    Alcotest.(check bool) "the changed file was read" true (changed > loaded);
+    Alcotest.(check bool) "the same damage is not due a second time" false (still_refused ());
+    Alcotest.(check int) "the same damage is read once" changed !closes;
+    damaged.repair path;
+    Alcotest.(check bool) "the repaired file is not reported" false (still_refused ());
+    let repaired = !closes in
+    Alcotest.(check bool) "the repaired file was read" true (repaired > changed);
+    Alcotest.(check bool) "the repaired source is readable without a restart" true
+      (source.readable store);
+    Alcotest.(check bool) "a readable source is not due" false (still_refused ());
+    Alcotest.(check int) "a readable source is not read again" repaired !closes)
+;;
+
+(* #55465: a read again that fails before it reaches the file replaces the
+   refusal it was run for. The first refusal here is a stale cursor, which is
+   read again at every call; the read meets a lock file with the wrong mode and
+   leaves that as the cause, which is not. The source must still be read again
+   at the next call, or one failed read freezes it until a restart. The issue
+   names a descriptor shortage for that read; a lock file mode fails it at the
+   same place and can be set from a test. *)
+let test_read_again_that_did_not_reach_the_file_is_tried_again () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let previous = Sys.getenv_opt "MASC_BASE_PATH" in
+  let dir = fresh_test_base_path () in
+  Fun.protect ~finally:(fun () ->
+    Unix.putenv "MASC_BASE_PATH" (Option.value ~default:"" previous);
+    if Sys.file_exists dir then Fs_compat.remove_tree dir) (fun () ->
+    let new_store () =
+      let store = Masc_board_handlers.Board_core.create_store ~base_path:dir () in
+      load_sources store;
+      store
+    in
+    let stale = new_store () in
+    let post =
+      match
+        Masc_board_handlers.Board_core.create_post stale ~lookup:nobody_declared
+          ~author:"source-writer" ~content:"shared parent" ~post_kind:Board.Human_post ()
+      with
+      | Ok post -> post
+      | Error error ->
+        Alcotest.failf "create_post failed: %s" (Board.Post_publication_failure.to_string error)
+    in
+    let comment store content =
+      Masc_board_handlers.Board_core.add_comment ~reader:Masc_board_handlers.Board_access.Operator
+        store ~lookup:nobody_declared ~post_id:(Board.Post_id.to_string post.id)
+        ~author:"source-writer" ~content ()
+    in
+    let accepted what = function
+      | Ok (_ : Board.comment) -> ()
+      | Error error -> Alcotest.failf "%s: %s" what (Board.show_board_error error)
+    in
+    accepted "this store's comment" (comment stale "this store's comment");
+    let other = new_store () in
+    accepted "another writer's comment" (comment other "another writer's comment");
+    Alcotest.(check bool) "the stale cursor refuses the next comment" true
+      (Result.is_error (comment stale "refused against the stale cursor"));
+    let comments_still_refused () =
+      List.exists
+        (fun (file, (_ : Board.board_error)) -> file = Paths.Comments)
+        (Board.reobserve stale)
+    in
+    let lock = Board.comments_path stale ^ ".lock" in
+    Unix.chmod lock 0o640;
+    Alcotest.(check bool) "the read again fails on the lock file's mode" true
+      (comments_still_refused ());
+    Unix.chmod lock 0o600;
+    Alcotest.(check bool) "the next call reads again and clears the source" false
+      (comments_still_refused ());
+    accepted "a comment after the second read" (comment stale "accepted after the second read"))
+;;
+
 let () =
   Random.self_init ();
   Alcotest.run
@@ -716,5 +934,22 @@ let () =
             `Quick
             test_reload_deduplicates_comments_and_skips_blank_lines
         ] )
+    ; ( "refused_source_and_its_file"
+      , List.concat_map
+          (fun source ->
+             List.map
+               (fun damaged ->
+                  Alcotest.test_case
+                    (Printf.sprintf "%s refused for %s are read again when the file changes"
+                       source.name (damaged "").cause)
+                    `Quick
+                    (test_refused_source_is_read_again_when_its_file_changes source damaged))
+               [ torn_last_line; second_hard_link ])
+          refused_sources
+        @ [ Alcotest.test_case
+              "a read again that did not reach the file is tried again at the next call"
+              `Quick
+              test_read_again_that_did_not_reach_the_file_is_tried_again
+          ] )
     ]
 ;;

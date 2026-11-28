@@ -47,7 +47,10 @@ let make_http_config ~address ~port : Http.config =
      the settings panel as the environment's, and hand it to every child. *)
   (match Env_config_core.masc_http_base_url_opt () with
    | Some (_ : string) -> ()
-   | None -> Unix.putenv Env_config_core.http_base_url_env_key base_url);
+   | None ->
+     (* Recorded as written by the process, so the settings panel does not
+        take the bound address for an export of the shell. *)
+     Config_boot_overrides.put_process_env Env_config_core.http_base_url_env_key base_url);
   config
 ;;
 

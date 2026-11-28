@@ -928,6 +928,31 @@ let test_compares_a_redirect_with_the_base_url_of_the_file () =
           Alcotest.(check (option int)) "no port is recorded for the CLI" None (recorded_port ~base)))
 ;;
 
+(* With no base URL configured, the listener writes the address it bound and
+   records it as the process's own, so the settings panel does not report it
+   as an export of the shell. *)
+let test_the_bound_address_is_written_by_the_process () =
+  let key = Env_config_core.http_base_url_env_key in
+  Unix.unsetenv key;
+  Config_boot_overrides.reset_for_tests ();
+  Fun.protect
+    ~finally:(fun () ->
+      Config_boot_overrides.reset_for_tests ();
+      Unix.putenv key "")
+    (fun () ->
+      let _http_config = Server_bootstrap_http.make_http_config ~address:loopback ~port:8935 in
+      Alcotest.(check (option string))
+        "the variable holds the bound address"
+        (Some (Server_bootstrap_http.advertised_base_url ~address:loopback ~port:8935))
+        (Sys.getenv_opt key);
+      Alcotest.(check bool)
+        "its source is not the environment"
+        true
+        (match Config_boot_overrides.source key with
+         | Config_boot_overrides.Default -> true
+         | Config_boot_overrides.Env | Config_boot_overrides.Boot_override -> false))
+;;
+
 let test_stops_on_an_http_mode_outside_its_vocabulary () =
   with_installation (fun env { base; config = _; store; multi_account } ->
     (* The store is gone too: a boot that opened the zone before it read the
@@ -1811,6 +1836,10 @@ let () =
             "compares a redirect with the base URL of runtime.toml"
             `Quick
             test_compares_a_redirect_with_the_base_url_of_the_file
+        ; Alcotest.test_case
+            "the bound address is written by the process"
+            `Quick
+            test_the_bound_address_is_written_by_the_process
         ; Alcotest.test_case
             "the boot stops when the port cannot be announced"
             `Quick

@@ -658,6 +658,46 @@ let test_a_base_url_that_is_not_an_origin_stops_the_load () =
     [ "masc.example.com"; "https://masc.example.com/app"; "" ]
 ;;
 
+(* A server that started with no base URL holds the address it bound in the
+   variable, written by the process itself. A base URL the operator then adds
+   to the file waits for a restart; it is not hidden by an export. A value the
+   shell exported does hide it. *)
+let test_a_first_base_url_in_the_file_waits_for_a_restart () =
+  let key = Env_config_core.http_base_url_env_key in
+  let inherited = Sys.getenv_opt key in
+  Config_boot_overrides.reset_for_tests ();
+  Fun.protect
+    ~finally:(fun () ->
+      (match inherited with
+       | Some value -> Unix.putenv key value
+       | None -> Unix.unsetenv key);
+      Config_boot_overrides.reset_for_tests ())
+    (fun () ->
+       let doc =
+         match
+           Keeper_toml_loader.parse_toml
+             "[transport]\nhttp_base_url = \"https://masc.example.test\"\n"
+         with
+         | Ok doc -> doc
+         | Error message -> Alcotest.failf "the document does not parse: %s" message
+       in
+       let status () =
+         match Keeper_runtime_config.overlay_application_to_yojson doc with
+         | `Assoc fields ->
+           (match List.assoc_opt "status" fields with
+            | Some (`String status) -> status
+            | Some _ | None -> Alcotest.fail "the overlay has no status")
+         | _ -> Alcotest.fail "the overlay is not an object"
+       in
+       Config_boot_overrides.put_process_env key "http://127.0.0.1:8935";
+       Alcotest.(check string)
+         "the bound address does not hide the file"
+         "pending_restart"
+         (status ());
+       Unix.putenv key "https://shell.example.test";
+       Alcotest.(check string) "an export of the shell does" "preempted_by_env" (status ()))
+;;
+
 let () =
   Alcotest.run "runtime_toml_namespace"
     [ ( "namespaces"
@@ -699,5 +739,7 @@ let () =
             test_typed_boot_overrides_decoded_without_string_roundtrip
         ; Alcotest.test_case "a base URL that is not an origin stops the load" `Quick
             test_a_base_url_that_is_not_an_origin_stops_the_load
+        ; Alcotest.test_case "a first base URL in the file waits for a restart" `Quick
+            test_a_first_base_url_in_the_file_waits_for_a_restart
         ] )
     ]

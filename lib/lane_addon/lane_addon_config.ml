@@ -149,6 +149,15 @@ let package_source_of_fields fields =
       Error "package requires the name of a package this server carries"
   | None, Some _ -> Ok Manifest_path
 
+let authority_of_fields fields = match List.assoc_opt "operator_authority" fields with
+  | None | Some (Otoml.TomlBoolean false) -> Ok Unmarked
+  | Some (Otoml.TomlBoolean true) -> Ok Operator_marked
+  | Some (Otoml.TomlString _) | Some (Otoml.TomlInteger _) | Some (Otoml.TomlFloat _)
+  | Some (Otoml.TomlOffsetDateTime _) | Some (Otoml.TomlLocalDateTime _)
+  | Some (Otoml.TomlLocalDate _) | Some (Otoml.TomlLocalTime _) | Some (Otoml.TomlArray _)
+  | Some (Otoml.TomlTable _) | Some (Otoml.TomlInlineTable _) | Some (Otoml.TomlTableArray _) ->
+      Error "operator_authority requires a boolean"
+
 let decode ~packages ~manifest_scope ~source_path ~source_revision ~id fields =
   let allowed = ["id"; "enabled"; "run_id"; "package"; "manifest_path"; "binding"; "tool_hooks"; "exact_outputs";
     "max_exact_in_flight"; "operator_authority"] in
@@ -170,14 +179,7 @@ let decode ~packages ~manifest_scope ~source_path ~source_revision ~id fields =
     | Some (Otoml.TomlOffsetDateTime _) | Some (Otoml.TomlLocalDateTime _)
     | Some (Otoml.TomlLocalDate _) | Some (Otoml.TomlLocalTime _) | Some (Otoml.TomlArray _)
     | Some (Otoml.TomlTable _) | Some (Otoml.TomlInlineTable _) | Some (Otoml.TomlTableArray _) -> refused in
-  let* authority = match List.assoc_opt "operator_authority" fields with
-    | None | Some (Otoml.TomlBoolean false) -> Ok Unmarked
-    | Some (Otoml.TomlBoolean true) -> Ok Operator_marked
-    | Some (Otoml.TomlString _) | Some (Otoml.TomlInteger _) | Some (Otoml.TomlFloat _)
-    | Some (Otoml.TomlOffsetDateTime _) | Some (Otoml.TomlLocalDateTime _)
-    | Some (Otoml.TomlLocalDate _) | Some (Otoml.TomlLocalTime _) | Some (Otoml.TomlArray _)
-    | Some (Otoml.TomlTable _) | Some (Otoml.TomlInlineTable _) | Some (Otoml.TomlTableArray _) ->
-        Error "operator_authority requires a boolean" in
+  let* authority = authority_of_fields fields in
   let* run_id = text fields "run_id" in
   let directory = Filename.dirname source_path in
   (* A carried package resolves only to the folder holding exactly this
@@ -346,6 +348,8 @@ let toml_table bytes =
        | Otoml.TomlLocalTime _ | Otoml.TomlArray _ | Otoml.TomlInlineTable _
        | Otoml.TomlTableArray _ ) -> Error "declaration requires a TOML table"
   | exception Otoml.Duplicate_key message -> Error message
+
+let source_authority source_text = Result.bind (toml_table source_text) authority_of_fields
 
 let declared_carried ~directory =
   let directory = absolute directory in

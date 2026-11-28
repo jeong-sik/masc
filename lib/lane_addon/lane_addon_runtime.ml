@@ -3584,13 +3584,18 @@ let same_access left right = match left, right with
   | Unauthenticated, (Operator_configuration | Keeper _) -> false
 
 let operator_authority_is_operator_only = "only the operator can save operator_authority = true"
+let marked_file_is_operator_only =
+  "only the operator can change or remove a declaration that carries operator_authority = true"
 let operator_sources_need_marker =
   "a binding that reads an operator-only source requires operator_authority = true"
+let inherited_keeper_needs_marker =
+  "a binding that only inherits Keeper visibility requires operator_authority = true"
+let marker_lifts_it = "; only the operator allows it, with operator_authority = true"
 
 type declared_authority = { executes_as : Lane_addon_sources.access; reads_as : Lane_addon_sources.access }
 
-(* Inherited visibility restricts who may read a declaration. It cannot
-   confer a Keeper principal on an unmarked declaration. *)
+(* Whether one of the binding's own Fusion runs is [keeper]'s. A run's owner
+   is fixed when the run registers, so the bytes alone name it. *)
 let binding_names_fusion_owner ~binding keeper =
   let* sources = Lane_addon_sources.parse binding in
   List.fold_left (fun result source ->
@@ -3602,6 +3607,16 @@ let binding_names_fusion_owner ~binding keeper =
     | Lane_output _ | Snapshot_file _ | Msx_capture _ | Dos_capture _ | Browser_document _ -> Ok found)
     (Ok false) sources
 
+(* HIGH-RISK-UNREVIEWED: RFC lane-declaration-operator-authority 3.2. A
+   declaration file carries operator authority only when it says so, and the
+   save path refuses that line from anyone else. An unmarked file may have
+   been saved by anyone allowed to save its bytes, so its worker gets the least
+   of those authorities. A Shared binding reads nothing an unauthenticated
+   caller cannot read. A Keeper_only binding reads as its Keeper only when one
+   of its own Fusion runs is that Keeper's: visibility inherited from an
+   upstream Lane can change after the save, so it names no saver. Nobody but
+   the operator may save an operator-only binding. A marked Keeper_only
+   binding still reads as its Keeper, since only that Keeper sees its output. *)
 let declared_authority ~binding (authority : Lane_addon_config.authority) visibility =
   match authority, visibility with
   | Lane_addon_config.Operator_marked, Keeper_only keeper ->
@@ -3612,16 +3627,51 @@ let declared_authority ~binding (authority : Lane_addon_config.authority) visibi
       let* names_owner = binding_names_fusion_owner ~binding keeper in
       if names_owner then
         Ok {executes_as=Lane_addon_sources.Keeper keeper; reads_as=Lane_addon_sources.Keeper keeper}
-      else Error "a binding that only inherits Keeper visibility requires operator_authority = true"
+      else Error inherited_keeper_needs_marker
   | Unmarked, Shared ->
       Ok {executes_as=Lane_addon_sources.Unauthenticated; reads_as=Lane_addon_sources.Unauthenticated}
   | Unmarked, Operator_only -> Error operator_sources_need_marker
 
-(* An unmarked refusal names the line that lifts it; only the operator can
-   save that line. *)
-let declared_refusal (authority : Lane_addon_config.authority) message = match authority with
-  | Lane_addon_config.Unmarked -> message ^ "; only the operator allows it, with operator_authority = true"
-  | Operator_marked -> message
+(* The checks [authority] passes before the declaration's worker attaches. *)
+let admit_with ~workspace ~configuration (d : Lane_addon_config.declaration) authority =
+  let* () = authorize_execution ~access:authority.executes_as d.package in
+  let* () = Lane_addon_sources.authorize ~workspace ~access:authority.reads_as d.binding in
+  Lane_addon_records.grants
+    ~operator_owned:(operator_owned ~configuration ~source_access:authority.reads_as) d.binding
+  |> Result.map (fun (_ : Lane_addon_records.grant list) -> ())
+
+(* HIGH-RISK-UNREVIEWED: an unmarked refusal names the operator's line only
+   when the line would lift it, that is when the same checks pass with the
+   authority a marked file of this visibility gets. A marked Keeper_only file
+   still reads as its Keeper, so its record grant is refused either way. *)
+let admit_declared ~workspace ~configuration (d : Lane_addon_config.declaration) visibility authority =
+  match admit_with ~workspace ~configuration d authority with
+  | Ok () -> Ok ()
+  | Error message ->
+      let lifted = match d.authority with
+        | Lane_addon_config.Operator_marked -> false
+        | Unmarked ->
+            (match declared_authority ~binding:d.binding Lane_addon_config.Operator_marked visibility with
+             | Ok marked -> Result.is_ok (admit_with ~workspace ~configuration d marked)
+             | Error _ -> false) in
+      Error (if lifted then message ^ marker_lifts_it else message)
+
+(* What a running worker does that only the operator's line allows. *)
+let operator_held (e : entry) = match e.package.execution, e.source_access with
+  | Lane_addon_types.Host_process _, (Lane_addon_sources.Operator_configuration | Keeper _ | Unauthenticated)
+  | Lane_addon_types.Container _, Lane_addon_sources.Operator_configuration -> true
+  | Lane_addon_types.Container _, (Lane_addon_sources.Keeper _ | Unauthenticated) -> false
+
+(* HIGH-RISK-UNREVIEWED: RFC lane-declaration-operator-authority 3.5. A file
+   that carries the operator's line is the operator's: no one else may save
+   over it or remove it, so no one else can swap what the operator vouched
+   for. *)
+let change_declaration_file ~access (authority : Lane_addon_config.authority) =
+  match access, authority with
+  | Lane_addon_sources.Operator_configuration, (Lane_addon_config.Operator_marked | Unmarked)
+  | (Lane_addon_sources.Keeper _ | Unauthenticated), Lane_addon_config.Unmarked -> Ok ()
+  | (Lane_addon_sources.Keeper _ | Unauthenticated), Lane_addon_config.Operator_marked ->
+      Error marked_file_is_operator_only
 
 let attach_entry ~sw m ~run_id ~package ~binding ~configuration ~source_access ~visibility ~max_exact_in_flight =
   (* An image that is not on the host is not a worker that failed. Creating one
@@ -3760,6 +3810,12 @@ let save_declaration ?(access = Lane_addon_sources.Unauthenticated) ~config json
                  | Some _ | None -> authorize_document m ~workspace:config.Workspace.base_path ~access current)
             | Operator_configuration | Unauthenticated ->
                 authorize_document m ~workspace:config.Workspace.base_path ~access current in
+          (* Text that is not a TOML table carries no line, and the document
+             checks above already decided who may repair it. *)
+          let* () = match Lane_addon_config.source_authority current.source_text with
+            | Ok authority -> change_declaration_file ~access authority
+                |> Result.map_error (fun message -> {Lane_addon_declaration.code=Invalid_request;message;current=None})
+            | Error _ -> Ok () in
           Ok (Some current)
       | Error {Lane_addon_declaration.code=Not_found;_} -> Ok None
       | Error ({Lane_addon_declaration.code=Invalid_request | Revision_conflict | Invalid_declaration | Io_error;_} as error) -> Error error in
@@ -3786,6 +3842,11 @@ let save_declaration ?(access = Lane_addon_sources.Unauthenticated) ~config json
             Lane_addon_records.grants ~operator_owned:false declaration.binding
             |> Result.map_error (fun message -> {Lane_addon_declaration.code=Invalid_request;message;current=None}) in
           let* visibility = binding_visibility m ~access declaration.binding
+            |> Result.map_error (fun message -> {Lane_addon_declaration.code=Invalid_request;message;current=None}) in
+          (* Reconcile reads these unmarked bytes with the table's authority;
+             a binding it refuses is refused before it is written. *)
+          let* (_ : declared_authority) =
+            declared_authority ~binding:declaration.binding Lane_addon_config.Unmarked visibility
             |> Result.map_error (fun message -> {Lane_addon_declaration.code=Invalid_request;message;current=None}) in
           (match access, visibility with
            | Keeper keeper, Keeper_only owner when String.equal keeper owner -> Ok (Some keeper)
@@ -3836,22 +3897,23 @@ let save_declaration ?(access = Lane_addon_sources.Unauthenticated) ~config json
    declaration, if any. Detach asks this before it stops anything, so a
    declaration that changed or became invalid since it was applied is refused
    while the worker still runs. *)
-let removable_declaration ~packages ~directory (owner : configuration_owner) =
+let removable_declaration ~packages ~access ~directory (owner : configuration_owner) =
   let snapshot = Lane_addon_config.load ~packages ~directory in
   if not snapshot.complete then Error "Lane configuration directory could not be read; removal was not applied"
   else
     let matches = List.filter (fun (d : Lane_addon_config.declaration) -> d.id = owner.id) snapshot.declarations in
     let conflicts = List.filter (fun (i : Lane_addon_config.issue) -> i.id = Some owner.id) snapshot.issues in
     match matches, conflicts with
-    | [d], [] when d.revision = owner.revision -> Ok (Some d.source_path)
+    | [d], [] when d.revision = owner.revision ->
+        let* () = change_declaration_file ~access d.authority in Ok (Some d.source_path)
     | [_], [] -> Error "Lane configuration changed; refresh before removing its current installation"
     | [], [] when List.mem owner.source_path snapshot.paths ->
         Error "Lane declaration is invalid; correct or remove the declaration before detaching"
     | [], [] -> Ok None
     | _ -> Error "Lane configuration identity is ambiguous; remove its duplicate declarations"
 
-let check_configuration_removable ~packages ~directory owner =
-  Result.map (fun (_ : string option) -> ()) (removable_declaration ~packages ~directory owner)
+let check_configuration_removable ~packages ~access ~directory owner =
+  Result.map (fun (_ : string option) -> ()) (removable_declaration ~packages ~access ~directory owner)
 
 (* What one Detach did to the declaration that wanted its worker. Deleting the
    file edits the operator's configuration, so the answer names the file. *)
@@ -3875,8 +3937,8 @@ let declaration_outcome_json outcome =
     | Declaration_kept Applied_by_another_instance ->
         ["outcome", `String "kept"; "reason", `String "applied_by_another_instance"])
 
-let remove_configuration_file ~packages ~directory (owner : configuration_owner) =
-    let* path = removable_declaration ~packages ~directory owner in
+let remove_configuration_file ~packages ~access ~directory (owner : configuration_owner) =
+    let* path = removable_declaration ~packages ~access ~directory owner in
     match path with
     | None -> Ok Declaration_absent
     | Some path ->
@@ -3898,7 +3960,10 @@ let remove_configuration_file ~packages ~directory (owner : configuration_owner)
            Unix.rename path staged;
            match Lane_addon_config.load_file ~packages ~path:staged with
            | Ok current when current.id = owner.id && current.revision = owner.revision ->
-               Unix.unlink staged; Ok (Declaration_removed path)
+               (* The line is outside the revision, so it is read again here. *)
+               (match change_declaration_file ~access current.authority with
+                | Ok () -> Unix.unlink staged; Ok (Declaration_removed path)
+                | Error message -> restore message)
            | Ok _ -> restore "Lane configuration changed during removal; detach was not applied"
            | Error message -> restore ("Lane declaration could not be verified during removal: " ^ message)
          with
@@ -4441,8 +4506,8 @@ let dispatch ?caller ?(access = Lane_addon_sources.Unauthenticated) ~config ~ope
            the worker still running, and it is removed only after the cleanup is
            confirmed. A cleanup that fails leaves the declaration in place and
            returns the failure. *)
-        let check owner = runtime_result (offload (fun () -> check_configuration_removable ~packages:(carried_packages m) ~directory owner)) in
-        let remove owner = runtime_result (offload (fun () -> remove_configuration_file ~packages:(carried_packages m) ~directory owner)) in
+        let check owner = runtime_result (offload (fun () -> check_configuration_removable ~packages:(carried_packages m) ~access ~directory owner)) in
+        let remove owner = runtime_result (offload (fun () -> remove_configuration_file ~packages:(carried_packages m) ~access ~directory owner)) in
         (* The reply carries what happened to the declaration; the server log
            repeats a deletion for whoever looks for the file later. *)
         let answer ~instance_id fields outcome =
@@ -4759,6 +4824,20 @@ let reconcile_configuration ~config ~directory = Eio_context.run_on_owner_domain
      | Error _ -> ()
      | Ok sw when can_apply ->
          List.iter (fun (d : Lane_addon_config.declaration) ->
+           (* HIGH-RISK-UNREVIEWED: RFC lane-declaration-operator-authority
+              3.3. The operator's line is outside the revision. A worker that
+              does what only the line allows stops as soon as the file no
+              longer carries it, before any check below that could leave a
+              worker of this declaration running. *)
+           (match d.authority with
+            | Lane_addon_config.Operator_marked -> ()
+            | Unmarked ->
+                List.iter (fun e -> if operator_held e then (
+                  (match d.enabled, e.package.execution with
+                   | true, Lane_addon_types.Host_process _ ->
+                       add_issue ~id:d.id d.source_path (host_process_denied ^ marker_lifts_it)
+                   | true, Lane_addon_types.Container _ | false, (Lane_addon_types.Host_process _ | Container _) -> ());
+                  retire sw e)) (live_for d.id));
            (* A record that may belong to this declaration and cannot be read
               may hold its running worker or its privacy owner, and neither can
               be checked. The declaration waits for the record to be repaired
@@ -4843,17 +4922,12 @@ let reconcile_configuration ~config ~directory = Eio_context.run_on_owner_domain
            | [e] ->
                let owner = {id=d.id; source_path=d.source_path; revision=d.revision} in
                (* HIGH-RISK-UNREVIEWED: a worker keeps running only with the
-                  authority this pass gives the declaration. A worker started
-                  with another source authority, such as one attached before
-                  RFC lane-declaration-operator-authority, restarts with this
-                  one; a process the declaration may no longer run stops. *)
-               (match e.configuration,
-                      authorize_execution ~access:authority.executes_as d.package
-                      |> Result.map_error (declared_refusal d.authority) with
-                | (Some _ | None), Error message ->
-                    add_issue ~id:d.id d.source_path message;
-                    retire sw e
-                | Some applied, Ok () when applied.revision = d.revision && e.running && not e.stopping
+                  read authority this pass gives the declaration. A worker
+                  started with another one restarts with this one. What only
+                  the operator's line allows was checked at the top of this
+                  pass, and the same revision runs the same package. *)
+               (match e.configuration with
+                | Some applied when applied.revision = d.revision && e.running && not e.stopping
                     && same_access e.source_access authority.reads_as ->
                     (* The count is outside the revision: the next pass of this
                        worker reads it. *)
@@ -4862,7 +4936,7 @@ let reconcile_configuration ~config ~directory = Eio_context.run_on_owner_domain
                       e.configuration <- Some owner;
                       match persist m e with Ok () -> ()
                       | Error message -> add_issue ~id:d.id d.source_path message)
-                | (Some _ | None), Ok () -> retire sw e)
+                | Some _ | None -> retire sw e)
            | [] ->
                let pending = List.filter (fun (owner, fields) -> owner.id = d.id && not (record_is_detached fields)) histories in
                if pending <> [] then List.iter (retire_past sw) pending
@@ -4874,13 +4948,8 @@ let reconcile_configuration ~config ~directory = Eio_context.run_on_owner_domain
                  let attached =
                    (* HIGH-RISK-UNREVIEWED: the same parse that is attached is
                       admitted, with the authority the declaration carries. *)
-                   let* () = Result.map_error (declared_refusal d.authority) (
-                     let* () = authorize_execution ~access:authority.executes_as d.package in
-                     let* () = Lane_addon_sources.authorize ~workspace:config.Workspace.base_path
-                       ~access:authority.reads_as d.binding in
-                     Lane_addon_records.grants
-                       ~operator_owned:(operator_owned ~configuration:owner ~source_access:authority.reads_as) d.binding
-                     |> Result.map (fun (_ : Lane_addon_records.grant list) -> ())) in
+                   let* () = admit_declared ~workspace:config.Workspace.base_path ~configuration:owner
+                     d visibility authority in
                    attach_entry ~sw m ~run_id:d.run_id ~package:d.package ~binding:d.binding ~configuration:owner
                      ~source_access:authority.reads_as ~visibility ~max_exact_in_flight:d.max_exact_in_flight in
                  match attached with

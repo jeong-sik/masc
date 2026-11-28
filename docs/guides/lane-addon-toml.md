@@ -111,6 +111,9 @@ Apple에서는 정수 vCPU와 정확한 MiB 단위 메모리를 사용하고 `pi
 
 `runtime = "host_process"`는 설치한 MCP stdio 실행 파일을 호스트에서 실행한다. 운영자만 설치 선언의 최상위에 `operator_authority = true`를 추가할 수 있으며, 이 표시가 있어야 host process가 붙는다.
 기록 grant나 작업 공간 밖 스냅샷에 운영자 읽기 권한이 필요한 선언도 표시가 필요하다. Keeper 전용 선언의 읽기 권한은 표시가 있어도 해당 Keeper로 유지된다.
+Keeper 전용 가시성을 위층 Lane 출력에서만 물려받는 선언도 표시가 필요하다. 그 Keeper의 Fusion run을 직접 읽는 선언은 표시 없이 그 Keeper 권한으로 붙는다.
+표시가 있는 파일은 운영자 것이다. Keeper나 인증 없는 호출자는 그 파일을 덮어써 저장하거나 Detach로 지울 수 없다.
+표시를 지우면 다음 reconcile에서 host process가 멈춘다. 같은 바퀴에 선언을 적용하지 못해도 멈춘다.
 기존 browser 선언은 setup이 수정하지 않는다. setup 출력에 표시된 파일을 검토한 뒤 운영자가 필요한 표시를 추가한다.
 `command`는 패키지 디렉터리에서 실행하며 `image`를 쓰지 않는다. `[resources]`에는
 `max_reply_bytes`만 선언한다. 컨테이너 격리나 CPU·메모리·PID 한도를 제공하지 않는다.

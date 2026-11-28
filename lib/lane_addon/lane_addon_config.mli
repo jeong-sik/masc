@@ -105,6 +105,11 @@ val load_source :
     from [declarations] and reported, without selecting an arbitrary winner. *)
 val load : packages:string -> directory:string -> snapshot
 
+val source_authority : string -> (authority, string) result
+(** The [operator_authority] line of declaration text, read by the same rule
+    as {!load} without resolving the package. [Error] when the text is not a
+    TOML table or the line is not a boolean. *)
+
 val declared_carried : directory:string -> Lane_addon_carried.id list * issue list
 (** The carried packages the declarations in [directory] name with [package],
     in {!Lane_addon_carried.all} order. Each declaration's package choice is

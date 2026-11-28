@@ -178,6 +178,15 @@ scripts/install-local-build.sh --base-path "$HOME/MASC"
 "$HOME/.local/bin/masc" setup --base-path "$HOME/MASC"
 ```
 
+When other sessions pull or edit the checkout while you install, install a
+commit with `--from`. It builds and installs that commit from the detached
+worktree `.worktrees/deploy`, which only `--from` moves, so the server and the
+guest exec shim come from one source:
+
+```bash
+git fetch origin main && scripts/install-local-build.sh --from origin/main
+```
+
 For a new source installation, choose Docker in setup. To use Apple Container,
 first [build and install the Linux ARM64 guest shim from the same checkout](docs/MICROVM-REMOTE-RUNBOOK.md#shim-받기),
 using the same workspace path. When the workspace's guest shim declares another

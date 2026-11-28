@@ -169,6 +169,14 @@ scripts/install-local-build.sh --base-path "$HOME/MASC"
 "$HOME/.local/bin/masc" setup --base-path "$HOME/MASC"
 ```
 
+설치하는 동안 다른 세션이 체크아웃을 pull 하거나 고친다면 `--from` 으로 커밋을 지정합니다.
+그 커밋을 detached worktree `.worktrees/deploy` 에서 빌드해 설치합니다.
+이 worktree 는 `--from` 만 옮기므로, 서버와 게스트 exec shim 이 같은 소스에서 나옵니다.
+
+```bash
+git fetch origin main && scripts/install-local-build.sh --from origin/main
+```
+
 새 소스 설치에서는 설정 화면에서 Docker를 고릅니다. Apple Container를 쓰려면
 먼저 [같은 체크아웃에서 Linux ARM64 게스트 shim을 빌드해 같은 작업 공간에 설치합니다](docs/MICROVM-REMOTE-RUNBOOK.md#shim-받기).
 로컬 설치기는 새 작업 공간에 shim을 추가하지 않습니다. 이미 있는 shim 이 새 빌드와 다른

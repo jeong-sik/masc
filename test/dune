@@ -4556,36 +4556,17 @@
  (name runtest)
  (deps (alias runtest-test_install_local_build)))
 
-; A local install brings the workspace's release guest shim to the release
-; the build names. The suite borrows the build and workspace fixtures of
-; test_install_local_build.py.
-(rule
- (alias runtest-test_install_local_build_guest_shim)
- (deps
-  test_install_local_build_guest_shim.py
-  test_install_local_build.py
-  ../scripts/install-local-build.sh
-  ../scripts/check-runtime-deployment-preflight.sh
-  ../scripts/lib/install-workspace-dashboard.sh)
- (action
-  (run python3 %{dep:test_install_local_build_guest_shim.py})))
-
-(alias
- (name runtest)
- (deps (alias runtest-test_install_local_build_guest_shim)))
-
 ; A local install rebuilds a workspace guest shim of another source from the
 ; same checkout before it replaces the server (#53164). The suite borrows the
-; fixtures of test_install_local_build.py and
-; test_install_local_build_guest_shim.py, and stands a fake in for
+; fixtures of test_install_local_build.py and stands a fake in for
 ; scripts/remote-ssh/build-shim.sh, which needs Docker.
 (rule
  (alias runtest-test_install_local_build_checkout_shim)
  (deps
   test_install_local_build_checkout_shim.py
-  test_install_local_build_guest_shim.py
   test_install_local_build.py
   ../scripts/install-local-build.sh
+  ../scripts/check-runtime-deployment-preflight.sh
   ../scripts/lib/install-workspace-dashboard.sh)
  (action
   (run python3 %{dep:test_install_local_build_checkout_shim.py})))

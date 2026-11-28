@@ -48,7 +48,16 @@ const CATALOG = {
 
 interface Post { readonly url: string; readonly body: unknown }
 
-function serve(answer: (url: string, body: unknown) => Response) {
+interface Serve {
+  readonly answer: (url: string, body: unknown) => Response | Promise<Response>
+  readonly catalog?: unknown
+  readonly unreadable?: readonly unknown[]
+  readonly showOf?: (name: string) => Response
+}
+
+function serve(options: Serve | Serve['answer']) {
+  const { answer, catalog = CATALOG, unreadable = [], showOf = (name: string) => jsonResponse(show(name)) } =
+    typeof options === 'function' ? { answer: options } : options
   const posts: Post[] = []
   const reads: string[] = []
   globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -59,13 +68,15 @@ function serve(answer: (url: string, body: unknown) => Response) {
       return answer(url, body)
     }
     reads.push(url)
-    if (url === '/api/v1/prompts') return jsonResponse(CATALOG)
-    if (url === '/api/v1/presets') return jsonResponse(listing(['default', '_autosave']))
-    if (url.startsWith('/api/v1/presets/show?name=')) return jsonResponse(show(decodeURIComponent(url.split('=')[1]!)))
+    if (url === '/api/v1/prompts') return jsonResponse(catalog)
+    if (url === '/api/v1/presets') return jsonResponse(listing(['default', '_autosave', 'night'], unreadable))
+    if (url.startsWith('/api/v1/presets/show?name=')) return showOf(decodeURIComponent(url.split('=')[1]!))
     return jsonResponse({})
   }) as typeof fetch
   return { posts, reads: (url: string) => reads.filter(r => r === url).length }
 }
+
+const SHOW_DEFAULT = '/api/v1/presets/show?name=default'
 
 describe('Runtime → Prompts → 프리셋', () => {
   let container: HTMLDivElement
@@ -99,9 +110,7 @@ describe('Runtime → Prompts → 프리셋', () => {
     expect(el).not.toBeNull()
     el!.click()
   }
-  const open = async (name: string) => {
-    render(html`<${RuntimeWorkspace} subroute="prompts" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
-    click('[data-section="presets"]')
+  const pick = async (name: string) => {
     const row = await vi.waitFor(() => {
       const found = Array.from(container.querySelectorAll<HTMLButtonElement>('[role="listitem"] button'))
         .find(b => b.querySelector('.mono')?.textContent === name)
@@ -109,8 +118,18 @@ describe('Runtime → Prompts → 프리셋', () => {
       return found!
     })
     row.click()
+    await flushUi()
+  }
+  const mount = () => {
+    render(html`<${RuntimeWorkspace} subroute="prompts" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
+    click('[data-section="presets"]')
+  }
+  const open = async (name: string) => {
+    mount()
+    await pick(name)
     await vi.waitFor(() => expect(container.querySelector('[data-testid="preset-override"]')).not.toBeNull())
   }
+  const text = () => container.textContent ?? ''
   const typeInto = async (label: string, text: string) => {
     const input = container.querySelector<HTMLInputElement>(`input[aria-label="${label}"]`)!
     input.value = text
@@ -119,11 +138,26 @@ describe('Runtime → Prompts → 프리셋', () => {
   }
 
   it('compares the preset with the text in force and names the overrides a restore clears', async () => {
-    serve(() => jsonResponse({}))
+    serve({
+      answer: () => jsonResponse({}),
+      catalog: { ...CATALOG, prompts: [prompt('keeper.worldview', '<world>\n</world>', 'override'), prompt('judge.board', 'judge the board.', 'override')] },
+    })
     await open('default')
     expect(container.querySelector('[data-testid="preset-override"] summary')?.textContent).toContain('지금과 다름')
     expect(container.querySelector('[data-testid="preset-override-diff"]')).not.toBeNull()
-    expect(container.querySelector('[data-testid="preset-clears"]')?.textContent).toContain('judge.board')
+    const clears = container.querySelector('[data-testid="preset-clears"]')?.textContent ?? ''
+    expect(clears).toContain('judge.board')
+    expect(clears).not.toContain('keeper.worldview')
+    expect(text()).toContain('지금 설정과 다름')
+    expect(text()).toContain('max_output_tokens: 4096 · thinking: 지금 값 유지')
+    expect(text()).toContain('max_output_tokens: 지움 · thinking: 지움')
+  })
+
+  it('says why when the preset on the list cannot be read', async () => {
+    serve({ answer: () => jsonResponse({}), showOf: () => jsonResponse({ ok: false, error: 'manifest names night, directory is default' }, 404) })
+    mount()
+    await pick('default')
+    await vi.waitFor(() => expect(container.querySelector('[data-testid="preset-absent"]')).not.toBeNull())
   })
 
   it('creates a preset, and replaces one only after the operator says so', async () => {
@@ -138,9 +172,33 @@ describe('Runtime → Prompts → 프리셋', () => {
     click('[data-testid="preset-save"]')
     await vi.waitFor(() => expect(container.querySelector('[data-testid="preset-taken"]')).not.toBeNull())
     expect(server.posts).toEqual([{ url: '/api/v1/presets/create', body: { name: 'default', description: 'night shift' } }])
+    const showReads = server.reads(SHOW_DEFAULT)
     click('[data-testid="preset-replace"]')
     await vi.waitFor(() => expect(server.posts).toHaveLength(2))
     expect(server.posts[1]).toEqual({ url: '/api/v1/presets', body: { name: 'default', description: 'night shift' } })
+    await vi.waitFor(() => expect(server.reads(SHOW_DEFAULT)).toBeGreaterThan(showReads))
+  })
+
+  it('reads the lists again when a save answers 2xx without the preset', async () => {
+    const server = serve(() => jsonResponse({ ok: true }))
+    mount()
+    await vi.waitFor(() => expect(container.querySelector('[data-testid="preset-save-form"]')).not.toBeNull())
+    await typeInto('새 프리셋 이름', 'night')
+    const listingReads = server.reads('/api/v1/presets')
+    click('[data-testid="preset-save"]')
+    await vi.waitFor(() => expect(server.reads('/api/v1/presets')).toBeGreaterThan(listingReads))
+    expect(container.querySelector('[data-testid="preset-save-refusal"]')).toBeNull()
+  })
+
+  it('says the outcome is unknown and reads the lists again when no answer came back', async () => {
+    const server = serve(() => { throw new TypeError('Failed to fetch') })
+    await open('default')
+    click('[data-testid="preset-restore"]')
+    await flushUi()
+    const listingReads = server.reads('/api/v1/presets')
+    click('[data-testid="preset-restore-go"]')
+    await vi.waitFor(() => expect(container.querySelector('[data-testid="preset-refusal"]')?.textContent).toContain('결과를 알 수 없어요'))
+    await vi.waitFor(() => expect(server.reads('/api/v1/presets')).toBeGreaterThan(listingReads))
   })
 
   it('restores only after the confirm, reports each surface and reads the prompts again', async () => {
@@ -151,6 +209,7 @@ describe('Runtime → Prompts → 프리셋', () => {
     expect(container.querySelector('[data-testid="preset-restore-confirm"]')?.textContent).toContain('_autosave')
     expect(server.posts).toEqual([])
     const catalogReads = server.reads('/api/v1/prompts')
+    const showReads = server.reads(SHOW_DEFAULT)
     click('[data-testid="preset-restore-go"]')
     await vi.waitFor(() => expect(container.querySelector('[data-testid="preset-restore-report"]')).not.toBeNull())
     expect(server.posts).toEqual([{ url: '/api/v1/presets/restore', body: { name: 'default' } }])
@@ -158,6 +217,45 @@ describe('Runtime → Prompts → 프리셋', () => {
     expect(report).toContain('keeper TOML not found')
     expect(report).toContain('capability catalog')
     await vi.waitFor(() => expect(server.reads('/api/v1/prompts')).toBe(catalogReads + 1))
+    await vi.waitFor(() => expect(server.reads(SHOW_DEFAULT)).toBeGreaterThan(showReads))
+    await pick('night')
+    expect(container.querySelector('[data-testid="preset-restore-report"]')).toBeNull()
+  })
+
+  it('keeps a late restore report off the preset the operator moved to', async () => {
+    let release: (r: Response) => void = () => {}
+    serve(() => new Promise<Response>(resolve => { release = resolve }))
+    await open('default')
+    click('[data-testid="preset-restore"]')
+    await flushUi()
+    click('[data-testid="preset-restore-go"]')
+    await flushUi()
+    await pick('night')
+    release(jsonResponse(restored('default')))
+    await flushUi(100)
+    expect(container.querySelector('[data-testid="preset-restore-report"]')).toBeNull()
+  })
+
+  it('deletes a readable-named unreadable preset once, and offers nothing for a name the server refuses', async () => {
+    let release: (r: Response) => void = () => {}
+    const server = serve({
+      answer: () => new Promise<Response>(resolve => { release = resolve }),
+      unreadable: [
+        { name: 'broken', reason: 'manifest.json: invalid JSON' },
+        { name: 'my preset', reason: 'invalid preset name' },
+      ],
+    })
+    mount()
+    await vi.waitFor(() => expect(container.querySelectorAll('[data-testid="preset-unreadable-delete"]')).toHaveLength(1))
+    click('[data-testid="preset-unreadable-delete"]')
+    await flushUi()
+    click('[data-testid="preset-unreadable-delete-go"]')
+    await flushUi()
+    click('[data-testid="preset-unreadable-delete-go"]')
+    await flushUi()
+    release(jsonResponse({ ok: true, deleted: 'broken' }))
+    await vi.waitFor(() => expect(container.querySelector('[data-testid="preset-unreadable-delete-go"]')).toBeNull())
+    expect(server.posts).toEqual([{ url: '/api/v1/presets/delete', body: { name: 'broken' } }])
   })
 
   it('deletes only after the confirm and shows a refusal', async () => {

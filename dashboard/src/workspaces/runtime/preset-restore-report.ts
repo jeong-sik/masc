@@ -40,7 +40,7 @@ function Part({ title, when, part }: { title: string; when: string; part: PartRe
 function RuntimeLine({ runtime }: { runtime: RuntimeOutcome }) {
   switch (runtime.status) {
     case 'unchanged':
-      return html`<div style=${noteStyle}>runtime.toml 은 바꿀 것이 없어서 그대로예요.</div>`
+      return html`<div style=${noteStyle}>runtime.toml 은 그대로예요.</div>`
     case 'failed':
       return html`<div role="alert" class="ap-error">runtime.toml 을 바꾸지 못했어요: ${runtime.error}</div>`
     case 'committed': {
@@ -80,7 +80,10 @@ export function RestoreReportView({ report, onDismiss }: { report: RestoreReport
         <h3><span class="mono">${report.restored}</span> 을 복원했어요</h3>
         <button type="button" class="btn-ghost btn-compact" onClick=${onDismiss}>닫기</button>
       </div>
-      <div style=${noteStyle}>복원 전 상태는 <span class="mono">${report.autosave}</span> 프리셋에 있어요. 그 프리셋을 복원하면 되돌려요.</div>
+      <div style=${noteStyle}>
+        복원 전 상태는 <span class="mono">${report.autosave}</span> 프리셋에 있어요. 그 프리셋을 복원하면 프롬프트 override 와 Runtime 배정은 되돌아가요.
+        Keeper instructions 와 lane 은 그 프리셋에 있는 것만 다시 써요.
+      </div>
       <${Part} title="프롬프트 override" when="바로 적용돼요." part=${report.prompt_overrides} />
       <${Part} title="Keeper instructions" when="각 Keeper 를 다시 올릴 때 적용돼요." part=${report.instructions} />
       <div style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-1)' }}>

@@ -9,7 +9,13 @@
  *   as the preset would write them. A lane setting the preset did not record
  *   keeps its current value on restore; a recorded `null` removes it.
  * - Restore and delete ask once more inline before sending. Restore names the
- *   `_autosave` preset it overwrites; delete says it cannot be undone.
+ *   `_autosave` preset it overwrites, and says what restoring `_autosave`
+ *   does not undo (`Prompt_preset.restore`): keeper instructions and lanes
+ *   are written only for what that preset holds. Delete says it cannot be
+ *   undone.
+ * - A restore sets the runtime assignments to the preset's list exactly
+ *   (`runtime_text_with`), so the assignments section says a keeper missing
+ *   from it loses its assignment.
  */
 
 import { html } from 'htm/preact'
@@ -124,6 +130,7 @@ function Body({ show, catalog }: { show: PresetShow; catalog: PromptCatalog | nu
       `)}
     </${Section}>
     <${Section} title="Runtime 배정" count=${preset.assignments.length}>
+      <div style=${noteStyle}>복원하면 runtime.toml 의 배정을 이 목록으로 맞춰요. 여기 없는 Keeper 의 배정은 지워요.</div>
       <div style=${{ display: 'grid', gridTemplateColumns: 'minmax(8rem, max-content) 1fr', gap: 'var(--sp-0) var(--sp-3)', fontSize: 'var(--fs-12)' }}>
         ${preset.assignments.map(a => html`<span key=${`k:${a.keeper}`} class="mono">${a.keeper}</span><span key=${`r:${a.keeper}`} class="mono" style=${{ overflowWrap: 'anywhere' }}>${a.runtime}</span>`)}
       </div>
@@ -195,10 +202,12 @@ export function PresetDetail({ name, catalog, canEdit, onRestore, onDelete }: Pr
         `}
         ${obs.kind === 'failed' && html`<div role="alert" class="ap-error">프리셋을 읽지 못했어요: ${obs.error.message}</div>`}
         ${obs.kind === 'loading' && html`<div class="dtable-absent">프리셋 불러오는 중…</div>`}
+        ${obs.kind === 'absent' && html`<div role="alert" class="ap-error" data-testid="preset-absent">이 프리셋을 읽지 못했어요${obs.reason === undefined ? '.' : `: ${obs.reason}`}</div>`}
+        ${obs.kind === 'unreported' && html`<div role="alert" class="ap-error">서버가 이 프리셋을 알려 주지 않았어요${obs.reason === undefined ? '.' : `: ${obs.reason}`}</div>`}
         ${canEdit && html`
           <div style=${{ display: 'flex', gap: 'var(--sp-1)', flexWrap: 'wrap' }}>
             <button type="button" class="btn-primary" data-testid="preset-restore" disabled=${busy || show === null} onClick=${() => { setRefusal(null); setPending('restore') }}>
-              ${isAutosave ? '마지막 복원 되돌리기' : '이 프리셋으로 복원'}
+              이 프리셋으로 복원
             </button>
             <button type="button" class="btn-ghost ap-danger-btn" data-testid="preset-delete" disabled=${busy} onClick=${() => { setRefusal(null); setPending('delete') }}>
               삭제
@@ -209,7 +218,8 @@ export function PresetDetail({ name, catalog, canEdit, onRestore, onDelete }: Pr
           <div class="ap-inline-panel" data-testid="preset-restore-confirm" role="alert">
             <span style=${noteStyle}>
               지금 상태를 <span class="mono">${AUTOSAVE_PRESET}</span> 에 저장하고(이전 <span class="mono">${AUTOSAVE_PRESET}</span> 는 덮어써요) <span class="mono">${name}</span> 을 적용해요.
-              프롬프트 override 와 Runtime 배정은 바로 바뀌고, Keeper instructions 는 각 Keeper 를 다시 올릴 때 적용돼요.
+              프롬프트 override 와 Runtime 배정은 이 프리셋대로 맞추고, Keeper instructions 는 각 Keeper 를 다시 올릴 때 적용돼요.
+              ${isAutosave && html`<br />Keeper instructions 와 lane 은 이 프리셋에 있는 것만 다시 써요. 마지막 복원이 새로 준 instructions 와 새로 더한 lane 은 남아요.`}
             </span>
             <div style=${{ display: 'flex', gap: 'var(--sp-1)' }}>
               <button type="button" class="btn-primary" data-testid="preset-restore-go" disabled=${busy} onClick=${() => void run('restore')}>복원</button>
@@ -226,7 +236,7 @@ export function PresetDetail({ name, catalog, canEdit, onRestore, onDelete }: Pr
             </div>
           </div>
         `}
-        ${refusal !== null && html`<div role="alert" class="ap-error" data-testid="preset-refusal">하지 못했어요: ${refusal}</div>`}
+        ${refusal !== null && html`<div role="alert" class="ap-error" data-testid="preset-refusal">${refusal}</div>`}
       </div>
       ${show !== null && html`<${Body} show=${show} catalog=${catalog} />`}
     </div>

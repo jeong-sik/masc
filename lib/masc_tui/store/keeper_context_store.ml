@@ -345,17 +345,19 @@ let selected_prompt_block ks =
 
 type block_text =
   | Block_text of string
+  | Block_text_rewritten of string
   | Block_text_differs
   | Block_text_not_captured
 
 (* A turn record keeps each block's sha256, never its text; the capture keeps
-   the text of the keeper's last assembly. A block's text is the captured text
-   with the same id and the same digest, so an earlier turn whose block did
-   not change shows it too, and a turn whose block changed never shows
-   another turn's text. A captured text with secrets redacted has another
-   digest and reads as different. *)
+   the text of the keeper's last assembly. A block reads the captured text when
+   both its id and its sha256 match, so an earlier turn whose block did not
+   change shows it too, and a changed block never shows another turn's text.
+   When the capture is this very turn but the digest differs, the capture is
+   this turn's text as the server kept it: secrets redacted, and connector
+   personal memory taken out of the turn context. *)
 let block_text_in_capture (capture : Wire_keeper_context.last_prompt_capture)
-    (block : Turn_record.prompt_block) =
+    (record : Turn_record.t) (block : Turn_record.prompt_block) =
   let same_id =
     List.filter
       (fun (c : Wire_keeper_context.captured_block) ->
@@ -372,25 +374,59 @@ let block_text_in_capture (capture : Wire_keeper_context.last_prompt_capture)
   | None -> (
       match same_id with
       | [] -> Block_text_not_captured
-      | _ :: _ -> Block_text_differs)
+      | c :: _ ->
+          if
+            String.equal capture.lp_trace_id record.trace_id
+            && Int.equal capture.lp_absolute_turn record.absolute_turn
+          then Block_text_rewritten c.cb_text
+          else Block_text_differs)
 
-(* The block list and the text beside it, or above it when narrow; the view
-   draws with it and the scroll keys bound the text with it. *)
-let prompt_blocks_split (area : Rect.t) =
-  if area.w >= 72 then
-    match
-      Masc_tui_ui.Layout.split_h ~gap:2 area
-        [ Masc_tui_ui.Layout.Ratio 0.44; Masc_tui_ui.Layout.Flex 1 ]
-    with
-    | [ l; r ] -> (l, r)
-    | _ -> (area, Rect.empty)
-  else
-    match
-      Masc_tui_ui.Layout.split_v ~gap:1 area
-        [ Masc_tui_ui.Layout.Ratio 0.48; Masc_tui_ui.Layout.Flex 1 ]
-    with
-    | [ t; b ] -> (t, b)
-    | _ -> (area, Rect.empty)
+type prompt_blocks_layout = {
+  pb_header : Rect.t;
+  pb_blocks : Rect.t;
+  pb_text : Rect.t;
+}
+
+(* The summary line and the hairline above the block list. *)
+let prompt_blocks_header_rows = 2
+
+(* The view draws with this layout and the scroll keys bound the text with it,
+   so the last line the keys reach is the last line the view can show. *)
+let prompt_blocks_layout (content : Rect.t) =
+  let header_h = Int.min prompt_blocks_header_rows (Int.max 0 content.h) in
+  let header = Rect.make ~x:content.x ~y:content.y ~w:content.w ~h:header_h in
+  let area =
+    Rect.make ~x:content.x ~y:(content.y + header_h) ~w:content.w
+      ~h:(Int.max 0 (content.h - header_h))
+  in
+  let blocks, text =
+    if area.w >= 72 then
+      match
+        Masc_tui_ui.Layout.split_h ~gap:2 area
+          [ Masc_tui_ui.Layout.Ratio 0.44; Masc_tui_ui.Layout.Flex 1 ]
+      with
+      | [ l; r ] -> (l, r)
+      | _ -> (area, Rect.empty)
+    else
+      match
+        Masc_tui_ui.Layout.split_v ~gap:1 area
+          [ Masc_tui_ui.Layout.Ratio 0.48; Masc_tui_ui.Layout.Flex 1 ]
+      with
+      | [ t; b ] -> (t, b)
+      | _ -> (area, Rect.empty)
+  in
+  { pb_header = header; pb_blocks = blocks; pb_text = text }
+
+(* The text pane's first row is its title; a rewritten copy spends one more
+   row saying so. *)
+let prompt_block_text_rect (pane : Rect.t) block_text =
+  let skip =
+    match block_text with
+    | Block_text_rewritten _ -> 2
+    | Block_text _ | Block_text_differs | Block_text_not_captured -> 1
+  in
+  let skip = Int.min skip (Int.max 0 pane.h) in
+  Rect.make ~x:pane.x ~y:(pane.y + skip) ~w:pane.w ~h:(pane.h - skip)
 
 let part_content_for_selected ks =
   match
@@ -710,7 +746,12 @@ let apply_turn_records ~observed_at ~keeper
       if Option.equal String.equal prev_ref next_ref then next_ks
       else
         reset_turn_scoped_slots
-          { next_ks with selected_part_idx = 0; scroll_offset = 0 })
+          {
+            next_ks with
+            selected_part_idx = 0;
+            selected_block_idx = 0;
+            scroll_offset = 0;
+          })
     t
 
 let apply_provider_input ~observed_at ~keeper ~turn_ref

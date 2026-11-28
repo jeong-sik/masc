@@ -1,6 +1,6 @@
 (** Per-keeper Context & Turns Inspector + Tool Calls sub-store.
 
-    Stores per-keeper turn records, turn stepper cursor, 5 context sub-tabs
+    Stores per-keeper turn records, turn stepper cursor, 6 context sub-tabs
     ([Ctx_composition | Ctx_flow | Ctx_exact_input | Ctx_input_map | Ctx_response
     | Ctx_prompt_blocks]),
     lazy caches for [provider-input], [provider-input/part], [cache-outcome],
@@ -170,17 +170,36 @@ val selected_prompt_block : keeper_state -> Turn_record.prompt_block option
 type block_text =
   | Block_text of string
       (** The capture holds this block with the same digest: this is its text. *)
+  | Block_text_rewritten of string
+      (** The capture is this turn but holds the block with another digest: the
+          text as the server kept it, with secrets redacted and connector
+          personal memory taken out of the turn context. *)
   | Block_text_differs
-      (** The capture holds this block with another digest: another turn's
-          text, or a text the capture keeps with secrets redacted. *)
+      (** The capture is another turn and its block has other content. *)
   | Block_text_not_captured
       (** The capture has no block with this id. *)
 
 val block_text_in_capture :
-  Wire_keeper_context.last_prompt_capture -> Turn_record.prompt_block -> block_text
+  Wire_keeper_context.last_prompt_capture ->
+  Turn_record.t ->
+  Turn_record.prompt_block ->
+  block_text
+(** [block_text_in_capture capture record block] reads [block] of [record]. *)
 
-val prompt_blocks_split : Rect.t -> Rect.t * Rect.t
-(** The block list and the text area of the Prompt Blocks subtab. *)
+type prompt_blocks_layout = {
+  pb_header : Rect.t;
+  pb_blocks : Rect.t;
+  pb_text : Rect.t;
+}
+
+val prompt_blocks_layout : Rect.t -> prompt_blocks_layout
+(** The Prompt Blocks subtab's summary rows, block list and text pane within
+    its padded content rect. The text pane's first row is its title. *)
+
+val prompt_block_text_rect : Rect.t -> block_text -> Rect.t
+(** Where a block's text is drawn inside the text pane [pb_text]: below the
+    title, and below the note that marks a rewritten copy. *)
+
 val selected_tool_call :
   keeper_state -> Wire_keeper_context.tool_call_entry option
 

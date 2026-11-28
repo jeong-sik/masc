@@ -12913,29 +12913,37 @@ let apply_move (m : Model.t) dir =
                           false
                     in
                     if scroll_text then
+                      let max_scroll_of block_text text =
+                        let layout =
+                          Keeper_context_store.prompt_blocks_layout
+                            (Rect.make ~x:0 ~y:0 ~w:inner_w ~h:body_h)
+                        in
+                        let text_r =
+                          Keeper_context_store.prompt_block_text_rect
+                            layout.Keeper_context_store.pb_text block_text
+                        in
+                        markdown_max_scroll ~theme ~width:(max 1 text_r.w)
+                          ~height:(max 1 text_r.h) text
+                      in
                       let max_scroll =
                         match
-                          ( Keeper_context_store.selected_prompt_block ks,
+                          ( Keeper_context_store.selected_turn_entry ks,
+                            Keeper_context_store.selected_prompt_block ks,
                             Observed.to_option ks.last_prompt )
                         with
-                        | Some block, Some capture -> (
-                            match
+                        | Some entry, Some block, Some capture -> (
+                            let block_text =
                               Keeper_context_store.block_text_in_capture
-                                capture block
-                            with
-                            | Keeper_context_store.Block_text text ->
-                                let _, text_r =
-                                  Keeper_context_store.prompt_blocks_split
-                                    (Rect.make ~x:0 ~y:0 ~w:inner_w ~h:body_h)
-                                in
-                                markdown_max_scroll ~theme
-                                  ~width:(max 1 text_r.w)
-                                  ~height:(max 1 (text_r.h - 1))
-                                  text
+                                capture entry.record block
+                            in
+                            match block_text with
+                            | Keeper_context_store.Block_text text
+                            | Keeper_context_store.Block_text_rewritten text ->
+                                max_scroll_of block_text text
                             | Keeper_context_store.Block_text_differs
                             | Keeper_context_store.Block_text_not_captured ->
                                 0)
-                        | Some _, None | None, _ -> 0
+                        | Some _, Some _, None | Some _, None, _ | None, _, _ -> 0
                       in
                       Keeper_context_store.move_scroll ~keeper:name ~max_scroll
                         ~delta:(scroll_delta dir) m.keeper_context

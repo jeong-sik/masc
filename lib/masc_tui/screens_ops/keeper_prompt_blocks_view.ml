@@ -106,7 +106,7 @@ let columns : Table.column list =
 
 let draw_text_pane grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
     ~(st : Keeper_context_store.keeper_state) ~focused
-    (block : Turn_record.prompt_block) =
+    (record : Turn_record.t) (block : Turn_record.prompt_block) =
   let bg = Color.of_rgb theme.surface_1 in
   let hdr_style =
     if focused then Typography.anchor ~bg:(Color.of_rgb theme.selection_bg) theme
@@ -125,16 +125,27 @@ let draw_text_pane grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
   let body_r =
     Rect.make ~x:rect.x ~y:(rect.y + 1) ~w:rect.w ~h:(Int.max 0 (rect.h - 1))
   in
-  let say_line ~ko ~en =
-    ignore
-      (Ops_common.put_line ~clip:body_r grid ~x:body_r.x ~y:body_r.y
-         ~max_w:body_r.w
-         ~style:(Typography.whisper ~bg theme)
-         (Ops_common.say model ~ko ~en))
+  (* A note that stands in for the text wraps over the whole pane. *)
+  let say_lines ~ko ~en =
+    Chat_transcript.wrap_plain_lines ~width:body_r.w (Ops_common.say model ~ko ~en)
+    |> List.iteri (fun i line ->
+           if i < body_r.h then
+             ignore
+               (Ops_common.put_line ~clip:body_r grid ~x:body_r.x
+                  ~y:(body_r.y + i) ~max_w:body_r.w
+                  ~style:(Typography.whisper ~bg theme)
+                  line))
+  in
+  let draw_text (r : Rect.t) text =
+    if Rect.is_empty r then ()
+    else
+      ignore
+        (Markdown.draw grid ~rect:r ~theme ~osc8:false ~scroll:st.scroll_offset
+           (Ops_common.scrub_secrets_in_text text))
   in
   if Rect.is_empty body_r then ()
   else if not (Rbac.can_single_user_token_admin model.auth_session) then
-    say_line ~ko:"블록 본문은 관리자 세션에서 읽어요 (/last-prompt)"
+    say_lines ~ko:"블록 본문은 관리자 세션에서 읽어요 (/last-prompt)"
       ~en:"Block text needs an admin session (/last-prompt)"
   else
     match Observed.to_option st.last_prompt with
@@ -142,30 +153,41 @@ let draw_text_pane grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
         Ops_common.draw_observed_empty grid ~rect:body_r ~theme ~lang:model.lang
           st.last_prompt
           ~empty_msg:
-            (Say.make ~ko:"이 Keeper 는 아직 조립한 턴의 기록이 없어요"
-               ~en:"This keeper has no assembled turn on record yet")
+            (Say.make
+               ~ko:"프롬프트 기록을 남기기 시작한 뒤로 이 Keeper 가 조립한 턴이 없어요"
+               ~en:"This keeper has not assembled a turn since prompt capture began")
     | Some capture -> (
         let capture_ref =
           Printf.sprintf "%s#%d" capture.lp_trace_id capture.lp_absolute_turn
         in
-        match Keeper_context_store.block_text_in_capture capture block with
-        | Keeper_context_store.Block_text text ->
+        let block_text =
+          Keeper_context_store.block_text_in_capture capture record block
+        in
+        let text_r = Keeper_context_store.prompt_block_text_rect rect block_text in
+        match block_text with
+        | Keeper_context_store.Block_text text -> draw_text text_r text
+        | Keeper_context_store.Block_text_rewritten text ->
+            (* One row, as [prompt_block_text_rect] counts it. *)
             ignore
-              (Markdown.draw grid ~rect:body_r ~theme ~osc8:false
-                 ~scroll:st.scroll_offset
-                 (Ops_common.scrub_secrets_in_text text))
+              (Ops_common.put_line ~clip:body_r grid ~x:body_r.x ~y:body_r.y
+                 ~max_w:body_r.w
+                 ~style:(Typography.whisper ~bg theme)
+                 (Ops_common.say model
+                    ~ko:"서버 사본 · sha256 다름 · 비밀값과 연결 앱 개인 기억을 뺐어요"
+                    ~en:"The server's copy · sha256 differs · secrets and connector personal memory removed"));
+            draw_text text_r text
         | Keeper_context_store.Block_text_differs ->
-            say_line
+            say_lines
               ~ko:
                 (Printf.sprintf
-                   "이 턴의 본문은 남아 있지 않아요. 마지막 기록(%s)의 같은 블록은 내용이 달라요. 비밀값을 가린 블록도 이렇게 보여요."
+                   "이 턴의 본문은 남아 있지 않아요. 마지막 기록(%s)의 같은 블록은 내용이 달라요."
                    capture_ref)
               ~en:
                 (Printf.sprintf
-                   "This turn's text is not kept. The same block in the last record (%s) has other content; a block with secrets redacted reads this way too."
+                   "This turn's text is not kept. The same block in the last record (%s) has other content."
                    capture_ref)
         | Keeper_context_store.Block_text_not_captured ->
-            say_line
+            say_lines
               ~ko:(Printf.sprintf "마지막 기록(%s)에는 이 블록이 없어요." capture_ref)
               ~en:
                 (Printf.sprintf "The last record (%s) has no such block."
@@ -192,12 +214,14 @@ let draw grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
             (fun acc (b : Turn_record.prompt_block) -> acc + b.bytes)
             0 blocks
         in
-        let y = ref content.y in
-        let bot = Rect.bottom content in
+        let layout = Keeper_context_store.prompt_blocks_layout content in
+        let header = layout.Keeper_context_store.pb_header in
+        let y = ref header.y in
+        let bot = Rect.bottom header in
         if !y < bot then begin
           ignore
-            (Ops_common.put_line ~clip:content grid ~x:content.x ~y:!y
-               ~max_w:content.w
+            (Ops_common.put_line ~clip:header grid ~x:header.x ~y:!y
+               ~max_w:header.w
                ~style:(Typography.whisper ~bg theme)
                (Ops_common.say model
                   ~ko:
@@ -212,24 +236,21 @@ let draw grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
           Card.draw_hairline ~pad_x:0 ~bg
             ~label:
               (Ops_common.say model
-                 ~ko:"블록 ([↑↓] 선택 · [PgUp/PgDn] 본문 · Δ 앞 턴 대비)"
-                 ~en:"Blocks ([↑↓] Select · [PgUp/PgDn] Text · Δ vs previous turn)")
-            grid ~rect:content ~y:!y ~theme;
-          incr y
+                 ~ko:"블록 ([↑↓] 선택 · [→] 본문 · [PgUp/PgDn] 본문 넘김 · Δ 앞 턴 대비)"
+                 ~en:"Blocks ([↑↓] Select · [→] Text · [PgUp/PgDn] Scroll text · Δ vs previous turn)")
+            grid ~rect:header ~y:!y ~theme
         end;
-        let area =
-          Rect.make ~x:content.x ~y:!y ~w:content.w ~h:(Int.max 0 (bot - !y))
-        in
-        if Rect.is_empty area then ()
+        let list_r = layout.Keeper_context_store.pb_blocks in
+        let text_r = layout.Keeper_context_store.pb_text in
+        if Rect.is_empty list_r then ()
         else if blocks = [] then
           ignore
-            (Ops_common.put_line ~clip:area grid ~x:area.x ~y:area.y
-               ~max_w:area.w
+            (Ops_common.put_line ~clip:list_r grid ~x:list_r.x ~y:list_r.y
+               ~max_w:list_r.w
                ~style:(Typography.whisper ~bg theme)
                (Ops_common.say model ~ko:"이 턴에 기록된 블록이 없어요"
                   ~en:"No blocks recorded for this turn"))
         else
-          let list_r, text_r = Keeper_context_store.prompt_blocks_split area in
           let rows =
             List.mapi
               (fun idx (b : Turn_record.prompt_block) ->
@@ -274,5 +295,5 @@ let draw grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
           match Keeper_context_store.selected_prompt_block st with
           | Some block when not (Rect.is_empty text_r) ->
               draw_text_pane grid ~rect:text_r ~theme ~model ~st
-                ~focused:text_focused block
+                ~focused:text_focused entry.record block
           | Some _ | None -> ()

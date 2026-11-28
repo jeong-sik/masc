@@ -5121,7 +5121,8 @@ let test_startup_state_json () =
     (List.sort String.compare
        [ "phase"; "state_ready"; "pending_lazy_tasks"; "last_error";
          "path_diagnostics"; "config_resolution"; "elapsed_sec";
-         "watchdog_timeout_sec"; "product"; "model_runtime" ])
+         "step"; "idle_sec"; "stall_timeout_sec"; "product";
+         "model_runtime" ])
     (json |> json_assoc |> List.map fst |> List.sort String.compare);
   let product = List.assoc "product" (json_assoc json) in
   Alcotest.(check (list string))
@@ -5702,8 +5703,10 @@ let test_health_before_the_workspace_is_published_is_the_public_probe () =
        in
        let json = health_json name body in
        Alcotest.(check int) (name ^ ": readiness status") 503 status;
-       Alcotest.(check (list string)) (name ^ ": readiness keys") [ "phase"; "ready" ]
-         (json_keys json);
+       Alcotest.(check (list string)) (name ^ ": readiness keys")
+         [ "phase"; "ready"; "step" ] (json_keys json);
+       Alcotest.(check string) (name ^ ": the boot step is one fixed word")
+         "initializing" (json |> member "step" |> to_string);
        Alcotest.(check bool) (name ^ ": not ready") false (json |> member "ready" |> to_bool))
     [ "no credential", []
     ; "an admin bearer", bearer routes.admin_token
@@ -5807,21 +5810,21 @@ let test_startup_failure_disposition_requires_readiness_for_degraded_serving () 
      | Server_runtime_bootstrap.Degraded_after_ready -> true
      | Server_runtime_bootstrap.Fatal_pre_ready -> false)
 
-let test_watchdog_timeout_env () =
-  with_env "MASC_STARTUP_WATCHDOG_SEC" (Some "90") (fun () ->
+let test_stall_timeout_env () =
+  with_env "MASC_STARTUP_STALL_SEC" (Some "90") (fun () ->
       Alcotest.(check (float 0.1)) "reads env" 90.0
-        (Server_startup_state.watchdog_timeout_sec ()));
-  with_env "MASC_STARTUP_WATCHDOG_SEC" (Some "10") (fun () ->
-      Alcotest.(check (float 0.1)) "clamps to 30 min" 30.0
-        (Server_startup_state.watchdog_timeout_sec ()));
-  with_env "MASC_STARTUP_WATCHDOG_SEC" (Some "999") (fun () ->
+        (Server_startup_state.stall_timeout_sec ()));
+  with_env "MASC_STARTUP_STALL_SEC" (Some "10") (fun () ->
+      Alcotest.(check (float 0.1)) "clamps to 30 s min" 30.0
+        (Server_startup_state.stall_timeout_sec ()));
+  with_env "MASC_STARTUP_STALL_SEC" (Some "999") (fun () ->
       Alcotest.(check (float 0.1)) "clamps to 600 max" 600.0
-        (Server_startup_state.watchdog_timeout_sec ()));
-  with_env "MASC_STARTUP_WATCHDOG_SEC" None (fun () ->
+        (Server_startup_state.stall_timeout_sec ()));
+  with_env "MASC_STARTUP_STALL_SEC" None (fun () ->
       Alcotest.(check (float 0.1)) "default 240" 240.0
-        (Server_startup_state.watchdog_timeout_sec ()))
+        (Server_startup_state.stall_timeout_sec ()))
 
-let test_startup_state_json_includes_watchdog () =
+let test_startup_state_json_includes_stall_limit () =
   Server_startup_state.reset ();
   let json = Server_startup_state.to_yojson () in
   let elapsed =
@@ -5831,13 +5834,62 @@ let test_startup_state_json_includes_watchdog () =
   in
   Alcotest.(check bool) "elapsed_sec present and non-negative" true
     (elapsed >= 0.0);
-  let watchdog =
-    match Yojson.Safe.Util.member "watchdog_timeout_sec" json with
+  let stall_limit =
+    match Yojson.Safe.Util.member "stall_timeout_sec" json with
     | `Float v -> v
-    | _ -> Alcotest.failf "watchdog_timeout_sec missing or not float"
+    | _ -> Alcotest.failf "stall_timeout_sec missing or not float"
   in
-  Alcotest.(check bool) "watchdog_timeout_sec is positive" true
-    (watchdog > 0.0)
+  Alcotest.(check bool) "stall_timeout_sec is positive" true
+    (stall_limit > 0.0);
+  let idle =
+    match Yojson.Safe.Util.member "idle_sec" json with
+    | `Float v -> v
+    | _ -> Alcotest.failf "idle_sec missing or not float"
+  in
+  Alcotest.(check bool) "idle_sec is non-negative" true (idle >= 0.0);
+  Alcotest.(check string) "a boot that has reported nothing is initializing"
+    "initializing" (json_string_field "step" json);
+  Startup_progress.enter Startup_progress.Closing_open_turns;
+  Alcotest.(check string) "the step follows what the boot reported"
+    "closing_open_turns"
+    (json_string_field "step" (Server_startup_state.to_yojson ()));
+  Server_startup_state.reset ();
+  Alcotest.(check string) "a reset boot starts over" "initializing"
+    (json_string_field "step" (Server_startup_state.to_yojson ()))
+
+(* The watchdog ends a boot that went silent, not one that is slow: a boot
+   that keeps reporting is waited on, and only the silence of the stall limit
+   ends it. *)
+let startup_verdict_to_string = function
+  | Startup_progress.Settled -> "settled"
+  | Startup_progress.Wait seconds -> Printf.sprintf "wait %.0f" seconds
+  | Startup_progress.Stalled seconds -> Printf.sprintf "stalled %.0f" seconds
+
+let test_startup_watchdog_ends_a_silent_boot_not_a_slow_one () =
+  let verdict ~ready ~idle_seconds =
+    startup_verdict_to_string
+      (Startup_progress.verdict ~stall_seconds:240.0 ~ready ~idle_seconds)
+  in
+  Alcotest.(check string) "a boot that just reported waits the whole limit"
+    "wait 240" (verdict ~ready:false ~idle_seconds:0.0);
+  Alcotest.(check string) "a boot silent for part of the limit waits the rest"
+    "wait 40" (verdict ~ready:false ~idle_seconds:200.0);
+  Alcotest.(check string) "a boot silent for the whole limit is stalled"
+    "stalled 240" (verdict ~ready:false ~idle_seconds:240.0);
+  Alcotest.(check string) "a ready server is never stalled"
+    "settled" (verdict ~ready:true ~idle_seconds:1000.0);
+  Startup_progress.reset ();
+  Unix.sleepf 0.2;
+  let silent = Startup_progress.idle_seconds () in
+  Alcotest.(check bool) "silence grows with the time" true (silent >= 0.1);
+  Startup_progress.beat ();
+  Alcotest.(check bool) "a beat ends the silence" true
+    (Startup_progress.idle_seconds () < silent);
+  Unix.sleepf 0.2;
+  let silent = Startup_progress.idle_seconds () in
+  Startup_progress.enter Startup_progress.Starting_keeper_loops;
+  Alcotest.(check bool) "entering a step ends the silence" true
+    (Startup_progress.idle_seconds () < silent)
 
 let test_startup_state_json_includes_runtime_resolution () =
   Server_startup_state.reset ();
@@ -8092,10 +8144,13 @@ let () =
             "pre-ready init failure cannot degrade-continue"
             `Quick
             test_startup_failure_disposition_requires_readiness_for_degraded_serving;
-          Alcotest.test_case "watchdog timeout env parsing" `Quick
-            test_watchdog_timeout_env;
-          Alcotest.test_case "startup json includes watchdog fields" `Quick
-            test_startup_state_json_includes_watchdog;
+          Alcotest.test_case "stall timeout env parsing" `Quick
+            test_stall_timeout_env;
+          Alcotest.test_case "startup json includes step and stall fields" `Quick
+            test_startup_state_json_includes_stall_limit;
+          Alcotest.test_case
+            "startup watchdog ends a silent boot, not a slow one" `Quick
+            test_startup_watchdog_ends_a_silent_boot_not_a_slow_one;
           Alcotest.test_case "startup json includes runtime resolution" `Quick
             test_startup_state_json_includes_runtime_resolution;
           Alcotest.test_case "created root populated before lock is not fresh seeded" `Quick

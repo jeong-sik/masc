@@ -666,6 +666,7 @@ let preparation_stage_elapsed_seconds started =
 ;;
 
 let observe_preparation_stage ~stage ~started ~examined ~failures =
+  Startup_progress.beat ();
   let elapsed_seconds = preparation_stage_elapsed_seconds started in
   let labels = [ "stage", stage ] in
   Otel_metric_store.observe_histogram
@@ -781,6 +782,7 @@ let prepare_keeper_persistence_owned
   =
   let base_path = config.Workspace.base_path in
   set_phase Restoring_shutdown;
+  Startup_progress.enter Startup_progress.Restoring_shutdown_fences;
   let shutdown_started = preparation_stage_started () in
   let shutdown_inventory =
     match Keeper_shutdown_store.scan_inventory ~config with
@@ -816,6 +818,7 @@ let prepare_keeper_persistence_owned
      remembers, so boot refuses unless the operator asked for it with
      --accept-store-quarantine. This workspace's keeper loops have
      not started; that does not fence independent external writers. *)
+  Startup_progress.enter Startup_progress.Reconciling_keeper_stores;
   let store_reconcile_started = preparation_stage_started () in
   let examination = Keeper_store_boot_reconcile.examine config in
   let admission =
@@ -856,6 +859,7 @@ let prepare_keeper_persistence_owned
      stayed permanently unresumable. This must run
      here rather than in a shutdown hook: an ungraceful kill runs no hook, and
      keeper loops have not started yet, so no writer races the CAS. *)
+  Startup_progress.enter Startup_progress.Recovering_transcript_tails;
   let transcript_tail_started = preparation_stage_started () in
   let transcript_tail = Keeper_transcript_tail_recovery.recover_open_tails config in
   observe_preparation_stage
@@ -877,6 +881,7 @@ let prepare_keeper_persistence_owned
   (* After the tails are closed and before any Keeper turn: a turn the last
      process left open gets its end line, and a Keeper with no turn log gets
      its first line. A failure is counted and the start goes on. *)
+  Startup_progress.enter Startup_progress.Closing_open_turns;
   let turn_log_started = preparation_stage_started () in
   let turn_log = Keeper_turn_log_process_start.run config in
   observe_preparation_stage

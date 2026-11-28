@@ -364,10 +364,11 @@ module Transport = struct
   let http_auth_strict_env_enabled () =
     get_bool ~default:false "MASC_HTTP_AUTH_STRICT"
 
-  (** Startup watchdog timeout, clamped to [30, 600]. Default: 240.
+  (** Seconds the startup watchdog waits without boot progress before it ends
+      the process, clamped to [30, 600]. Default: 240.
       Re-readable within the process, but operationally a boot-time input. *)
-  let startup_watchdog_sec () =
-    let v = get_float ~default:240.0 "MASC_STARTUP_WATCHDOG_SEC" in
+  let startup_stall_sec () =
+    let v = get_float ~default:240.0 "MASC_STARTUP_STALL_SEC" in
     Float.max 30.0 (Float.min 600.0 v)
 end
 

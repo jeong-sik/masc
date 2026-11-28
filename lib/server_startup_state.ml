@@ -99,7 +99,7 @@ let is_live () = true
 let elapsed_since_start () =
   wall_clock_now () -. (snapshot ()).started_at
 
-let watchdog_timeout_sec () = Env_config.Transport.startup_watchdog_sec ()
+let stall_timeout_sec () = Env_config.Transport.startup_stall_sec ()
 
 let pending_lazy_tasks () =
   (snapshot ()).pending_lazy_tasks
@@ -117,7 +117,8 @@ let input_base_path () = Atomic.get input_base_path_cell
 
 let reset () =
   Atomic.set state (initial_state ());
-  Atomic.set input_base_path_cell None
+  Atomic.set input_base_path_cell None;
+  Startup_progress.reset ()
 
 let mark_blocking () =
   update (fun current ->
@@ -318,7 +319,10 @@ let to_yojson () =
         | None -> `Null );
       ( "elapsed_sec",
         `Float (wall_clock_now () -. current.started_at) );
-      ("watchdog_timeout_sec", `Float (watchdog_timeout_sec ()));
+      ( "step",
+        `String (Startup_progress.step_to_string (Startup_progress.current_step ())) );
+      ("idle_sec", `Float (Startup_progress.idle_seconds ()));
+      ("stall_timeout_sec", `Float (stall_timeout_sec ()));
       ("product", Server_state_product.product_to_json product);
     ]
 

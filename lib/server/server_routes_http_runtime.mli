@@ -399,7 +399,8 @@ val readiness_handler : Httpun.Request.t -> Http_reqd.t -> unit
 (** [readiness_handler request reqd] responds [200] only when a workspace is
     published and [Server_startup_state.state_ready] is [true], and [503]
     otherwise. The body is {!Server_health_public.readiness_json} on both,
-    the same to every requester; no credential is read. Orchestrators
+    the same to every requester; no credential is read. The [503] body also
+    names the boot step ({!Startup_progress.step}). Orchestrators
     (k8s, Railway) key off the [200] vs [503] distinction. *)
 
 (** {1 Board} *)

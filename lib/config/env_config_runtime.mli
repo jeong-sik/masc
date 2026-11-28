@@ -121,7 +121,7 @@ module Transport : sig
 
   val serving_domain_enabled : unit -> bool
   val http_auth_strict_env_enabled : unit -> bool
-  val startup_watchdog_sec : unit -> float
+  val startup_stall_sec : unit -> float
 end
 
 (** {1 Board persistence} *)

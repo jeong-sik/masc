@@ -2203,12 +2203,16 @@ let public_health_prepared ~dev_token ~ready ~phase =
 
 let readiness_prepared_cache_mu = Stdlib.Mutex.create ()
 let readiness_prepared_cache :
-    (bool * Server_startup_state.phase, Server_cached_read_http.prepared_http) Hashtbl.t =
+    ( bool * Server_startup_state.phase * Startup_progress.step
+    , Server_cached_read_http.prepared_http )
+    Hashtbl.t =
   Hashtbl.create 8
 let readiness_prepared_cache_max = 32
 
-let readiness_prepared ~ready ~phase =
-  let key = ready, phase in
+(* The body of a server that is not ready names the boot step, so the step is
+   part of the key: a body prepared for one step is never sent for another. *)
+let readiness_prepared ~ready ~phase ~step =
+  let key = ready, phase, step in
   match
     Stdlib.Mutex.protect readiness_prepared_cache_mu (fun () ->
       Hashtbl.find_opt readiness_prepared_cache key)
@@ -2217,7 +2221,7 @@ let readiness_prepared ~ready ~phase =
   | None ->
     let prepared =
       Server_cached_read_http.prepare_json
-        (Server_health_public.readiness_json ~ready ~phase)
+        (Server_health_public.readiness_json ~ready ~phase ~step)
     in
     Stdlib.Mutex.protect readiness_prepared_cache_mu (fun () ->
       if Hashtbl.length readiness_prepared_cache >= readiness_prepared_cache_max
@@ -2316,7 +2320,10 @@ let health_handler request reqd =
 ;;
 
 (* HIGH-RISK-UNREVIEWED [H4]: the two sibling probes answer everyone with no
-   judgment of the requester, so a field added to either body is public. *)
+   judgment of the requester, so a field added to either body is public. The
+   readiness probe says the boot step while the server is not ready: one of
+   the fixed words of [Startup_progress.step_to_string], so [masc restart]
+   can show what a slow start is doing. *)
 
 (** Liveness probe: responds 200 as soon as the HTTP accept loop is running.
     Does not depend on server_state initialization.
@@ -2328,7 +2335,9 @@ let liveness_handler request reqd =
 (** Readiness probe: responds 200 only after the startup barrier and state publication. *)
 let readiness_handler request reqd =
   let ready, phase = public_readiness () in
-  let prepared = readiness_prepared ~ready ~phase in
+  let prepared =
+    readiness_prepared ~ready ~phase ~step:(Startup_progress.current_step ())
+  in
   if ready then
     Server_cached_read_http.respond_prepared ~request reqd prepared
   else

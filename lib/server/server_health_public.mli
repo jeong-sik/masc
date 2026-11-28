@@ -43,8 +43,14 @@ val health_json :
 val liveness_json : Yojson.Safe.t
 (** [{live}]. *)
 
-val readiness_json : ready:bool -> phase:Server_startup_state.phase -> Yojson.Safe.t
-(** [{ready; phase}]. *)
+val readiness_json :
+  ready:bool
+  -> phase:Server_startup_state.phase
+  -> step:Startup_progress.step
+  -> Yojson.Safe.t
+(** [{ready; phase}], and [step] while the server is not ready. [step] is one
+    of the fixed words of {!Startup_progress.step_to_string}; it names where
+    the boot is and nothing of the workspace. *)
 
 val capabilities : string list
 (** Additive server API capability flags advertised on [/api/v1/dashboard/shell]

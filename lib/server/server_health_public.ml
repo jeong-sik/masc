@@ -47,7 +47,15 @@ let health_json ~dev_token ~ready ~phase =
 ;;
 
 let liveness_json = `Assoc [ live_field, `Bool true ]
-let readiness_json ~ready ~phase = `Assoc (readiness_fields ~ready ~phase)
+let step_field = "step"
+
+let readiness_json ~ready ~phase ~step =
+  `Assoc
+    (readiness_fields ~ready ~phase
+     @ (if ready
+        then []
+        else [ step_field, `String (Startup_progress.step_to_string step) ]))
+;;
 
 let capabilities =
   [ "memory_v2"

@@ -42,18 +42,22 @@ val pending_lazy_tasks : unit -> string list
 (** Seconds elapsed since startup began. *)
 val elapsed_since_start : unit -> float
 
-(** Effective watchdog timeout from env, clamped to [[30, 600]]. *)
-val watchdog_timeout_sec : unit -> float
+(** Seconds without boot progress ({!Startup_progress}) that the startup
+    watchdog allows, from env, clamped to [[30, 600]]. *)
+val stall_timeout_sec : unit -> float
 
 (** Current snapshot as JSON:
     [{phase, state_ready, pending_lazy_tasks,
       last_error, path_diagnostics,
-      config_resolution, elapsed_sec, watchdog_timeout_sec}]. *)
+      config_resolution, elapsed_sec, step, idle_sec, stall_timeout_sec,
+      product, model_runtime}]. [step] is the current
+    {!Startup_progress.step}; [idle_sec] is the time since the last progress. *)
 val to_yojson : unit -> Yojson.Safe.t
 
 (** {1 Transitions} *)
 
-(** Reset to [Blocking] / not-ready. *)
+(** Reset to [Blocking] / not-ready, and start the boot progress over
+    ({!Startup_progress.reset}). *)
 val reset : unit -> unit
 
 val mark_blocking : unit -> unit

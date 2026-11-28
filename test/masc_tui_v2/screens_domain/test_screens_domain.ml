@@ -4970,15 +4970,19 @@ let test_board_typed_media_from_post_meta () =
               "mime":"application/octet-stream","preview":""}}},
            {"kind":"file","url":"https://example.com/a.pdf"}]}}|}
   in
-  match Wire_knowledge.decode_board_post ~observed_at:0.0 json with
+  match
+    Wire_knowledge.decode_board_feed ~observed_at:now_mono
+      (`Assoc [ ("posts", `List [ json ]) ])
+  with
   | Error detail -> Alcotest.fail detail
-  | Ok post ->
+  | Ok { posts = [ post ]; _ } ->
       Alcotest.(check (list string)) "audio and midi only"
         [ "[audio: https://example.com/a.wav] · No playback on Board";
           "[midi: a.mid 2KB] · No playback on Board" ]
         (List.map
            (Screen_knowledge.board_typed_media_chip ~lang:Say.Lang_en)
            post.typed_media)
+  | Ok _ -> Alcotest.fail "expected one post"
 
 let () =
   Alcotest.run "masc_tui_screens_domain"

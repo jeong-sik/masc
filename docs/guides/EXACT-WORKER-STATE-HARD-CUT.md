@@ -59,8 +59,9 @@ Exact records and proofs, domain ledgers, receipts and source queues.
    undispatched work can be admitted normally. A dispatched open original cannot
    recover automatically from empty worker state: the Exact runner only
    processes worker-listed requests. This is why step 2 must resolve or
-   explicitly set aside those originals before clearing the volume. Check the known IDs against host proofs
-   and owner outcomes, recording delivery and domain commit separately.
+   explicitly set aside those originals before clearing the volume. Check the
+   known IDs against host proofs and owner outcomes, recording delivery and
+   domain commit separately.
 
 The host incarnation/cause change has its own Exact/Curator/Librarian hard cut.
 If both changes deploy together, use one stopped-server window and satisfy both

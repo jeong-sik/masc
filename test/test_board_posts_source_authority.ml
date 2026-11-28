@@ -1265,8 +1265,22 @@ let test_unsettled_reobservation_names_restart base_path _workspace =
      Alcotest.(check bool) "the refusal names the needed restart" true
        (mentions "Restart the server")
    | Error error -> Alcotest.fail (Board.show_board_error error));
-  (* #55449: the read every Board operation starts from reports it too. *)
-  (match Board.reobserve store with
+  (* #55449: the read every Board operation starts from reports it too, from
+     the store's fields: an operation that only reads does not queue behind a
+     write's file I/O to be told. The report is asked here while this fiber
+     holds persistence, and it has answered before persistence is released. *)
+  let answered_while_held, reported =
+    Eio.Switch.run (fun sw ->
+      let reported, resolve = Eio.Promise.create () in
+      let answered =
+        Board.with_persist_lock store (fun () ->
+          Eio.Fiber.fork ~sw (fun () -> Eio.Promise.resolve resolve (Board.reobserve store));
+          Eio.Promise.is_resolved reported)
+      in
+      answered, Eio.Promise.await reported)
+  in
+  Alcotest.(check bool) "the report does not wait for persistence" true answered_while_held;
+  (match reported with
    | [ Paths.Posts, Board.Io_error _ ] -> ()
    | [] -> Alcotest.fail "the needed restart is no longer reported at each operation"
    | (_, error) :: _ -> Alcotest.fail (Board.show_board_error error));

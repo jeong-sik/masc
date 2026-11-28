@@ -67,8 +67,8 @@ let test_stale_update_preserves_foreign_policy base_path =
     (get restarted "foreign").name
 
 (* #55449: the refusal above lasted until a restart, for reads as well.
-   [Board.reobserve] reads the policy again only when the refusal proves the
-   observation stale. *)
+   [Board.reobserve] reads the policy again only for a refusal one more read
+   can end. *)
 let test_stale_update_is_reobserved base_path =
   let first = new_store base_path in
   ignore (require (create first "existing"));
@@ -167,6 +167,32 @@ let with_started_store base_path f =
     Result.get_ok (Board_dispatch.init_jsonl ~base_path
       ~recipient_lookup:Recipient_lookup.none_declared ());
     f (Board.global ()))
+
+(* #55449: a read again that met the other writer's lock leaves that cause in
+   place of the stale one. The policy is still read again, and a Dispatch read
+   is where: it takes the store through [Board_dispatch.backend]. One process
+   cannot contend with its own lock, so the test writes the state that read
+   leaves. *)
+let test_dispatch_read_tries_a_contended_source_again base_path =
+  with_started_store base_path (fun stale ->
+    ignore (require (create stale "existing"));
+    let other = new_store base_path in
+    ignore (require (create other "foreign"));
+    require_unavailable
+      (Board.update_sub_board stale ~sub_board_id:"existing" ~name:"not committed" ());
+    (match stale.Board.sub_boards_source with
+     | Board.Policy_refused refused ->
+       stale.Board.sub_boards_source <- Board.Policy_refused { refused with
+         policy_failure = Board.Policy_transaction_failed
+             (Fs_compat.Stable_lock_contended { lock_path = "sub-boards.lock" }) }
+     | Board.Policy_unobserved | Board.Policy_readable _ | Board.Policy_publishing _
+     | Board.Policy_unsettled _ ->
+       Alcotest.fail "the stale update did not refuse the policy source");
+    let foreign : Board.sub_board =
+      require (Board_dispatch.get_sub_board
+        ~reader:Masc_board_handlers.Board_access.Operator ~sub_board_id:"foreign") in
+    Alcotest.(check string) "the Dispatch read answers with the other writer's policy"
+      "foreign" foreign.name)
 
 let tool name args =
   Board_tool.handle_tool ~reader:Masc_board_handlers.Board_access.Operator
@@ -297,6 +323,8 @@ let () =
          (with_fixture test_stale_update_preserves_foreign_policy);
        Alcotest.test_case "stale update is read again once" `Quick
          (with_fixture test_stale_update_is_reobserved);
+       Alcotest.test_case "a Dispatch read tries a source that met a lock again" `Quick
+         (with_fixture test_dispatch_read_tries_a_contended_source_again);
        Alcotest.test_case "stale append and deletion retain foreign policy" `Quick
          (with_fixture test_stale_append_and_delete_preserve_foreign_policy)];
      "source loss and byte changes",

@@ -81,8 +81,8 @@ let test_stale_append_requires_full_reload base_path =
   Alcotest.(check bool) "reloaded writer's comment survives restart" true (has_comment restarted next)
 
 (* #55449: the refusal above lasted until a restart or an explicit reload.
-   [Board.reobserve] is that reload, taken only when the refusal proves the
-   observation stale. A Board operation runs it at entry. *)
+   [Board.reobserve] is that reload, taken only for a refusal one more read
+   can end. A Board operation runs it when it takes the store. *)
 let test_stale_append_is_reobserved base_path =
   let stale, post = seed base_path in
   let own = require (append stale post "this store's durable comment") in
@@ -130,6 +130,38 @@ let test_contended_read_is_tried_again base_path =
    | [] -> ()
    | (_, error) :: _ -> Alcotest.fail (Board.show_board_error error));
   ignore (require (append stale post "accepted once the lock was free"))
+
+(* #55449: the source is asked again once persistence is held. A call that
+   waited behind a read that cleared the source reads nothing; without the
+   second question it would read the file again, and a failure of that read
+   would refuse a source that had just been cleared. *)
+let test_waiting_call_reads_nothing_after_a_clearing_read base_path =
+  let stale, post = seed base_path in
+  ignore (require (append stale post "this store's durable comment"));
+  let other = new_store base_path in
+  ignore (require (append other post "another writer's durable comment"));
+  require_io_error (append stale post "refused against the stale cursor");
+  let waited, cleared =
+    Eio.Switch.run (fun sw ->
+      let waiting, resolve = Eio.Promise.create () in
+      let cleared =
+        Board.with_persist_lock stale (fun () ->
+          Eio.Fiber.fork ~sw (fun () -> Eio.Promise.resolve resolve (Board.reobserve stale));
+          let queued = not (Eio.Promise.is_resolved waiting) in
+          let loaded = Rows.load_comments_under_persistence stale ~derive:ignore in
+          queued, Result.is_ok loaded, stale.Board.comments_source)
+      in
+      Eio.Promise.await waiting, cleared)
+  in
+  let queued, loaded, source = cleared in
+  Alcotest.(check bool) "the second call waits for persistence" true queued;
+  Alcotest.(check bool) "the first read cleared the source" true loaded;
+  (match waited with
+   | [] -> ()
+   | (_, error) :: _ -> Alcotest.fail (Board.show_board_error error));
+  Alcotest.(check bool) "the waiting call did not read the source again" true
+    (stale.Board.comments_source == source);
+  ignore (require (append stale post "accepted after the single read"))
 
 let test_stale_snapshot_keeps_foreign_append base_path =
   let first, post = seed base_path in
@@ -582,6 +614,8 @@ let () = Alcotest.run "board comments source"
     [Alcotest.test_case "stale append requires model reload" `Quick (with_fixture test_stale_append_requires_full_reload);
      Alcotest.test_case "stale append is read again once" `Quick (with_fixture test_stale_append_is_reobserved);
      Alcotest.test_case "a read that met a lock is tried again" `Quick (with_fixture test_contended_read_is_tried_again);
+     Alcotest.test_case "a call that waited behind a clearing read reads nothing" `Quick
+       (with_fixture test_waiting_call_reads_nothing_after_a_clearing_read);
      Alcotest.test_case "stale flush retains foreign append" `Quick (with_fixture test_stale_snapshot_keeps_foreign_append);
      Alcotest.test_case "same inode and size do not authorize overwrite" `Quick
        (with_fixture test_same_inode_same_length_edit_is_not_overwritten);

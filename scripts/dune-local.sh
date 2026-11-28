@@ -409,6 +409,8 @@ if [[ "${GITHUB_ACTIONS:-}" != "true" \
       piaf
       piaf.stream
       opentelemetry.client
+      zipc
+      xmlm
     )
     _missing=()
     for _library in "${_required_findlib[@]}"; do

@@ -177,6 +177,10 @@
   (bisect_ppx (and :with-test (>= 2.8)))
   (mtime (>= 2.0))
   (markup (>= 1.0.3))
+  ; Document package identification (lib/media_format) reads ZIP central
+  ; directories and expands at most four small parts, read as XML by xmlm.
+  (zipc (= 0.2.0))
+  (xmlm (= 1.4.0))
   (uutf (>= 1.0.0))
   (uucp (>= 17.0.0))
   (uunf (>= 17.0.0))

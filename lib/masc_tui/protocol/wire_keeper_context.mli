@@ -18,6 +18,7 @@ val keeper_provider_input_part_path :
 
 val keeper_cache_outcome_path : keeper:string -> turn_ref:string -> string
 val keeper_next_request_path : keeper:string -> string
+val keeper_last_prompt_path : keeper:string -> string
 val keeper_turn_transcript_path : keeper:string -> turn_ref:string -> string
 val keeper_tool_stats_path : keeper:string -> ?window_hours:int -> unit -> string
 
@@ -678,3 +679,32 @@ val encode_keeper_run_next_body :
   ?interrupt_token:string ->
   unit ->
   Yojson.Safe.t
+
+
+(** {1 Last Prompt ([GET /api/v1/keepers/:name/last-prompt])}
+
+    What the keeper was told on its last assembled turn, block by block. The
+    server keeps one capture per keeper, written on a turn's first provider
+    round, with the text redacted for secrets. *)
+
+type captured_block = {
+  cb_id : Prompt_block_id.t;
+  cb_text : string;
+  cb_sha256 : string;
+      (** Lowercase sha256 hex of [cb_text], computed when decoded. A turn
+          record's block carries the sha256 of the text it was given, so an
+          equal digest means this is that text. *)
+}
+
+type last_prompt_capture = {
+  lp_keeper : string;
+  lp_trace_id : string;
+  lp_absolute_turn : int;
+  lp_captured_at_unix : float;
+  lp_blocks : captured_block list;  (** Assembly order. *)
+}
+
+val decode_last_prompt_capture :
+  Yojson.Safe.t -> (last_prompt_capture, string) result
+(** Refuses a block id the server does not name, and a block whose [bytes]
+    is not the length of its [text]. *)

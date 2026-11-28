@@ -27,6 +27,9 @@ let keeper_cache_outcome_path ~keeper ~turn_ref =
 let keeper_next_request_path ~keeper =
   Printf.sprintf "/api/v1/keepers/%s/next-request" (percent_encode keeper)
 
+let keeper_last_prompt_path ~keeper =
+  Printf.sprintf "/api/v1/keepers/%s/last-prompt" (percent_encode keeper)
+
 let keeper_turn_transcript_path ~keeper ~turn_ref =
   Printf.sprintf "/api/v1/keepers/%s/turn-transcript?turn_ref=%s"
     (percent_encode keeper) (percent_encode turn_ref)
@@ -2165,3 +2168,51 @@ let encode_keeper_run_next_body ~keeper ~request_id ?interrupt_token () =
     | Some _ | None -> []
   in
   `Assoc (base @ extra)
+
+
+(* --- Last Prompt Capture ([/last-prompt]) --- *)
+
+type captured_block = {
+  cb_id : Prompt_block_id.t;
+  cb_text : string;
+  cb_sha256 : string;
+}
+
+type last_prompt_capture = {
+  lp_keeper : string;
+  lp_trace_id : string;
+  lp_absolute_turn : int;
+  lp_captured_at_unix : float;
+  lp_blocks : captured_block list;
+}
+
+(* The server writes [bytes] as the length of [text]; a block where they
+   differ was not written by it. The digest is computed here so a turn
+   record's block, which carries only the sha256 of its text, can be joined
+   to this text without the server sending a second copy. *)
+let decode_captured_block json =
+  let* raw_id = required_nonblank_string json "id" in
+  let* cb_id = Prompt_block_id.of_string raw_id in
+  let* cb_text = required_string_field json "text" in
+  let* bytes = required_nonnegative_int_field json "bytes" in
+  if Int.equal bytes (String.length cb_text) then
+    Ok
+      {
+        cb_id;
+        cb_text;
+        cb_sha256 = Agent_core_sha256.(digest_string cb_text |> to_hex);
+      }
+  else
+    Error
+      (Printf.sprintf "last-prompt block %s: bytes %d but its text has %d"
+         raw_id bytes (String.length cb_text))
+
+let decode_last_prompt_capture json =
+  let* _, body = unwrap_v2_or_raw json in
+  let* lp_keeper = required_nonblank_string body "keeper" in
+  let* lp_trace_id = required_nonblank_string body "trace_id" in
+  let* lp_absolute_turn = required_nonnegative_int_field body "absolute_turn" in
+  let* lp_captured_at_unix = required_finite_float body "captured_at" in
+  let* raw_blocks = required_list_field body "blocks" in
+  let* lp_blocks = decode_list "blocks" decode_captured_block raw_blocks in
+  Ok { lp_keeper; lp_trace_id; lp_absolute_turn; lp_captured_at_unix; lp_blocks }

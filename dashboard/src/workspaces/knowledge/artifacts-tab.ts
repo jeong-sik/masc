@@ -10,7 +10,7 @@
 import { html } from 'htm/preact'
 import { copyToClipboard } from '../../components/common/copyable-code'
 import { MarkdownContent } from '../../components/common/markdown-renderer'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { authSession, canUseSingleUserTokenAdmin, currentSessionEpoch, isEpochCurrent, sessionEpoch } from '../../core/auth'
 import { markViewSnapshot } from '../../core/observer'
 import { resourceCache, type Observed } from '../../core/resource-cache'
@@ -23,7 +23,7 @@ import {
   type SandboxedHtmlMediaHydrationResult,
 } from '../../lib/workspace-media-cache'
 import { KeeperBadge } from '../../components/keeper-badge'
-import { MasterDetail } from '../../components/primitives/master-detail'
+import { LinkedItemAbsent, MasterDetail } from '../../components/primitives/master-detail'
 import { PopoverMenu } from '../../components/primitives/popover-menu'
 import { RefreshButton } from '../../components/primitives/refresh-button'
 import { VirtualList } from '../../components/primitives/virtual-list'
@@ -105,6 +105,9 @@ export function ArtifactsTab(props: WorkspaceViewProps) {
   // A selected artifact with no document and no error is one being read: from
   // the first render, before the effect that reads it has run.
   const docLoading = selectedId !== null && doc === null && docError === null
+  // The artifact a link names, once a list was read without it.
+  const linkedArtifactAbsent = !loading && loadError === null && selectedId !== null
+    && selectedId === (props.entityId ?? null) && !bundle.artifacts.some((a) => a.id === selectedId)
   const docAbortRef = useRef<AbortController | null>(null)
   const mountedRef = useRef(true)
 
@@ -115,6 +118,11 @@ export function ArtifactsTab(props: WorkspaceViewProps) {
       docAbortRef.current?.abort()
     }
   }, [])
+
+  // The address names an artifact: that one is selected, once for each address.
+  useLayoutEffect(() => {
+    if (props.entityId) setSelectedId(props.entityId)
+  }, [props.entityId])
 
   useEffect(() => {
     setSelectedRevision(null)
@@ -142,8 +150,10 @@ export function ArtifactsTab(props: WorkspaceViewProps) {
       setBundle(obs.data)
       markViewSnapshot()
       setSelectedId((prev) => {
-        if (props.entityId && obs.data.artifacts.some((a) => a.id === props.entityId)) return props.entityId
-        if (prev && obs.data.artifacts.some((a) => a.id === prev)) return prev
+        // A read keeps what is selected: the artifact the reader picked, or
+        // the one a link names, in the list or not. The document is read by
+        // its id, so one the list does not hold is shown or says why not.
+        if (prev && (prev === props.entityId || obs.data.artifacts.some((a) => a.id === prev))) return prev
         return obs.data.artifacts[0]?.id ?? null
       })
     } else if (obs.kind === 'failed') {
@@ -493,7 +503,12 @@ export function ArtifactsTab(props: WorkspaceViewProps) {
     : docLoading
       ? html`<div class="kn-detail-pad"><span class="dtable-absent">아티팩트 본문 불러오는 중…</span></div>`
       : docError
-        ? html`<div class="kn-detail-pad"><div class="kn-notice kn-notice--err" role="alert">${docError}</div></div>`
+        ? html`
+            <div class="kn-detail-pad">
+              ${linkedArtifactAbsent && html`<${LinkedItemAbsent} kind="아티팩트" id=${selectedId} class="kn-notice kn-notice--warn" />`}
+              <div class="kn-notice kn-notice--err" role="alert">${docError}</div>
+            </div>
+          `
         : null
 
   return html`

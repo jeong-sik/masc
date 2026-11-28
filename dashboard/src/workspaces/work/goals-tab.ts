@@ -24,7 +24,7 @@ import { KeeperBadge } from '../../components/keeper-badge'
 import { TimeAgo } from '../../components/common/time-ago'
 import { InlineSpinner } from '../../components/common/inline-spinner'
 import { formatDuration } from '../../lib/format-time'
-import { MasterDetail } from '../../components/primitives/master-detail'
+import { LinkedItemAbsent, MasterDetail } from '../../components/primitives/master-detail'
 import { PopoverMenu } from '../../components/primitives/popover-menu'
 import { RefreshButton } from '../../components/primitives/refresh-button'
 import { TargetLockedAction } from '../../components/primitives/target-locked-action'
@@ -408,6 +408,10 @@ export function GoalsTab(props: WorkspaceViewProps) {
     selectedGoalRef.current = selectedGoal?.id ?? null
     if (selectedGoalId === null && goalsCurrent && selectedGoal) setSelectedGoalId(selectedGoal.id)
   }, [selectedGoalId, selectedGoal, goalsCurrent])
+  // The goal a link names, once a list was read without it. It stays the
+  // selection: no other goal is shown in its place.
+  const linkedGoalAbsent = goalRead !== null && selectedGoal === null
+    && selectedGoalId !== null && selectedGoalId === (props.entityId ?? null)
   const taskLinksIncomplete = selectedGoal !== null
     && (goalRead?.incompleteTaskLinks.has(selectedGoal.id) === true || !!verificationRead?.recovery)
   const selectedConfirmationRead = confirmationRead?.epoch === epoch
@@ -1315,13 +1319,15 @@ export function GoalsTab(props: WorkspaceViewProps) {
           </section>
         </div>
       `
-    : null
+    : linkedGoalAbsent
+      ? html`<div class="wk-detail-pad"><${LinkedItemAbsent} kind="목표" id=${selectedGoalId} class="wk-notice wk-notice--warn" /></div>`
+      : null
 
   return html`
     <${MasterDetail}
       master=${masterPane}
       detail=${detailPane}
-      hasSelection=${selectedGoal !== null}
+      hasSelection=${selectedGoal !== null || linkedGoalAbsent}
       selectionKey=${selectedGoalId}
       linkedKey=${props.entityId ?? null}
       masterLabel="목표 목록"

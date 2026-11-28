@@ -63,6 +63,19 @@ function clickedIn(event: MouseEvent, selector: string): boolean {
   return false
 }
 
+/**
+ * What a detail pane says when a link names an item the list does not hold.
+ * The screen keeps that item selected and selects no other in its place, so
+ * the reader is told why the detail is empty.
+ */
+export function LinkedItemAbsent(props: { readonly kind: string; readonly id: string; readonly class: string }) {
+  return html`
+    <div class=${props.class} role="status" data-testid="linked-item-absent">
+      이 링크가 가리키는 ${props.kind}(<span class="mono">${props.id}</span>)가 목록에 없습니다.
+    </div>
+  `
+}
+
 export function MasterDetail(props: MasterDetailProps) {
   const showDetail = props.hasSelection ?? true
   const masterLabel = props.masterLabel ?? '목록'

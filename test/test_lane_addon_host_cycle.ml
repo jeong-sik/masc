@@ -289,9 +289,10 @@ let test_original_exact_semantic_dispatch_authority () =
     write source declaration)
 
 (* Review 5612102961: a submit that lands between the retirement of one
-   worker and the attach of its replacement never reaches a worker. The
-   Runtime refusal is Not_sent, so the submit-once journal declines the
-   intent and the next pass submits the same request to the reattached worker. *)
+   worker and the attach of its replacement never reaches a worker. Runtime
+   refuses it before sending ([Unavailable] or a host refusal, never
+   [Outcome_unknown]), so the next pass can submit the same request to the
+   reattached worker. *)
 let test_submit_in_the_replacement_gap_is_not_sent_and_reaches_the_next_worker () =
   let calls=ref 0 in
   let tool=Mcp_protocol.Mcp_types.tool_of_yojson (`Assoc ["name",`String "queue_question";
@@ -304,16 +305,15 @@ let test_submit_in_the_replacement_gap_is_not_sent_and_reaches_the_next_worker (
       let export ()=(Runtime.tool_export_snapshot ~config ~access:Lane_addon_sources.Operator_configuration ~reserved:[]).exports
         |> List.find_opt (fun (export : Runtime.tool_export) -> export.tool.name="queue_question") in
       let submit export=Runtime.call_exported_tool_with_principal ~principal:(Some Lane_addon_call_context.Operator)
-        ~config ~access:Lane_addon_sources.Operator_configuration ~reserved:[] ~export ~arguments:(`Assoc [])
-        |> Result.map_error Lane_addon_submit_once.call_error_of_runtime in
+        ~config ~access:Lane_addon_sources.Operator_configuration ~reserved:[] ~export ~arguments:(`Assoc []) in
       await clock (fun () -> Option.is_some (export ()));
       let retired=match export () with Some export -> export | None -> fail "the original tool must be exported" in
       write source ("enabled=false\n" ^ declaration);
       ignore (Runtime.reconcile_configuration ~config ~directory |> unwrap);
       await clock (fun () -> Option.is_none (export ()));
       (match submit retired with
-       | Error (Lane_addon_submit_once.Not_sent _) -> ()
-       | Error (Lane_addon_submit_once.Sent_unknown _) | Ok _ ->
+       | Error (Runtime.Unavailable _ | Runtime.Host_refusal _) -> ()
+       | Error (Runtime.Outcome_unknown _) | Ok _ ->
          fail "a submit in the replacement gap must be refused before sending");
       check int "the retired worker received nothing" 0 !calls;
       (* An absent export only proves that retirement started. The entry can
@@ -333,7 +333,7 @@ let test_submit_in_the_replacement_gap_is_not_sent_and_reaches_the_next_worker (
       let attached=match export () with Some export -> export | None -> fail "the replacement must export the tool" in
       (match submit attached with
        | Ok _ -> ()
-       | Error (Lane_addon_submit_once.Not_sent _ | Lane_addon_submit_once.Sent_unknown _) ->
+       | Error (Runtime.Unavailable _ | Runtime.Host_refusal _ | Runtime.Outcome_unknown _) ->
          fail "the reattached worker must receive the next submit");
       check int "the next pass delivers exactly one submit" 1 !calls)
 

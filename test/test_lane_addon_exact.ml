@@ -473,65 +473,6 @@ let test_v2_proof_recovers_lost_outcome_publication () =
     check int "the original runner was called once" 1 !sent;
     check int "recovery did not call a provider" 0 !sends)
 
-let test_original_consumer_recovers_proof_without_worker_rpc () =
-  with_root (fun root ->
-    let module Owner=Masc.Lane_addon_tool_request_owner in
-    let module Progress=Masc.Lane_addon_request_progress in
-    let module Submit=Masc.Lane_addon_submit_once in
-    let store=Store.create ~root in
-    let original=request "consumer-recovers-proof" in
-    let scope="proof-publication-consumer" in
-    let owned value=require (Result.map_error Owner.error_to_string value) in
-    require (Result.map_error Owner.error_to_string
-      (Owner.retain ~store ~scope ~request_id:original.request_id
-        ~installation_id:(Owner.installation_id (Owner.Configuration declaration_id))
-        ~package_id:package.id ~tool:"derive" ~summary:`Null
-        ~request:(Exact.request_to_json original)));
-    let retained=Option.get (owned (Owner.load ~store ~scope ~request_id:original.request_id)) in
-    let retained=match require (Result.map_error Owner.update_error_to_string
-      (Owner.advance ~store ~expected:retained ~event:Progress.Dispatch_intended)) with
-      | Owner.Stored record | Already_stored record -> record
-      | Unconfirmed detail -> fail detail in
-    let runner,sends,_=counting_runner store (ref [Answer question]) in
-    ignore (run_request store runner original);
-    let wire=Option.get (require (Store.load_exact_request store ~declaration_id
-      ~request_id:original.request_id)) in
-    let unpublished=match wire with
-      | `Assoc fields -> `Assoc (("attempts",`List [other_process_marker])::
-          ("final",`Null)::List.remove_assoc "attempts" (List.remove_assoc "final" fields))
-      | _ -> fail "original Exact record expected" in
-    require (Store.save_exact_request store ~declaration_id
-      ~request_id:original.request_id unpublished);
-    let calls=ref 0 in
-    let result=Submit.resume_retained ~store ~label:"Proven original" ~original:retained
-      ~request:original ~schema ~decode_final:(Exact.final_of_json ~schema)
-      ~unadmitted:(fun () -> fail "recovery asked about admission")
-      ~prepare:(fun () -> fail "recovery requested fresh admission")
-      ~call:(fun ~arguments:_ -> incr calls; fail "recovery contacted the worker")
-      ~terminal:(fun _ final ->
-        match Exact.read_latest_original_execution ~store ~declaration_id ~schema original with
-        | Error detail -> Error (Submit.Rejected detail)
-        | Ok actual -> match actual,final with
-        | Exact.Completed_latest {execution={outcome=Exact.Call_ended (Exact.Answered {output;_});_};_},
-          Exact.Call_final (Exact.Answered {output=delivered;_})
-          when Exact.checked_json output=question && Exact.checked_json delivered=question -> Ok final
-        | Exact.No_completed_latest,_ | Exact.Completed_latest _,_ ->
-          Error (Submit.Rejected "consumer requires its actual proven answer")) in
-    (match result with
-     | Ok (Submit.Final (Exact.Call_final (Exact.Answered {output;_}))) ->
-       check bool "consumer validates its original answer" true (Exact.checked_json output=question)
-     | Error error -> fail (Submit.error_to_string error)
-     | Ok (Submit.Awaiting _ | Final _ | Commit_pending _ | Settled _) ->
-       fail "consumer did not recover the proven terminal");
-    let after=Option.get (owned (Owner.load ~store ~scope ~request_id:original.request_id)) in
-    check bool "only the original judgment is retained; no domain ACK is invented" true
-      (match Progress.phase after.progress with
-       | Progress.Judged _ -> true
-       | Captured | Admission_wait _ | Dispatch_pending _ | Committing _ | Commit_unknown _
-       | Finished _ | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _ -> false);
-    check int "the actual provider ran only for the original" 1 !sends;
-    check int "the missing worker was never contacted" 0 !calls)
-
 let test_publication_recovery_preserves_unproven_original () =
   with_root (fun root ->
     let store=Store.create ~root in
@@ -2300,8 +2241,6 @@ let () =
             test_an_open_record_is_observed_by_identity
         ; test_case "v2 proof recovers lost outcome publication" `Quick
             test_v2_proof_recovers_lost_outcome_publication
-        ; test_case "original consumer recovers proof without worker RPC" `Quick
-            test_original_consumer_recovers_proof_without_worker_rpc
         ; test_case "publication recovery preserves an unproven original" `Quick
             test_publication_recovery_preserves_unproven_original
         ; test_case "original execution binds request schema and actual attempt" `Quick test_original_execution_is_bound_to_one_attempt

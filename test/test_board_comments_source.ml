@@ -81,8 +81,10 @@ let test_stale_append_requires_full_reload base_path =
   Alcotest.(check bool) "reloaded writer's comment survives restart" true (has_comment restarted next)
 
 (* #55449: the refusal above lasted until a restart or an explicit reload.
-   [Board.reobserve] is that reload, taken only for a refusal one more read
-   can end. A Board operation runs it when it takes the store. *)
+   [Board.reobserve] is that reload, and a Board operation runs it when it
+   takes the store. A stale cursor is a cause it reads again for at every
+   call. When it reads again for the other causes is in
+   test_board_persistence_load_contract (#55465). *)
 let test_stale_append_is_reobserved base_path =
   let stale, post = seed base_path in
   let own = require (append stale post "this store's durable comment") in

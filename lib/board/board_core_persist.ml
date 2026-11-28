@@ -41,11 +41,6 @@ let record_persist_error ~where msg =
 let create_store_on_binding workspace_binding posts_source_io comments_source_io sub_boards_source_io votes_source_io reactions_source_io deletion_source_io () =
   { posts_source = Posts_unobserved
   ; posts_source_io
-  ; posts_source_seen = Source_file.never_seen
-  ; comments_source_seen = Source_file.never_seen
-  ; sub_boards_source_seen = Source_file.never_seen
-  ; votes_source_seen = Source_file.never_seen
-  ; reactions_source_seen = Source_file.never_seen
   ; comments_source = Comments_unobserved
   ; comments_source_io
   ; sub_boards_source = Policy_unobserved

@@ -198,6 +198,24 @@ let no_deletion_pending store ~path =
     Error (Io_error (Printf.sprintf
       "Board source %s is not read again while a Board deletion is pending." path))
 
+(* #55449, #55465: whether this call reads a refused source again, asked
+   without persistence so that a call with nothing to read waits for no lock.
+
+   A refusal one more read can end answers from the store's fields, and a
+   pending deletion is reported: the caller's operation is about to be refused
+   for it. Any other refusal asks the directory, with one [lstat] of the file
+   and one of its lock file. While a deletion is pending it does not ask: no
+   source is read again then, so the call leaves it as it is, reports nothing,
+   and the question is put again once the deletion is over. *)
+let due_without_persistence store ~path asked =
+  match asked with
+  | Board_source_file.Not_refused -> Ok false
+  | Board_source_file.Read_again ->
+    Result.map (fun () -> true) (no_deletion_pending store ~path)
+  | Board_source_file.Read_again_once_changed seen ->
+    Ok (Result.is_ok (no_deletion_pending store ~path)
+        && Board_source_file.changed_since seen ~path)
+
 let unknown_posts_write ~path =
   Io_error (Printf.sprintf
     "posts source %s has an earlier write whose outcome is unknown, so Board \
@@ -212,50 +230,51 @@ let unknown_posts_write ~path =
    Persistence is taken only for a read. A store with nothing due, an unknown
    earlier write and a pending deletion are answered without it: every Board
    operation asks, and one that only reads must not queue behind a write's
-   file I/O to be told what a field already says. A refused source asks one
-   more thing, also without a lock: whether its file has changed (#55465). *)
+   file I/O to be told what a field already says ([due_without_persistence]).
+   Once persistence is held the store is asked again from its fields, so a
+   call that waited behind another call's read does not read a second time. *)
 let reobserve_posts store =
   match store.posts_source with
   | Posts_unobserved | Posts_readable _ -> Ok ()
   | Posts_unsettled _ -> Error (unknown_posts_write ~path:(Board_paths.persist_path store))
   | Posts_refused _ ->
-    if not (Board_posts_source.reobservation_due store)
-    then Ok ()
-    else
-      let path = Board_paths.persist_path store in
-      match no_deletion_pending store ~path with
-      | Error _ as refused -> refused
-      | Ok () ->
-        with_persist_lock store (fun () ->
-          match model_reload_allowed store ~path with
-          | Error _ as refused -> refused
-          | Ok () ->
-            match Board_posts_source.reobserve store with
-            | Board_posts_source.Reobservation_not_due -> Ok ()
-            | Board_posts_source.Unsettled_write_pending -> Error (unknown_posts_write ~path)
-            | Board_posts_source.Reobserved outcome ->
-              let outcome =
-                try
-                  with_lock store (fun () ->
-                    (match outcome with
-                     | Posts_complete { posts; _ } ->
-                       Board_votes_json.replace_loaded_posts store posts;
-                       recalculate_reply_counts store;
-                       recalculate_vote_counts store
-                     | Posts_partial _ | Posts_unavailable _ -> ());
-                    publish_posts_read store outcome);
-                  outcome
-                with exception_ ->
-                  fst (Board_posts_source.fail_read store outcome ~stage:Project_posts
-                    exception_ (Printexc.get_raw_backtrace ())) in
-              finish_posts_read outcome;
-              require_posts_source_readable store)
+    let path = Board_paths.persist_path store in
+    let asked = Board_posts_source.refusal store in
+    match due_without_persistence store ~path asked with
+    | Error _ as refused -> refused
+    | Ok false -> Ok ()
+    | Ok true ->
+      with_persist_lock store (fun () ->
+        match model_reload_allowed store ~path with
+        | Error _ as refused -> refused
+        | Ok () ->
+          match Board_posts_source.reobserve store ~asked with
+          | Board_posts_source.Reobservation_not_due -> Ok ()
+          | Board_posts_source.Unsettled_write_pending -> Error (unknown_posts_write ~path)
+          | Board_posts_source.Reobserved outcome ->
+            let outcome =
+              try
+                with_lock store (fun () ->
+                  (match outcome with
+                   | Posts_complete { posts; _ } ->
+                     Board_votes_json.replace_loaded_posts store posts;
+                     recalculate_reply_counts store;
+                     recalculate_vote_counts store
+                   | Posts_partial _ | Posts_unavailable _ -> ());
+                  publish_posts_read store outcome);
+                outcome
+              with exception_ ->
+                fst (Board_posts_source.fail_read store outcome ~stage:Project_posts
+                  exception_ (Printexc.get_raw_backtrace ())) in
+            finish_posts_read outcome;
+            require_posts_source_readable store)
 
 (* #55449: the other four sources refuse on a stale observation as posts did
    and were read again only at startup. On 2026-11-24 every comment write was
    refused for 123 minutes, until the restart. Each is read again by the
    function that loads it at startup, and only when it is due: for a refusal
-   one more read can end, or once its file has changed (#55465). *)
+   one more read can end, or once its file or its lock file is no longer what
+   the refusal carries (#55465). *)
 let reloaded result =
   result
   |> Result.map (fun (_ : int) -> ())
@@ -265,19 +284,22 @@ let reloaded result =
    counts held on posts and comments.
 
    As for posts, persistence is taken only for a read. A source is asked again
-   once persistence is held: a call that waited behind a read that cleared the
-   source reads nothing. Behind a read that met another writer's lock the
-   source is still due, and each waiting call tries once. *)
+   once persistence is held, from its fields: a call that waited behind
+   another call's read reads nothing, whether that read cleared the source or
+   left it refused with what it saw. Behind a read that met another writer's
+   lock the source is still due, and each waiting call tries once. *)
 let reobserve store =
-  let read_again file ~due ~load () =
-    if not (due store)
-    then Ok ()
-    else
-      match no_deletion_pending store ~path:(Board_paths.store_file_path store file) with
-      | Error _ as refused -> refused
-      | Ok () ->
-        with_persist_lock store (fun () ->
-          if due store then reloaded (load store) else Ok ())
+  let read_again file ~refusal ~load () =
+    let path = Board_paths.store_file_path store file in
+    let asked = refusal store in
+    match due_without_persistence store ~path asked with
+    | Error _ as refused -> refused
+    | Ok false -> Ok ()
+    | Ok true ->
+      with_persist_lock store (fun () ->
+        if Board_source_file.still_due ~asked (refusal store)
+        then reloaded (load store)
+        else Ok ())
   in
   (* As at startup, and in the interval that replaces the comments: reply
      counts are held on posts, and the vote counts of the comments just loaded
@@ -294,15 +316,15 @@ let reobserve store =
        | Error error -> Some (file, error))
     [ Board_paths.Posts, (fun () -> reobserve_posts store)
     ; ( Board_paths.Comments
-      , read_again Board_paths.Comments ~due:Board_comments_source.reobservation_due
+      , read_again Board_paths.Comments ~refusal:Board_comments_source.refusal
           ~load:load_comments )
     ; ( Board_paths.Votes
-      , read_again Board_paths.Votes ~due:Board_votes_source.reobservation_due
+      , read_again Board_paths.Votes ~refusal:Board_votes_source.refusal
           ~load:load_votes_under_persistence )
     ; ( Board_paths.Reactions
-      , read_again Board_paths.Reactions ~due:Board_reactions_source.reobservation_due
+      , read_again Board_paths.Reactions ~refusal:Board_reactions_source.refusal
           ~load:load_reactions_under_persistence )
     ; ( Board_paths.Sub_boards
-      , read_again Board_paths.Sub_boards ~due:Board_sub_boards_source.reobservation_due
+      , read_again Board_paths.Sub_boards ~refusal:Board_sub_boards_source.refusal
           ~load:Board_sub_boards.reload_sub_boards_under_persistence )
     ]

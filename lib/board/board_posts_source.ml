@@ -94,11 +94,11 @@ let history = function
   | Posts_readable { observation; _ } -> Posts_observed observation
   | Posts_refused { last_observed; _ } | Posts_unsettled { last_observed; _ } -> last_observed
 
-let refused store failure diagnostics = match store.posts_source with
+let refused store ~seen failure diagnostics = match store.posts_source with
   | Posts_unsettled _ -> ()
   | Posts_unobserved | Posts_readable _ | Posts_refused _ ->
     store.posts_source <- Posts_refused {
-      last_observed = history store.posts_source; failure; diagnostics }
+      last_observed = history store.posts_source; failure; diagnostics; seen }
 
 let unsettled store ~pending failure diagnostics =
   store.posts_source <- Posts_unsettled {
@@ -156,6 +156,12 @@ let read_diagnostics = function
   | Posts_complete { diagnostics; _ } | Posts_partial { diagnostics; _ }
   | Posts_unavailable { diagnostics; _ } -> diagnostics
 
+(* What a refusal made from this read carries: a read that returned rows
+   took the entries first. *)
+let read_seen = function
+  | Posts_complete { entries; _ } | Posts_partial { entries; _ } -> Source_file.Read_at entries
+  | Posts_unavailable { seen; _ } -> seen
+
 let write_diagnostics = function
   | Posts_written { diagnostics } | Posts_not_written { diagnostics; _ }
   | Posts_write_unknown { diagnostics; _ } -> diagnostics
@@ -165,8 +171,9 @@ let fail_read store outcome ~stage exception_ backtrace =
   let failure = match outcome with
     | Posts_unavailable { failure; _ } -> failure
     | Posts_complete _ | Posts_partial _ -> Posts_raised { exception_; backtrace } in
-  refused store failure diagnostics;
-  Posts_unavailable { failure; diagnostics }, failure
+  let seen = read_seen outcome in
+  refused store ~seen failure diagnostics;
+  Posts_unavailable { failure; diagnostics; seen }, failure
 
 let finish_read outcome =
   let result = match outcome with
@@ -189,24 +196,26 @@ let finish_write outcome =
 
 (* Physical read of the bound posts file, shared by [read] and [reobserve]. *)
 let read_source store =
-    let diagnostics = ref [] in
+    let diagnostics = ref [] and seen = ref Source_file.Unread in
     let add diagnostic = diagnostics := !diagnostics @ [diagnostic] in
     let unavailable failure =
-      refused store failure !diagnostics;
-      Posts_unavailable { failure; diagnostics = !diagnostics } in
-    match observe_workspace store with
-    | Error rejection -> add (Workspace_diagnostic rejection);
-      unavailable (Posts_workspace_binding_refused rejection)
-    | Ok before ->
+      refused store ~seen:!seen failure !diagnostics;
+      Posts_unavailable { failure; diagnostics = !diagnostics; seen = !seen } in
+    let stage = ref Read_posts in
+    try
+      (* #55465: the first step. Whatever this read then meets, its refusal
+         carries what the directory said before it. *)
       let path = Board_paths.persist_path store in
-      let stage = ref Read_posts in
-      try
-        let seen, received = Source_file.around_read store.posts_source_seen ~path (fun () ->
-          Fs_compat.private_jsonl_snapshot_success_receipt (match store.posts_source_io.posts with
-            | None -> Fs_compat.read_private_jsonl_durable_locked_result path ~after:None
-            | Some io -> Fs_compat.read_private_jsonl_durable_locked_with_io_for_testing ~io path ~after:None)) in
-        store.posts_source_seen <- seen;
-        match received with
+      let entries = Board_source_file.inspect ~path in
+      seen := Source_file.Read_at entries;
+      match observe_workspace store with
+      | Error rejection -> add (Workspace_diagnostic rejection);
+        unavailable (Posts_workspace_binding_refused rejection)
+      | Ok before ->
+        let result = match store.posts_source_io.posts with
+          | None -> Fs_compat.read_private_jsonl_durable_locked_result path ~after:None
+          | Some io -> Fs_compat.read_private_jsonl_durable_locked_with_io_for_testing ~io path ~after:None in
+        match Fs_compat.private_jsonl_snapshot_success_receipt result with
         | Error error -> add (File_diagnostic { file = Posts_file; error });
           unavailable (Posts_transaction_failed error)
         | Ok receipt ->
@@ -266,15 +275,16 @@ let read_source store =
                 | [] ->
                   Board_posts_rows.register_snapshot ~bytes:raw_bytes
                     ~by_id:!by_id ~slices:!slices ~covered_bytes:!covered_bytes;
-                  Posts_complete { observation; posts; diagnostics = !diagnostics }
-                | errors -> Posts_partial { observation; posts; errors; diagnostics = !diagnostics }
-      with exception_ ->
-        let backtrace = Printexc.get_raw_backtrace () in
-        add (Raised_diagnostic { stage = !stage; exception_; backtrace });
-        unavailable (Posts_raised { exception_; backtrace })
+                  Posts_complete { observation; posts; diagnostics = !diagnostics; entries }
+                | errors -> Posts_partial { observation; posts; errors; diagnostics = !diagnostics; entries }
+    with exception_ ->
+      let backtrace = Printexc.get_raw_backtrace () in
+      add (Raised_diagnostic { stage = !stage; exception_; backtrace });
+      unavailable (Posts_raised { exception_; backtrace })
 
 let read store = match store.posts_source with
-  | Posts_unsettled { failure; _ } -> Posts_unavailable { failure; diagnostics = [] }
+  | Posts_unsettled { failure; _ } ->
+    Posts_unavailable { failure; diagnostics = []; seen = Source_file.Unread }
   | Posts_unobserved | Posts_readable _ | Posts_refused _ -> read_source store
 
 let publish_read store outcome = match store.posts_source with
@@ -283,10 +293,10 @@ let publish_read store outcome = match store.posts_source with
     match outcome with
     | Posts_complete { observation; diagnostics; _ } ->
       store.posts_source <- Posts_readable { observation; diagnostics }
-    | Posts_partial { observation; errors; diagnostics; _ } ->
+    | Posts_partial { observation; errors; diagnostics; entries; _ } ->
       store.posts_source <- Posts_refused { last_observed = Posts_observed observation;
-        failure = Posts_rows_rejected errors; diagnostics }
-    | Posts_unavailable { failure; diagnostics } -> refused store failure diagnostics
+        failure = Posts_rows_rejected errors; diagnostics; seen = Source_file.Read_at entries }
+    | Posts_unavailable { failure; diagnostics; seen } -> refused store ~seen failure diagnostics
 
 (* Only error branches with actual prepublication evidence are nonwrites. The
    final append fstat uses the same operation tag as its precondition fstat. *)
@@ -342,7 +352,7 @@ let classify_write store ~pre_write ~kind ~workspace_observation ~bytes ~diagnos
     let diagnostics = File_diagnostic { file = Posts_file; error } :: diagnostics in
     let failure = Posts_transaction_failed error in
     if definitely_not_written error then (
-      if contradicts_observation error then refused store failure diagnostics
+      if contradicts_observation error then refused store ~seen:Source_file.Unread failure diagnostics
       else retain_trace store diagnostics;
       Posts_not_written { failure; diagnostics })
     else
@@ -370,8 +380,9 @@ let write store ~pre_write ~kind ~workspace_observation ~bytes ~diagnostics perf
    as it is (a torn tail, a second hard link, not a regular file) or an
    operation that failed. While such a cause lasts a read meets it again, so
    a source that kept asking would take persistence at every operation. Such
-   a refusal is read again only once the file is no longer the one this
-   store last read ([Source_file], #55465). *)
+   a refusal is read again only once the directory no longer says of the
+   file and of its lock file what it said when the refusing read began, or
+   at once when no read made the refusal ([Board_source_file], #55465). *)
 let rec fresh_read_can_clear = function
   | Fs_compat.Cursor_mismatch _ | Transaction_content_changed _
   | Transaction_path_binding_changed _ | Stable_lock_contended _ -> true
@@ -399,22 +410,20 @@ type reobservation =
   | Reobserved of posts_source_read
   | Unsettled_write_pending
 
-(* #55465: a refusal for any other cause is read again once the file has
-   changed since this store last read it: one [lstat], and no lock. A stale
-   observation is asked first, so it costs no IO. *)
-let reobservation_due store = match store.posts_source with
-  | Posts_refused { failure; _ } ->
-    stale_observation failure
-    || Source_file.changed_since store.posts_source_seen ~path:(Board_paths.persist_path store)
-  | Posts_unobserved | Posts_readable _ | Posts_unsettled _ -> false
+let refusal store = match store.posts_source with
+  | Posts_refused { failure; seen; _ } ->
+    if stale_observation failure then Board_source_file.Read_again
+    else Board_source_file.Read_again_once_changed seen
+  | Posts_unobserved | Posts_readable _ | Posts_unsettled _ -> Board_source_file.Not_refused
 
 (* An unsettled store keeps its unknown-write evidence: a read cannot prove a
    durability-unknown publication durable (the parent-sync case), so only a
    fresh store settles it. Reobservation reports that instead of re-reading. *)
-let reobserve store = match store.posts_source with
+let reobserve store ~asked = match store.posts_source with
   | Posts_unobserved | Posts_readable _ -> Reobservation_not_due
   | Posts_refused _ ->
-    if reobservation_due store then Reobserved (read_source store) else Reobservation_not_due
+    if Board_source_file.still_due ~asked (refusal store)
+    then Reobserved (read_source store) else Reobservation_not_due
   | Posts_unsettled _ -> Unsettled_write_pending
 
 let observe_guard_refusal store observation failure =
@@ -422,7 +431,7 @@ let observe_guard_refusal store observation failure =
   | Posts_readable current when current.observation == observation
       && String.equal failure.Fs_compat.guard_path observation.source_path
       && contradicts_observation failure.guard_error ->
-    refused store (Posts_transaction_failed failure.guard_error) [Posts_guard_diagnostic failure]
+    refused store ~seen:Source_file.Unread (Posts_transaction_failed failure.guard_error) [Posts_guard_diagnostic failure]
   | Posts_readable _ | Posts_unobserved | Posts_refused _ | Posts_unsettled _ -> ()
 
 let not_written failure diagnostics = Posts_not_written { failure; diagnostics }
@@ -432,7 +441,7 @@ let not_written failure diagnostics = Posts_not_written { failure; diagnostics }
 let workspace_not_written store rejection =
   let failure = Posts_workspace_binding_refused rejection in
   let diagnostics = [Workspace_diagnostic rejection] in
-  refused store failure diagnostics; not_written failure diagnostics
+  refused store ~seen:Source_file.Unread failure diagnostics; not_written failure diagnostics
 
 let prepare_append store post = match expected store with
   | Error failure -> Error (not_written failure [])
@@ -499,7 +508,7 @@ let append_creation_with_policy store ~(policy : sub_boards_source_observation) 
       let guard_refused ~target failure cleanup =
         let trace = diagnostics (failure :: cleanup) in
         let cause = Posts_transaction_failed failure.Fs_compat.guard_error in
-        if target && contradicts_observation failure.guard_error then refused store cause trace
+        if target && contradicts_observation failure.guard_error then refused store ~seen:Source_file.Unread cause trace
         else retain_trace store trace;
         not_written cause trace in
       try

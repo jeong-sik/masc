@@ -7,16 +7,19 @@ type read =
       observation : sub_boards_source_observation;
       rows : sub_board list;
       diagnostics : sub_boards_source_diagnostic list;
+      entries : Source_file.entries;
     }
   | Partial of {
       observation : sub_boards_source_observation;
       rows : sub_board list;
       errors : sub_boards_row_error list;
       diagnostics : sub_boards_source_diagnostic list;
+      entries : Source_file.entries;
     }
   | Unavailable of {
       failure : sub_boards_source_failure;
       diagnostics : sub_boards_source_diagnostic list;
+      seen : Source_file.seen;
     }
 
 val read : store -> read
@@ -57,12 +60,11 @@ val finish_write : write -> ('a, board_error) result -> ('a, board_error) result
 (** Finish after model publication/acknowledgement on known success. Preserve
     the original reserved cleanup cause through the shared Board carrier. *)
 val require_readable : store -> (unit, board_error) result
-val reobservation_due : store -> bool
-(** Whether this source is read again, by the rule of
-    {!Board_posts_source.reobservation_due}: it is refused, and either its
-    cause is one {!Board_posts_source.fresh_read_can_clear} accepts (#55449)
-    or its file has changed since this store last read it (#55465). False,
-    without IO, for a pending publication or an unknown write. *)
+val refusal : store -> Board_source_file.refusal
+(** What this source's state says about reading it again, from its fields
+    alone: refused for a cause {!Board_posts_source.fresh_read_can_clear}
+    accepts (#55449), refused for any other cause together with what the
+    refusal saw of the file (#55465), or not refused. *)
 val observe_guard_refusal : store -> sub_boards_source_observation ->
   Fs_compat.private_jsonl_guard_failure -> unit
 (** Caller owns persistence. An actual refusal at this exact current policy

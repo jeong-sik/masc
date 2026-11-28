@@ -98,8 +98,9 @@ let emoji_counts store parent user =
   |> List.sort (fun (left, _) (right, _) -> String.compare left right)
 
 (* #55449: the refusal above lasted until a restart, for reads as well.
-   [Board.reobserve] reads the table again only for a refusal one more read
-   can end. *)
+   [Board.reobserve] reads the table again. A stale cursor is a cause it reads
+   again for at every call. When it reads again for the other causes is in
+   test_board_persistence_load_contract (#55465). *)
 let test_stale_toggle_is_reobserved base_path =
   let stale = fresh_store base_path in
   let parent = post stale "a stale reaction source is read again before the next operation" in

@@ -42,32 +42,34 @@ val require_readable : store -> (unit, board_error) result
     source reads and writes. A fresh store loads the actual source instead. *)
 type reobservation =
   | Reobservation_not_due
-      (** Readable, never observed, or refused with nothing due
-          ({!reobservation_due}). The file was not read. *)
+      (** Readable, never observed, or no longer the refusal the caller found
+          due ({!Board_source_file.still_due}). The file was not read. *)
   | Reobserved of posts_source_read
-      (** The store was refused and due ({!reobservation_due}). The caller
+      (** The store is still refused as the caller found it. The caller
           installs the read into the model and {!publish_read}s it. *)
   | Unsettled_write_pending
       (** An earlier write's outcome is unknown. No IO is performed: a read
           cannot prove a durability-unknown publication durable, so only a
           fresh store (server restart) settles it. *)
 
-val reobserve : store -> reobservation
-(** Caller holds persistence. Re-reads the posts file only when
-    {!reobservation_due}: a write refused because another writer appended
-    does not refuse every later write, and a refusal for what the file was
-    ends once the file is repaired. *)
+val reobserve : store -> asked:Board_source_file.refusal -> reobservation
+(** Caller holds persistence and found the store due before it waited for it:
+    [asked] is what {!refusal} answered then. Re-reads the posts file when
+    {!Board_source_file.still_due}, so a write refused because another writer
+    appended does not refuse every later write, and a refusal for what the
+    file or its lock file was ends once that is repaired. The question is
+    answered from the store's fields; the read takes the directory entries
+    itself, as its first step. *)
 
-val reobservation_due : store -> bool
-(** Whether {!reobserve} would read the file. The store is refused, and
-    either its cause is one {!fresh_read_can_clear} accepts, or the file has
-    changed since this store last read it
-    ({!Board_types.Source_file.changed_since}, #55465). The first is answered
-    from the store's fields. The second is asked only when the first is no:
-    one [lstat], no lock. A read that fails before it reaches the file leaves
-    what the store last saw as it was, so the source stays due and the next
-    call tries again; a store whose reads never reached the file is always
-    due. Every other phase answers [false] without IO. *)
+val refusal : store -> Board_source_file.refusal
+(** What the posts state says about reading the file again, from its fields
+    alone. Refused for a cause {!fresh_read_can_clear} accepts: [Read_again].
+    Refused for any other cause: [Read_again_once_changed] with what the
+    refusal carries (#55465). A read takes the entries of the file and of its
+    lock file before anything else, and its refusal carries them whatever the
+    read then met, so a cause that lasts is met once and not at every call.
+    A refusal no read made (a write, a guard) carries [Unread] and is read
+    again at the next call. Every other phase: [Not_refused]. *)
 
 val failure_to_board_error : posts_source_failure -> board_error
 val finish_write : posts_write_outcome -> (unit, board_error) result
@@ -95,9 +97,9 @@ val fresh_read_can_clear : Fs_compat.private_jsonl_transaction_error -> bool
     operation: a cursor or content mismatch, a path that changed during the
     operation, or a contended lock. A torn tail, a second hard link, a file
     that is not regular and a failed operation are not: a refusal for one
-    is read again only once the file has changed since the store last read
-    it ({!reobservation_due}, #55465). Every Board source asks this before it
-    reads again (#55449). *)
+    is read again only once its file or its lock file is no longer what the
+    refusal carries ({!refusal}, #55465). Every Board source asks this before
+    it reads again (#55449). *)
 val propagate_reserved : exn -> Printexc.raw_backtrace -> unit
 val defer_reserved :
   result:(unit, board_error) result -> exn -> Printexc.raw_backtrace -> unit

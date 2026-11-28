@@ -6,11 +6,14 @@ let source_path store = Board_paths.store_file_path store Board_paths.Reactions
 
 type read =
   | Complete of { observation : reactions_source_observation; rows : row list;
-                  diagnostics : reactions_source_diagnostic list }
+                  diagnostics : reactions_source_diagnostic list;
+                  entries : Source_file.entries }
   | Partial of { observation : reactions_source_observation; rows : row list;
-                 errors : reactions_row_error list; diagnostics : reactions_source_diagnostic list }
+                 errors : reactions_row_error list; diagnostics : reactions_source_diagnostic list;
+                 entries : Source_file.entries }
   | Unavailable of { failure : reactions_source_failure;
-                     diagnostics : reactions_source_diagnostic list }
+                     diagnostics : reactions_source_diagnostic list;
+                     seen : Source_file.seen }
 
 type publication = reactions_publication
 type write =
@@ -42,14 +45,14 @@ let history = function
   | Reactions_refused { reaction_history; _ } -> reaction_history
   | Reactions_unsettled { reaction_pending; _ } -> Reactions_observed reaction_pending.reaction_before
 
-let refuse store failure diagnostics = match store.reactions_source with
+let refuse store ~seen failure diagnostics = match store.reactions_source with
   | Reactions_publishing _ | Reactions_unsettled _ -> ()
   | Reactions_unobserved | Reactions_readable _ | Reactions_refused _ ->
     store.reactions_source <- Reactions_refused {
       reaction_history = history store.reactions_source;
-      reaction_failure = failure; reaction_diagnostics = diagnostics }
+      reaction_failure = failure; reaction_diagnostics = diagnostics; reaction_seen = seen }
 
-let refuse_present store failure diagnostics =
+let refuse_present store ~seen failure diagnostics =
   let reaction_history = match history store.reactions_source with
     | No_reactions_observation | Reactions_present_without_snapshot -> Reactions_present_without_snapshot
     | Reactions_observed observation as previous ->
@@ -59,7 +62,7 @@ let refuse_present store failure diagnostics =
   | Reactions_publishing _ | Reactions_unsettled _ -> ()
   | Reactions_unobserved | Reactions_readable _ | Reactions_refused _ ->
     store.reactions_source <- Reactions_refused {
-      reaction_history; reaction_failure = failure; reaction_diagnostics = diagnostics }
+      reaction_history; reaction_failure = failure; reaction_diagnostics = diagnostics; reaction_seen = seen }
 
 let expected store = match store.reactions_source with
   | Reactions_readable observation ->
@@ -100,23 +103,27 @@ let finish_workspace store before =
     (Board_workspace_binding.revalidate store.workspace_binding before)
 
 let read store = match store.reactions_source with
-  | Reactions_unsettled { reaction_failure; _ } -> Unavailable { failure = reaction_failure; diagnostics = [] }
-  | Reactions_publishing _ -> Unavailable { failure = Reactions_publication_pending; diagnostics = [] }
+  | Reactions_unsettled { reaction_failure; _ } ->
+    Unavailable { failure = reaction_failure; diagnostics = []; seen = Source_file.Unread }
+  | Reactions_publishing _ ->
+    Unavailable { failure = Reactions_publication_pending; diagnostics = []; seen = Source_file.Unread }
   | Reactions_unobserved | Reactions_readable _ | Reactions_refused _ ->
     let diagnostics = ref [] and saw_present = ref false in
+    let seen = ref Source_file.Unread in
     let unavailable failure =
-      (if !saw_present then refuse_present else refuse) store failure !diagnostics;
-      Unavailable { failure; diagnostics = !diagnostics } in
+      (if !saw_present then refuse_present else refuse) store ~seen:!seen failure !diagnostics;
+      Unavailable { failure; diagnostics = !diagnostics; seen = !seen } in
     try
+      (* #55465: the first step. Whatever this read then meets, its refusal
+         carries what the directory said before it. *)
+      let path = source_path store in
+      let entries = Board_source_file.inspect ~path in
+      seen := Source_file.Read_at entries;
       match observe_workspace store with
       | Error rejection -> diagnostics := [Reaction_workspace_diagnostic rejection];
         unavailable (Reactions_workspace_refused rejection)
       | Ok before ->
-        let path = source_path store in
-        let seen, received = Source_file.around_read store.reactions_source_seen ~path (fun () ->
-          Fs_compat.private_jsonl_snapshot_success_receipt (read_file store path)) in
-        store.reactions_source_seen <- seen;
-        match received with
+        match Fs_compat.private_jsonl_snapshot_success_receipt (read_file store path) with
         | Error error ->
           diagnostics := [Reaction_file_diagnostic error];
           saw_present := Fs_compat.private_jsonl_transaction_error_is_incomplete_tail error;
@@ -146,8 +153,9 @@ let read store = match store.reactions_source with
                       errors := Invalid_reaction_json { line = index + 1; detail } :: !errors);
                 let observation = { reaction_path = path; reaction_snapshot = receipt.value; reaction_workspace } in
                 match List.rev !errors with
-                | [] -> Complete { observation; rows = List.rev !rows; diagnostics = !diagnostics }
-                | errors -> Partial { observation; rows = List.rev !rows; errors; diagnostics = !diagnostics })
+                | [] -> Complete { observation; rows = List.rev !rows; diagnostics = !diagnostics; entries }
+                | errors ->
+                  Partial { observation; rows = List.rev !rows; errors; diagnostics = !diagnostics; entries })
     with exception_ ->
       let backtrace = Printexc.get_raw_backtrace () in
       diagnostics := !diagnostics @ [Reaction_raised_diagnostic { exception_; backtrace }];
@@ -158,27 +166,29 @@ let publish_read store outcome = match store.reactions_source with
   | Reactions_unobserved | Reactions_readable _ | Reactions_refused _ ->
     match outcome with
     | Complete { observation; _ } -> store.reactions_source <- Reactions_readable observation
-    | Partial { observation; errors; diagnostics; _ } ->
+    | Partial { observation; errors; diagnostics; entries; _ } ->
       store.reactions_source <- Reactions_refused {
         reaction_history = Reactions_observed observation;
-        reaction_failure = Reactions_rows_rejected errors; reaction_diagnostics = diagnostics }
-    | Unavailable { failure; diagnostics } -> refuse store failure diagnostics
+        reaction_failure = Reactions_rows_rejected errors; reaction_diagnostics = diagnostics;
+        reaction_seen = Source_file.Read_at entries }
+    | Unavailable { failure; diagnostics; seen } -> refuse store ~seen failure diagnostics
 
 let fail_read store outcome exception_ backtrace =
-  let diagnostics, observation = match outcome with
-    | Complete { observation; diagnostics; _ } | Partial { observation; diagnostics; _ } ->
-      diagnostics, Some observation
-    | Unavailable { diagnostics; _ } -> diagnostics, None in
+  let diagnostics, observation, seen = match outcome with
+    | Complete { observation; diagnostics; entries; _ }
+    | Partial { observation; diagnostics; entries; _ } ->
+      diagnostics, Some observation, Source_file.Read_at entries
+    | Unavailable { diagnostics; seen; _ } -> diagnostics, None, seen in
   let failure = Reactions_raised { exception_; backtrace } in
   let diagnostics = diagnostics @ [Reaction_raised_diagnostic { exception_; backtrace }] in
   (match observation, store.reactions_source with
    | Some observation, (Reactions_unobserved | Reactions_readable _ | Reactions_refused _) ->
      store.reactions_source <- Reactions_refused { reaction_history = Reactions_observed observation;
-       reaction_failure = failure; reaction_diagnostics = diagnostics }
+       reaction_failure = failure; reaction_diagnostics = diagnostics; reaction_seen = seen }
    | Some _, (Reactions_publishing _ | Reactions_unsettled _)
    | None, (Reactions_unobserved | Reactions_readable _ | Reactions_refused _ | Reactions_publishing _ | Reactions_unsettled _) ->
-     refuse store failure diagnostics);
-  Unavailable { failure; diagnostics }
+     refuse store ~seen failure diagnostics);
+  Unavailable { failure; diagnostics; seen }
 
 let finish_read = function
   | Complete { rows; diagnostics; _ } -> finish (Ok (List.length rows)) diagnostics
@@ -198,18 +208,19 @@ let rec contradicts_observation = function
 
 (* #55449: a refusal that one more read of the same file can end is read
    again before the next operation, as the posts source is (task-4036). A
-   refusal for any other reason is read again once the file has changed since
-   this store last read it (#55465). *)
+   refusal for any other reason is read again once its file or its lock file
+   is no longer what the refusal carries (#55465). *)
 let stale_observation = function
   | Reactions_transaction_failed error -> Board_posts_source.fresh_read_can_clear error
   | Reactions_not_observed | Reactions_rows_rejected _ | Reactions_missing | Reactions_binding_mismatch
   | Reactions_publication_pending | Reactions_workspace_refused _ | Reactions_raised _ -> false
 
-let reobservation_due store = match store.reactions_source with
-  | Reactions_refused { reaction_failure; _ } ->
-    stale_observation reaction_failure
-    || Source_file.changed_since store.reactions_source_seen ~path:(source_path store)
-  | Reactions_unobserved | Reactions_readable _ | Reactions_publishing _ | Reactions_unsettled _ -> false
+let refusal store = match store.reactions_source with
+  | Reactions_refused { reaction_failure; reaction_seen; _ } ->
+    if stale_observation reaction_failure then Board_source_file.Read_again
+    else Board_source_file.Read_again_once_changed reaction_seen
+  | Reactions_unobserved | Reactions_readable _ | Reactions_publishing _ | Reactions_unsettled _ ->
+    Board_source_file.Not_refused
 
 let not_written failure diagnostics = Not_written { failure; diagnostics }
 
@@ -239,7 +250,7 @@ let write store ~before ~bytes perform =
       let diagnostics = Reaction_file_diagnostic error :: parent_diagnostics in
       let failure = Reactions_transaction_failed error in
       if Board_posts_source.definitely_not_written error then (
-        if contradicts_observation error then refuse store failure diagnostics;
+        if contradicts_observation error then refuse store ~seen:Source_file.Unread failure diagnostics;
         not_written failure diagnostics)
       else unknown failure diagnostics in
   try match perform () with
@@ -261,13 +272,13 @@ let before_write store f = match expected store with
     | Error rejection ->
       let failure = Reactions_workspace_refused rejection in
       let diagnostics = [Reaction_workspace_diagnostic rejection] in
-      refuse store failure diagnostics;
+      refuse store ~seen:Source_file.Unread failure diagnostics;
       not_written failure diagnostics
     | Ok () -> f before
     | exception exception_ ->
       let backtrace = Printexc.get_raw_backtrace () in
       let diagnostics = [Reaction_raised_diagnostic { exception_; backtrace }] in
-      refuse store (Reactions_raised { exception_; backtrace }) diagnostics;
+      refuse store ~seen:Source_file.Unread (Reactions_raised { exception_; backtrace }) diagnostics;
       not_written (Reactions_raised { exception_; backtrace }) diagnostics
 
 let rewrite store bytes = before_write store (fun before ->
@@ -284,7 +295,7 @@ let rewrite_admitted store ~admission bytes = before_write store (fun before ->
   | Error rejection ->
     let failure = Reactions_workspace_refused rejection in
     let diagnostics = [Reaction_workspace_diagnostic rejection] in
-    refuse store failure diagnostics;
+    refuse store ~seen:Source_file.Unread failure diagnostics;
     not_written failure diagnostics
   | Ok () ->
     let io = store.reactions_source_io in

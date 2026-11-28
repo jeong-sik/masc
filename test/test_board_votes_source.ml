@@ -192,7 +192,9 @@ let test_known_append_publishes_before_reserved_cleanup base_path =
     (read_post restarted parent).votes_up
 
 (* #55449: the refusal above lasted until a restart. [Board.reobserve] reads
-   the ledger again only for a refusal one more read can end. *)
+   the ledger again. A stale cursor is a cause it reads again for at every
+   call. When it reads again for the other causes is in
+   test_board_persistence_load_contract (#55465). *)
 let test_stale_append_is_reobserved base_path =
   let stale = fresh_store base_path in
   let parent = post stale "a stale vote source is read again before the next operation" in

@@ -503,6 +503,87 @@ let test_a_manifest_wrapped_execute_keeps_identity () =
   check bool "a changed externalized answer changes identity" false
     (identity ~base_path:path first = identity ~base_path:path changed)
 
+(* An Execute result that carries artifacts and fits the lane goes to the
+   model as an envelope: its data beside the manifest's reference. The
+   manifest stores the execution time, so its address differs between two
+   runs of one command. The identity is read from the data inside the
+   envelope, and is the one the same receipt has as plain text and as a
+   stored marker. *)
+let test_an_inline_execute_envelope_keeps_identity () =
+  let base_path = Filename.temp_file "execute-envelope-identity-" "" in
+  Sys.remove base_path;
+  Unix.mkdir base_path 0o700;
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base_path) @@ fun () ->
+  let store = Tool_blob_store.create ~base_path in
+  let receipt ~elapsed_ms ~text =
+    let reference =
+      Tool_blob_store.put_durable store ~bytes:text ~mime:"text/plain"
+      |> O.normalized_artifact_ref_to_json
+    in
+    `Assoc
+      [ "ok", `Bool true
+      ; "status", `Assoc [ "kind", `String "exit"; "code", `Int 0 ]
+      ; "output_artifact", reference
+      ; "typed", `Bool true
+      ; "execution_time_ms", `Int elapsed_ms
+      ]
+  in
+  let project ~projection value =
+    let result =
+      Tool_result.make_ok ~tool_name:"Execute" ~start_time:(Tool_timing.start ()) ~data:value ()
+    in
+    let wrapped =
+      match Masc.Tool_bridge.attach_artifact_manifest ~projection ~base_path result with
+      | Ok result -> result
+      | Error error -> fail error.Masc.Tool_bridge.message
+    in
+    match
+      Masc.Tool_bridge.to_agent_core_typed_result
+        ~base_path
+        ~answer_reader:(fun output_text -> A.answer ~tool_name:"Execute" ~output_text)
+        wrapped
+    with
+    | Ok typed -> typed.Agent_core.Types.content
+    | Error error -> fail error.Agent_core.Types.message
+  in
+  let envelope value =
+    let content = project ~projection:O.Inline_with_structured_diagnostic value in
+    match O.decode_structured_reference content with
+    | O.Result_envelope_manifest reference -> content, reference
+    | O.No_structured_reference
+    | O.Invalid_structured_handle _
+    | O.Structured_handle _
+    | O.Invalid_result_envelope_manifest _ ->
+      fail "a receipt that fits the lane must go as an envelope"
+  in
+  let identity content =
+    match
+      P.digest_tool_io
+        ~base_path
+        ~tool_name:"Execute"
+        ~input:(`Assoc [ "argv", `List [ `String "collect" ] ])
+        ~output_text:content
+        ()
+    with
+    | Some io -> io.P.output_fingerprint
+    | None -> fail "identity missing"
+  in
+  let first, first_manifest = envelope (receipt ~elapsed_ms:1170 ~text:"collected output") in
+  let second, second_manifest = envelope (receipt ~elapsed_ms:1180 ~text:"collected output") in
+  let changed, _ = envelope (receipt ~elapsed_ms:1170 ~text:"collected output, changed") in
+  check bool "the two runs have different manifests" false
+    (String.equal first_manifest.O.sha256 second_manifest.O.sha256);
+  check string "a repeated inline execute keeps one identity" (identity first) (identity second);
+  check bool "a changed answer changes identity" false
+    (String.equal (identity first) (identity changed));
+  check string "the envelope has the identity of the plain receipt"
+    (identity (Yojson.Safe.to_string (receipt ~elapsed_ms:1170 ~text:"collected output")))
+    (identity first);
+  check string "and of the same receipt stored as a marker"
+    (identity (project ~projection:O.Reference_only (receipt ~elapsed_ms:1190 ~text:"collected output")))
+    (identity first)
+;;
+
 let test_execute_manifest_identity_does_not_read_child_artifacts () =
   let base_path = Filename.temp_file "execute-manifest-identity-" "" in
   Sys.remove base_path;
@@ -569,6 +650,8 @@ let () =
             test_large_selection_projection_keeps_answer_identity
         ; test_case "a manifest-wrapped execute keeps identity" `Quick
             test_a_manifest_wrapped_execute_keeps_identity
+        ; test_case "an inline execute envelope keeps identity" `Quick
+            test_an_inline_execute_envelope_keeps_identity
         ; test_case "memory rewrite identity stays stable" `Quick
             test_memory_rewrite_identity_stays_stable
         ; test_case "memory identity survives changing inputs" `Quick

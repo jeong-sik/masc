@@ -74,13 +74,30 @@ let resolve tool_name =
   | None -> Outside_keeper_descriptors
 ;;
 
+(* A result sent inline beside its manifest reference is an envelope around
+   the producer's data. The manifest's address differs between two runs of
+   one command, because the manifest stores the execution time, so the answer
+   is read from the data the envelope wraps: the text a completed result has
+   as its message, and what [stored_answer_content] reads from inside a
+   stored manifest. Any other text is the producer's own output. *)
+let producer_output output_text =
+  match Yojson.Safe.from_string output_text with
+  | json ->
+    (match Tool_output.artifact_result_envelope_of_json json with
+     | Tool_output.Decoded_artifact_result_envelope { structured_content; _ } ->
+       Yojson.Safe.to_string structured_content
+     | Tool_output.Not_artifact_result_envelope
+     | Tool_output.Invalid_artifact_result_envelope _ -> output_text)
+  | exception Yojson.Json_error _ -> output_text
+;;
+
 let answer ~tool_name ~output_text =
   match resolve tool_name with
   | Outside_keeper_descriptors -> None
   | Keeper_handler handler ->
     (match reader handler with
      | Whole_output -> None
-     | Reads_answer read -> read output_text)
+     | Reads_answer read -> read (producer_output output_text))
 ;;
 
 (* Only the bridge's closed manifest envelope may expose an original answer.

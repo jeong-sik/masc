@@ -119,6 +119,7 @@ let run config =
   let report =
     List.fold_left
       (fun report name ->
+         Startup_progress.beat ();
          let outcome = keeper config name in
          let failed = report_outcome name outcome in
          { examined = report.examined + 1

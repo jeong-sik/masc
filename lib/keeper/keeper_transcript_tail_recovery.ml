@@ -176,6 +176,7 @@ let recover_open_tails config =
   let report =
     List.fold_left
       (fun report name ->
+         Startup_progress.beat ();
          let outcome = recover_keeper config name in
          log_outcome name outcome;
          accumulate report (name, outcome))

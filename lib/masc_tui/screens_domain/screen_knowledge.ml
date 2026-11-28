@@ -1772,7 +1772,7 @@ let render_wiki ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~b
             | None -> []
         in
         Some
-          ( Wire_knowledge.wiki_lint_tally rep.counts
+          ( Wire_knowledge.wiki_lint_tally rep.counts ~findings:rep.findings
           , rep.duplicate_title_candidates
           , orphans )
     | None -> (
@@ -1780,6 +1780,7 @@ let render_wiki ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~b
         | Some idx ->
             Some
               ( Wire_knowledge.wiki_lint_tally idx.lint.counts
+                  ~findings:idx.lint.findings
               , idx.lint.duplicate_title_candidates
               , idx.lint.orphans )
         | None -> None)
@@ -1800,16 +1801,22 @@ let render_wiki ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~b
             (Say.resolve lang
                (Say.make ~ko:"wiki-lint 정상" ~en:"wiki-lint clean"))
         else
-          Printf.sprintf "%s lint: %s %d · %s %d · %s %d · %s %d"
+          (* The hint gets a third of the bar, so a zero count is left out. *)
+          let part ~ko ~en n =
+            if n > 0 then
+              Some (Printf.sprintf "%s %d" (Say.resolve lang (Say.make ~ko ~en)) n)
+            else None
+          in
+          Printf.sprintf "%s lint: %s"
             (Glyph.to_utf8 Glyph.Warning_triangle)
-            (Say.resolve lang (Say.make ~ko:"중복" ~en:"dup"))
-            duplicates
-            (Say.resolve lang (Say.make ~ko:"고아" ~en:"orphan"))
-            orphans
-            (Say.resolve lang (Say.make ~ko:"깨짐" ~en:"broken"))
-            broken
-            (Say.resolve lang (Say.make ~ko:"그 밖" ~en:"other"))
-            other
+            (String.concat " · "
+               (List.filter_map Fun.id
+                  [
+                    part ~ko:"중복" ~en:"dup" duplicates;
+                    part ~ko:"고아" ~en:"orphan" orphans;
+                    part ~ko:"깨짐" ~en:"broken" broken;
+                    part ~ko:"그 밖" ~en:"other" other;
+                  ]))
   in
   let mode_pills =
     [

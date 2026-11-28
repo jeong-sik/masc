@@ -345,7 +345,8 @@ type wiki_lint_counts = {
 
 (** The header's lint numbers. [broken] is what a reader cannot follow: a
     link or an embed to nothing, and a page that does not read. [other] is
-    every other finding but the orphans and the duplicate titles. *)
+    every other finding but the orphans and the duplicate titles, including
+    findings of a kind this build has no count for. *)
 type wiki_lint_tally = {
   duplicates : int;
   orphans : int;
@@ -353,7 +354,8 @@ type wiki_lint_tally = {
   other : int;
 }
 
-val wiki_lint_tally : wiki_lint_counts -> wiki_lint_tally
+val wiki_lint_tally :
+  wiki_lint_counts -> findings:wiki_lint_finding list -> wiki_lint_tally
 
 type wiki_index_lint = {
   total_findings : int;

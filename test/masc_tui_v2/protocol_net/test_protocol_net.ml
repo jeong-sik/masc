@@ -1131,7 +1131,8 @@ let test_wire_knowledge () =
     | _ -> Alcotest.fail "expected int offset")
 
 (* The server's embed lint kinds reach the TUI by name, and the header counts
-   an embed to nothing as broken. *)
+   an embed to nothing as broken and a kind this build does not know as
+   other. *)
 let test_wiki_lint_embed_kinds_and_tally () =
   let lint_json =
     parse_json
@@ -1149,7 +1150,8 @@ let test_wiki_lint_embed_kinds_and_tally () =
           { "kind": "broken_wiki_embed", "subject": "p", "page": "p", "line": 4, "target": "wiki:gone" },
           { "kind": "broken_artifact_embed", "subject": "p", "page": "p", "line": 5, "target": "artifact:gone" },
           { "kind": "invalid_embed", "subject": "p", "page": "p", "line": 6, "target": "media:xyz" },
-          { "kind": "unsupported_embed", "subject": "p", "page": "p", "line": 7, "target": "x:y" }
+          { "kind": "unsupported_embed", "subject": "p", "page": "p", "line": 7, "target": "x:y" },
+          { "kind": "kind_from_a_newer_server", "subject": "p", "page": "p" }
         ]
       }|}
   in
@@ -1166,12 +1168,13 @@ let test_wiki_lint_embed_kinds_and_tally () =
            Broken_artifact_embed;
            Invalid_embed;
            Unsupported_embed;
+           Other_lint "kind_from_a_newer_server";
          ]);
   Alcotest.(check int) "broken media embed count" 2 lint.counts.broken_media_embed;
-  let tally = Wire_knowledge.wiki_lint_tally lint.counts in
+  let tally = Wire_knowledge.wiki_lint_tally lint.counts ~findings:lint.findings in
   Alcotest.(check (list int))
-    "duplicates, orphans, broken (link and embeds), other"
-    [ 1; 1; 5; 1 ]
+    "duplicates, orphans, broken (link and embeds), other (with the unknown kind)"
+    [ 1; 1; 5; 2 ]
     [ tally.duplicates; tally.orphans; tally.broken; tally.other ]
 
 (* 5. Wire_runtime: $0 Sub/$0 Exhausted/? Unreported, real paths, nested probe, browser-lane, clients *)

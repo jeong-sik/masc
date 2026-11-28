@@ -9613,6 +9613,23 @@ let test_wiki_index_reply_requests_selected_page () =
   Alcotest.(check bool) "the answer takes the loading slot's place" true
     (Observed.is_value
        (Knowledge_store.wiki_page_for ~slug:"guide" answered.knowledge));
+  let refused, _ =
+    Update.step ~now:t1 asked
+      (Msg.Http_reply
+         {
+           epoch = asked.epoch;
+           reply =
+             Msg.Reply_wiki_page
+               {
+                 page = "guide";
+                 result =
+                   Error (Msg.Http_error { status = 503; body = ""; api_error = None });
+               };
+         })
+  in
+  Alcotest.(check bool) "a failed read leaves the loading slot failed" true
+    (Observed.is_failed
+       (Knowledge_store.wiki_page_for ~slug:"guide" refused.knowledge));
   let page_loaded =
     {
       on_wiki_tab with

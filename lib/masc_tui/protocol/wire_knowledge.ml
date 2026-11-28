@@ -1019,6 +1019,16 @@ type wiki_lint_tally = {
   other : int;
 }
 
+(* A kind no count key reads: its findings are counted from the list, since
+   the counts object's key for it is dropped. *)
+let has_no_count = function
+  | Broken_link | Unsupported_link | Broken_media_embed | Broken_wiki_embed
+  | Broken_artifact_embed | Invalid_embed | Unsupported_embed | Orphan_page
+  | Orphan_unconfirmed | Missing_sources | Hearsay_only | Unreadable_page
+  | Revision_log_gap | Revision_log_hole ->
+      false
+  | Duplicate_title_candidate | Other_lint _ -> true
+
 (* Warning 9 is on here: a count added to the record and left out of this
    pattern stops the build until it goes in one of the four. *)
 let[@warning "+9"] wiki_lint_tally
@@ -1038,7 +1048,13 @@ let[@warning "+9"] wiki_lint_tally
       revision_log_gap;
       revision_log_hole;
       duplicate_title_candidates;
-    } =
+    } ~findings =
+  let uncounted =
+    List.length
+      (List.filter
+         (fun (finding : wiki_lint_finding) -> has_no_count finding.kind)
+         findings)
+  in
   {
     duplicates = duplicate_title_candidates;
     orphans = orphan;
@@ -1047,7 +1063,8 @@ let[@warning "+9"] wiki_lint_tally
       + broken_artifact_embed + unreadable_page;
     other =
       unsupported_link + invalid_embed + unsupported_embed + orphan_unconfirmed
-      + missing_sources + hearsay_only + revision_log_gap + revision_log_hole;
+      + missing_sources + hearsay_only + revision_log_gap + revision_log_hole
+      + uncounted;
   }
 
 type wiki_index_lint = {

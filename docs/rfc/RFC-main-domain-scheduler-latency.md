@@ -236,6 +236,7 @@ fiber 12개가 "파일 읽기 → JSON 파싱 → 한 줄 append → fsync" 를 
 - **race**: ThreadSanitizer switch(`ocaml-option-tsan`, OCaml 5.5.2)로 그 단계가 건드리는 시험과 서버 기동 smoke 를 돌리고, 메인 도메인 스레드와 host 스레드가 짝인 보고를 0 으로 만든다. 단계 전후의 보고를 PR 본문에 싣는다.
 - **벤치**: 위 벤치를 저장소에 싣고(S1 PR) 같은 표를 다시 낸다.
 - **라이브**: 배포 뒤 같은 `sample` 분류에서 도메인 락 대기 비율과, runtime events 에서 도메인 0 이 내보내는 systhread 작업 수를 다시 잰다. load 를 함께 적는다.
+- **STW 에 늦게 닿는 domain**: 어느 domain 이 stop-the-world 요청에 몇 ms 늦게 답하는지 단계 전후에 잰다. S1·S2·S2b 는 blocking 작업을 `Systhread_host` 의 domain 하나로 모으고, 그 domain 의 스레드 수에는 상한이 없다(#46816 갈래 3).
 
 #### 하지 않는 것
 

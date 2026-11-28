@@ -726,7 +726,10 @@ let test_native_fusion_report_is_readable_after_detach () =
             id (if operator_authority then "operator_authority=true\n" else "")
             (Filename.concat addons (id ^ "/lane.toml")) sources);
           path in
-        let producer_path = declaration "fusion-results" (Printf.sprintf
+        (* The shipped packages live in the source tree, outside this
+           workspace, so the producer carries the operator's line as well
+           (RFC lane-declaration-operator-authority 6.3). *)
+        let producer_path = declaration ~operator_authority:true "fusion-results" (Printf.sprintf
           {|[{source_id="fusion",kind="fusion_run",run_id=%S}]|} run_id) in
         (* The report and its reader see the producer's Keeper only through an
            upstream output, so only the operator's line attaches them (RFC

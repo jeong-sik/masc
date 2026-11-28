@@ -1613,47 +1613,52 @@ let discord_post_attachments ~base_path files =
     in
     Ok (Some (Channel_gate_discord_state.Voice clip))
 
-(* Before approval: every named attachment must be one this Keeper may read,
-   and it is promoted to durable. An ephemeral attachment can otherwise be
-   evicted by the Keeper's own later files while the post waits for an
-   operator, and the approved replay would find nothing to upload. Durable
-   bytes stay alive while the pending gate record names them; attachment GC
-   reads canonical ids anywhere in that tree. The bytes are read once, after
-   approval. *)
-let discord_attachments_held ~base_path ~keeper attachment_ids =
-  let store = Attachment_store.create ~base_path in
-  let store_error id error =
-    Printf.sprintf "attachment %s: %s" id
-      (Attachment_store.get_error_to_string error)
-  in
-  let not_held id =
-    Printf.sprintf
-      "attachment %s is not in this keeper's attachments (absent, or another \
-       keeper's ephemeral file)"
-      id
-  in
-  List.fold_left
-    (fun acc id ->
-       Result.bind acc (fun () ->
-         match Attachment_store.can_keeper_read store ~keeper ~id_or_sha256:id with
-         | Error error -> Error (store_error id error)
-         | Ok false -> Error (not_held id)
-         | Ok true ->
-           (match Attachment_store.promote_to_durable store ~id with
-            | Ok (Some _) -> Ok ()
-            | Ok None -> Error (not_held id)
-            | Error error -> Error (store_error id error))))
-    (Ok ()) attachment_ids
+let attachment_store_error id error =
+  Printf.sprintf "attachment %s: %s" id (Attachment_store.get_error_to_string error)
 
-let discord_files_held ~base_path ~keeper = function
+let attachment_not_held id =
+  Printf.sprintf
+    "attachment %s is not in this keeper's attachments (absent, or another \
+     keeper's ephemeral file)"
+    id
+
+let attachment_readable store ~keeper id =
+  match Attachment_store.can_keeper_read store ~keeper ~id_or_sha256:id with
+  | Error error -> Error (attachment_store_error id error)
+  | Ok false -> Error (attachment_not_held id)
+  | Ok true -> Ok ()
+
+let attachment_promoted store id =
+  match Attachment_store.promote_to_durable store ~id with
+  | Ok (Some _) -> Ok ()
+  | Ok None -> Error (attachment_not_held id)
+  | Error error -> Error (attachment_store_error id error)
+
+let each_attachment check ids =
+  List.fold_left (fun acc id -> Result.bind acc (fun () -> check id)) (Ok ()) ids
+
+(* Before approval: every named attachment must be one this Keeper may read,
+   and a voice message's must be sound MASC can transcode. Only a post that
+   passes all of that promotes its files to durable, so a refused post leaves
+   them as they were. An ephemeral attachment can otherwise be evicted by the
+   Keeper's own later files while the post waits for an operator, and the
+   approved replay would find nothing to send. Durable bytes stay alive while
+   the pending gate record names them; attachment GC reads canonical ids
+   anywhere in that tree. A file post's bytes are read once, after approval. *)
+let discord_files_held ~base_path ~keeper files =
+  let store = Attachment_store.create ~base_path in
+  let open Result.Syntax in
+  match files with
   | Keeper_surface_post.Text_only -> Ok ()
   | Keeper_surface_post.Files (first, rest) ->
-    discord_attachments_held ~base_path ~keeper (first :: rest)
+    let ids = first :: rest in
+    let* () = each_attachment (attachment_readable store ~keeper) ids in
+    each_attachment (attachment_promoted store) ids
   | Keeper_surface_post.Voice_message id ->
-    Result.bind (discord_attachments_held ~base_path ~keeper [ id ]) (fun () ->
-      let store = Attachment_store.create ~base_path in
-      Result.bind (stored_bytes store id) (fun bytes ->
-        Result.map ignore (voice_source_format id bytes)))
+    let* () = attachment_readable store ~keeper id in
+    let* bytes = stored_bytes store id in
+    let* (_ : Discord_voice_clip.source_format) = voice_source_format id bytes in
+    attachment_promoted store id
 
 let replay_connector_post_with_senders
       ~config

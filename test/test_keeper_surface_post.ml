@@ -20,6 +20,9 @@ let tiny_png =
 
 let tiny_midi = "MThd\x00\x00\x00\x06\x00\x00\x00\x01\x00\x60"
 
+(* A RIFF/WAVE header, which is what the attachment store sniffs as WAV. *)
+let tiny_wav = "RIFF\x24\x00\x00\x00WAVEfmt "
+
 let target_pp fmt = function
   | SP.To_native route -> Format.fprintf fmt "To_native{%s}" (Yojson.Safe.to_string (Masc.Keeper_native_origin_reply.to_yojson route))
   | SP.To_dashboard -> Format.fprintf fmt "To_dashboard"
@@ -793,9 +796,10 @@ let test_discord_files_args_decode () =
      | Ok (SP.Text_only | SP.Voice_message _) | Error _ -> false);
   refused "an eleventh file" (decode [ distinct 11 ])
 
-(* Before approval a post may name only files its Keeper may read, and each
-   becomes durable, so the Keeper's later ephemeral files cannot evict it while
-   the post waits for an operator. *)
+(* Before approval a post may name only files its Keeper may read, and a voice
+   message only sound. A post that passes makes its files durable, so the
+   Keeper's later ephemeral files cannot evict them while the post waits for
+   an operator; a refused post leaves them ephemeral. *)
 let test_discord_attachments_held_before_approval () =
   let base_path = Filename.temp_dir "surface-post-held-" "" in
   Eio_main.run @@ fun env ->
@@ -804,16 +808,17 @@ let test_discord_attachments_held_before_approval () =
     (fun () ->
        if not (Fs_compat.has_fs ()) then Fs_compat.set_fs (Eio.Stdenv.fs env);
        let store = Attachment_store.create ~base_path in
-       let ephemeral_id =
+       let alice_file ~mime ~filename bytes =
          match
-           Attachment_store.put ~declared_mime:"image/png" ~filename:"cat.png"
+           Attachment_store.put ~declared_mime:mime ~filename
              ~origin:Attachment_store.Model_generated ~created_by:"alice"
              ~retention:(Attachment_store.Ephemeral { keeper = "alice" })
-             store ~bytes:tiny_png
+             store ~bytes
          with
          | Ok (meta : Attachment_store.meta) -> meta.id
          | Error error -> fail (Attachment_store.put_error_to_string error)
        in
+       let ephemeral_id = alice_file ~mime:"image/png" ~filename:"cat.png" tiny_png in
        let held keeper ids =
          let files =
            match ids with
@@ -823,40 +828,46 @@ let test_discord_attachments_held_before_approval () =
          Masc.Keeper_tool_in_process_runtime.For_testing.discord_files_held
            ~base_path ~keeper files
        in
-       let retention () =
-         match Attachment_store.get_meta store ~id:ephemeral_id with
+       let retention_of id =
+         match Attachment_store.get_meta store ~id with
          | Ok (Some (meta : Attachment_store.meta)) -> meta.retention
          | Ok None -> fail "the attachment vanished"
          | Error error -> fail (Attachment_store.get_error_to_string error)
        in
+       let retention () = retention_of ephemeral_id in
+       let ephemeral = Attachment_store.Ephemeral { keeper = "alice" } in
        check bool "another keeper's ephemeral file is refused" true
          (Result.is_error (held "bob" [ ephemeral_id ]));
        check bool "a refused check leaves the file ephemeral" true
          (retention () = Attachment_store.Ephemeral { keeper = "alice" });
        check bool "an absent file is refused" true
          (Result.is_error (held "alice" [ "att_" ^ String.make 64 'f' ]));
+       check bool "a post with one absent file is refused" true
+         (Result.is_error (held "alice" [ ephemeral_id; "att_" ^ String.make 64 'f' ]));
+       check bool "its readable file stays ephemeral" true (retention () = ephemeral);
        (match held "alice" [ ephemeral_id ] with
         | Ok () -> ()
         | Error detail -> fail detail);
        check bool "the owner's file is now durable" true
          (retention () = Attachment_store.Durable);
        (* A voice message must be sound MASC can transcode. *)
-       let midi_id =
-         match
-           Attachment_store.put ~declared_mime:"audio/midi" ~filename:"riff.mid"
-             ~origin:Attachment_store.Model_generated ~created_by:"alice"
-             ~retention:Attachment_store.Durable store ~bytes:tiny_midi
-         with
-         | Ok (meta : Attachment_store.meta) -> meta.id
-         | Error error -> fail (Attachment_store.put_error_to_string error)
-       in
        let voice id =
          Masc.Keeper_tool_in_process_runtime.For_testing.discord_files_held
            ~base_path ~keeper:"alice" (SP.Voice_message id)
        in
+       let midi_id = alice_file ~mime:"audio/midi" ~filename:"riff.mid" tiny_midi in
        check bool "a MIDI voice message is refused" true (Result.is_error (voice midi_id));
-       check bool "an image voice message is refused" true
-         (Result.is_error (voice ephemeral_id)))
+       check bool "the refused MIDI file stays ephemeral" true
+         (retention_of midi_id = ephemeral);
+       let png_id = alice_file ~mime:"image/png" ~filename:"dog.png" (tiny_png ^ "dog") in
+       check bool "an image voice message is refused" true (Result.is_error (voice png_id));
+       check bool "the refused image stays ephemeral" true (retention_of png_id = ephemeral);
+       let wav_id = alice_file ~mime:"audio/wav" ~filename:"hello.wav" tiny_wav in
+       (match voice wav_id with
+        | Ok () -> ()
+        | Error detail -> fail detail);
+       check bool "the voice message's sound is now durable" true
+         (retention_of wav_id = Attachment_store.Durable))
 
 (* The approved input is what the replay sends after approval: the files a
    post names survive it in order, a voice message stays a voice message, and

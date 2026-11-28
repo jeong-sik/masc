@@ -38,17 +38,16 @@ let make_http_config ~address ~port : Http.config =
   Unix.putenv
     Env_config_core.mcp_url_env_key
     (base_url ^ "/mcp");
-  (* A variable with a value stays as it is. Otherwise the variable is written,
-     so every reader of it, in this process and in a child, sees one base URL:
-     transport.http_base_url of runtime.toml, or the address the listener
-     binds. Writing the bound address when the file names one would hide the
-     file, since the variable wins over it. *)
-  (match Sys.getenv_opt Env_config_core.http_base_url_env_key with
-   | Some existing when String.trim existing <> "" -> ()
-   | Some _ | None ->
-     Unix.putenv
-       Env_config_core.http_base_url_env_key
-       (Option.value (Env_config_core.masc_http_base_url_opt ()) ~default:base_url));
+  (* The variable is written only when no base URL is configured: the
+     address the listener binds, which the trust policy reads back as the
+     explicit identity. A base URL of the operator stays where the operator
+     put it. The variable keeps its own; transport.http_base_url stays in the
+     file, where the getter reads it. Copying the file's value into the
+     variable would hide the file (the variable wins over it), report it to
+     the settings panel as the environment's, and hand it to every child. *)
+  (match Env_config_core.masc_http_base_url_opt () with
+   | Some (_ : string) -> ()
+   | None -> Unix.putenv Env_config_core.http_base_url_env_key base_url);
   config
 ;;
 

@@ -49,8 +49,9 @@ https_port = 8938
 # tls_key_file = "/path/to/server.key"
 # Public http(s) origin people open for this workspace. Login redirects of
 # config.json are compared with it and invitation links are built on it.
-# MASC_HTTP_BASE_URL in the environment comes before it. Unset, the server
-# uses the address it binds.
+# It must be an origin: no user, path, query or fragment. MASC_HTTP_BASE_URL
+# in the environment comes before it. Unset, the server uses the address it
+# binds.
 # http_base_url = "https://masc.example.com"
 
 [skills]

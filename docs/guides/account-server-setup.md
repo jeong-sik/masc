@@ -134,9 +134,11 @@ masc start --base-path <base> --port <port>
 ```
 
 - The server compares the redirect of each login client with
-  `http_base_url`, builds invitation links on it, and leaves it in
-  `MASC_HTTP_BASE_URL` of its own process. Without it the server uses the
-  address it binds and compares nothing.
+  `http_base_url` and builds invitation links on it. Without it the server
+  uses the address it binds and compares nothing.
+- The file stops the boot, and `masc auth`, when `http_base_url` is not an
+  http(s) origin with a host and no user, path, query or fragment. An empty
+  value is refused too: remove the key to use the address the server binds.
 - `MASC_HTTP_BASE_URL` in the environment comes before the file. A shell
   that exports it for another workspace on the same host, such as a
   single-user server, hands the account server that address. The boot then

@@ -93,7 +93,6 @@ let with_gateway ?(runtime = false) ?resources ?(zero_window = false) run =
                 let router = Http.Router.create ()
                   |> Server_routes_http_routes_artifacts.add_routes
                   |> Server_routes_http_routes_published_artifacts.add_routes
-                  |> Server_routes_http_routes_artifact_app_data.add_routes
                   |> Server_routes_http_routes_artifact_drafts.add_routes
                   |> Server_routes_http_routes_artifact_draft_live.add_routes
                   |> Server_routes_http_routes_verification.add_routes
@@ -204,7 +203,6 @@ let publication_body ?id ?revision content = body
 let list = "/api/v1/published-artifacts"
 let checks = "/api/v1/published-artifact-checks"
 let shares = "/api/v1/published-artifact-shares"
-let app_data = "/api/v1/artifact-app-data"
 let drafts = "/api/v1/artifact-drafts"
 let checkpoints = "/api/v1/artifact-draft-checkpoints"
 
@@ -761,64 +759,6 @@ let test_access_and_preconditions () = with_gateway (fun ~base_path ~worker ~pla
   check string "oversize request did not mutate H1 readback" large_source (field_string "content" (json h1));
   check string "oversize request did not mutate H2 readback" large_source (field_string "content" (json h2)))
 
-let test_app_input_transport_parity () = with_gateway (fun ~base_path ~worker ~player ~admin gateway ->
-  let expected = match Server_workspace_precondition.served_workspace () with
-    | Some value -> value | None -> fail "workspace unavailable" in
-  let h2_headers = ["x-masc-expected-base-path", expected.base_path; "x-masc-expected-masc-root", expected.masc_root] in
-  let foreign_headers = ["x-masc-expected-base-path", "/foreign-workspace"; "x-masc-expected-masc-root", expected.masc_root] in
-  let same_origin = "http://localhost:8935" in
-  let origin_headers = ["origin", same_origin] in
-  let html = body ["title", `String "H2 HTML app"; "summary", `String "input fixture";
-    "format", `String "html"; "content", `String "<form><input></form>"] in
-  let created_app = request H2 gateway ~token:admin ~meth:`POST ~body:html list in
-  check_status "create HTML app" 201 created_app;
-  let app_id = member "artifact" (json created_app) |> field_string "id" in
-  let app_path = app_data ^ "/" ^ app_id ^ "?revision=1" in
-  List.iter (fun (label, credential, expected) ->
-    pair_status ("app input read " ^ label) expected (both gateway ?token:credential app_path);
-    if expected <> 200 then pair_status ("app input write " ^ label) expected
-      (both gateway ?token:credential ~meth:`POST ~body:"{}" app_data))
-    ["Admin", Some admin, 200; "Worker", Some worker, 403; "Player", Some player, 403;
-     "anonymous", None, 401; "invalid", Some "invalid", 401];
-  let h1, h2 = both gateway ~token:admin app_path in
-  check_json "same empty app input over both transports" (json h1) (json h2);
-  check int "new app input version" 0 (field_int "version" (json h2));
-  let input_target = `Assoc ["artifact_id", `String app_id; "revision", `Int 1] in
-  let input_body = body ["target", input_target; "id", `String "019f0000-0000-7000-8000-000000000001";
-    "expected_version", `Int 0; "data", `Assoc ["answer", `String "alice"]] in
-  let written = request H2 gateway ~token:admin ~headers:h2_headers ~meth:`POST ~body:input_body app_data in
-  check_status "Admin writes app input on H2" 200 written;
-  check string "token owns app input" "admin" (field_string "actor" (json written));
-  check int "app input advances once" 1 (field_int "version" (json written));
-  let replay = request H1 gateway ~token:admin ~headers:origin_headers ~meth:`POST ~body:input_body app_data in
-  check_status "same app request replays on H1" 200 replay;
-  check (option string) "H1 delayed app input retains admitted Origin" (Some same_origin)
-    (header "access-control-allow-origin" replay);
-  check_json "idempotent app receipt is transport independent" (json written) (json replay);
-  let h1, h2 = both gateway ~token:admin app_path in
-  check_json "same stored app data over H1 and H2" (json h1) (json h2);
-  check string "stored input is preserved" "alice" (member "data" (json h2) |> field_string "answer");
-  let other_admin = token base_path ~actor:"second-admin" ~role:Masc_domain.Admin in
-  let other = both gateway ~token:other_admin app_path in
-  pair_status "another actor can read only its own input" 200 other;
-  let _, other_h2 = other in
-  check int "another actor starts with an empty input" 0 (field_int "version" (json other_h2));
-  check string "another actor's identity is retained" "second-admin" (field_string "actor" (json other_h2));
-  let input_next = body ["target", input_target; "id", `String "019f0000-0000-7000-8000-000000000002";
-    "expected_version", `Int 1; "data", `Assoc ["answer", `String "wrong workspace"]] in
-  pair_status "foreign workspace rejects app input write" 409
-    (both gateway ~token:admin ~headers:foreign_headers ~meth:`POST ~body:input_next app_data);
-  let h1, h2 = both gateway ~token:admin app_path in
-  List.iter (fun reply -> check string "refused app input write left data unchanged" "alice"
-    (member "data" (json reply) |> field_string "answer")) [h1; h2];
-  let encode = Uri.pct_encode ~component:`Query_value in
-  let query = "&expected_base_path=" ^ encode expected.base_path ^ "&expected_masc_root=" ^ encode expected.masc_root in
-  let app_bound_h1, app_bound_h2 = both gateway ~token:admin (app_path ^ query) in
-  List.iter (fun reply ->
-    check_status "bound app read" 200 reply;
-    check (option string) "bound app read admission" (Some "matched-v1") (header "x-masc-workspace-read" reply))
-    [app_bound_h1; app_bound_h2])
-
 let reset_frame stream_id =
   let frame = Bytes.of_string "\000\000\004\003\000\000\000\000\000\000\000\000\008" in
   Bytes.set_int32_be frame 5 (Int32.of_int stream_id);
@@ -1140,7 +1080,6 @@ let () = if Filename.basename Sys.argv.(0) = "masc-artifact-document" then run_s
     else [], Sys.argv in
   run ~argv "H2 artifact gateway"
     ["access and workspace", ["H1/H2 parity, publication, body admission", `Quick, test_access_and_preconditions;
-       "app input H1/H2 parity and actor/workspace ownership", `Quick, test_app_input_transport_parity;
        "Schedule reads bind workspaces on H1 and H2", `Quick, test_schedule_workspace_read_h1_h2;
        "Goal planning binds workspace reads on H1 and H2", `Quick, test_goal_planning_workspace_read_h1_h2;
        "Goal Candle is admin and workspace bound with fresh ledger reads", `Quick, test_goal_candle_access_and_fresh_read;

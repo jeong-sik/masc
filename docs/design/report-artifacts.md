@@ -63,10 +63,9 @@ existing publication endpoints.
 
 ## HTTP and tool contracts
 
-The artifact catalog, shared-draft and application-input routes are registered
-on both the HTTP/1 router and the h2c gateway. Both apply the same workspace,
-token and allowed-origin checks. Application inputs remain private to the
-authenticated actor and require `CanAdmin`.
+The artifact catalog and shared-draft routes are registered on both the HTTP/1
+router and the h2c gateway. Both apply the same workspace, token and
+allowed-origin checks.
 
 The h2c listener reserves its configured shared response capacity for the
 encoded response and an in-flight chunk. If capacity is unavailable, a normal

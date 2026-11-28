@@ -36,7 +36,6 @@ let make_routes_with_transport ~port:_ ~host:_ ~sw ~transport_sw ~clock =
   |> Server_routes_http_routes_attachments.add_routes
   |> Server_routes_http_routes_published_artifacts.add_routes
   |> Server_routes_http_routes_artifact_drafts.add_routes
-  |> Server_routes_http_routes_artifact_app_data.add_routes
   |> Server_routes_http_routes_artifact_draft_live.add_routes
   |> Server_routes_http_routes_voice.add_routes
   |> Server_routes_http_routes_play_screen.add_routes

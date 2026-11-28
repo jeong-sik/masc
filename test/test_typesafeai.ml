@@ -410,7 +410,6 @@ let policy
       ?(context_review = false)
       ?(skill_applicability = false)
       ?(workspace_memory_selection_enabled = false)
-      ?(memory_recall = Runtime_schema.Memory_recall_off)
       ?(excluded_keepers = [])
       ()
   : Runtime_schema.typesafeai
@@ -422,7 +421,6 @@ let policy
   ; context_review
   ; skill_applicability
   ; workspace_memory_selection_enabled
-  ; memory_recall
   ; excluded_keepers
   }
 ;;

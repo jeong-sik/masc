@@ -718,9 +718,6 @@ let typesafeai_keys =
   ; "context_review"
   ; "skill_applicability"
   ; "workspace_memory_selection_enabled"
-  ; "memory_recall"
-  ; "memory_recall_scope"
-  ; "memory_recall_keepers"
   ; "excluded_keepers"
   ]
 ;;
@@ -732,15 +729,16 @@ let result_errors = function
   | Error errors -> errors
 ;;
 
-(* A keeper name in [excluded_keepers] or [memory_recall_keepers]: a keeper is
-   named by its directory name, so an empty name or one with whitespace names
-   nothing and would exclude nothing, or recall for nobody, while looking as
-   if it did. Whether the name is a keeper of this base path is checked at
-   boot, where the keepers are known. [None] is a key that is not there. *)
-let parse_typesafeai_keeper_names ~(path : string) ~(key : string) (tbl : Otoml.t) =
+(* A keeper name in [excluded_keepers]: a keeper is named by its directory
+   name, so an empty name or one with whitespace names nothing and would
+   exclude nothing while looking as if it did. Whether the name is a keeper of
+   this base path is checked at boot, where the keepers are known. A key that
+   is not there excludes nobody. *)
+let parse_typesafeai_excluded_keepers ~(path : string) (tbl : Otoml.t) =
+  let key = "excluded_keepers" in
   match typed_find "an array of strings" path tbl key (Otoml.get_array Otoml.get_string) with
-  | Error _ as error -> error
-  | Ok None -> Ok None
+  | Error errors -> Error errors
+  | Ok None -> Ok []
   | Ok (Some names) ->
     let bad =
       List.concat_map
@@ -753,95 +751,7 @@ let parse_typesafeai_keeper_names ~(path : string) ~(key : string) (tbl : Otoml.
            else [])
         names
     in
-    if bad = [] then Ok (Some names) else Error bad
-;;
-
-let parse_typesafeai_excluded_keepers ~(path : string) (tbl : Otoml.t) =
-  Result.map
-    (Option.value ~default:[])
-    (parse_typesafeai_keeper_names ~path ~key:"excluded_keepers" tbl)
-;;
-
-(* What the three memory recall keys declare, before the switch decides
-   anything: the switch, and the scope the scope keys name whether the switch
-   is on or off. A file that switched recall off by hand keeps its list here,
-   which {!Runtime_schema.memory_recall} cannot say (off has no scope). *)
-type memory_recall_declaration =
-  { switch : bool
-  ; scope : Runtime_schema.memory_recall_scope option
-  }
-
-let memory_recall_scope_key path = path ^ ".memory_recall_scope"
-
-(* [memory_recall] is the switch and [memory_recall_scope] says which keepers:
-   "all", or "listed" with the names in [memory_recall_keepers]. A "listed"
-   scope with no names is refused, and so is a list next to "all" or to no
-   scope. No way of leaving a key out or writing it empty reaches every
-   keeper, and a list is never ignored while it looks like a limit. The scope
-   keys are read whatever the switch says: a misspelt scope is refused while
-   the switch is off. A switch that is on without a scope is answered here as
-   [{ switch = true; scope = None }]; refusing it is the decision of
-   [parse_typesafeai_memory_recall]. *)
-let parse_typesafeai_memory_recall_declaration ~(path : string) (tbl : Otoml.t)
-  : (memory_recall_declaration, parse_error list) result
-  =
-  let scope_key = memory_recall_scope_key path in
-  let keepers_key = path ^ ".memory_recall_keepers" in
-  let keepers_only_listed =
-    error
-      keepers_key
-      "needs memory_recall_scope = \"listed\"; remove the list or set that scope"
-  in
-  let switch =
-    typed_find_or "a boolean" path tbl "memory_recall" Otoml.get_boolean ~default:false
-  in
-  let scope =
-    match
-      ( typed_find "a string" path tbl "memory_recall_scope" Otoml.get_string
-      , parse_typesafeai_keeper_names ~path ~key:"memory_recall_keepers" tbl )
-    with
-    | Error scope_errors, Error keeper_errors -> Error (scope_errors @ keeper_errors)
-    | Error scope_errors, Ok _ -> Error scope_errors
-    | Ok _, Error keeper_errors -> Error keeper_errors
-    | Ok None, Ok None -> Ok None
-    | Ok None, Ok (Some _) | Ok (Some "all"), Ok (Some _) -> Error keepers_only_listed
-    | Ok (Some "all"), Ok None -> Ok (Some Runtime_schema.All_keepers)
-    | Ok (Some "listed"), Ok (Some (first :: rest)) ->
-      Ok (Some (Runtime_schema.Listed_keepers (first, rest)))
-    | Ok (Some "listed"), Ok (None | Some []) ->
-      Error
-        (error
-           keepers_key
-           "memory_recall_scope = \"listed\" needs at least one keeper name; an empty list does \
-            not mean every keeper")
-    | Ok (Some other), Ok _ ->
-      Error
-        (error
-           scope_key
-           (Printf.sprintf "must be \"all\" or \"listed\", got %S" other))
-  in
-  match switch, scope with
-  | Error switch_errors, Error scope_errors -> Error (switch_errors @ scope_errors)
-  | Error switch_errors, Ok _ -> Error switch_errors
-  | Ok _, Error scope_errors -> Error scope_errors
-  | Ok switch, Ok scope -> Ok { switch; scope }
-;;
-
-(* The switch and the scope are one value for everyone who asks whether a
-   keeper is covered: no scope is read from a switch that is off. *)
-let parse_typesafeai_memory_recall ~(path : string) (tbl : Otoml.t)
-  : (Runtime_schema.memory_recall, parse_error list) result
-  =
-  match parse_typesafeai_memory_recall_declaration ~path tbl with
-  | Error errors -> Error errors
-  | Ok { switch = false; scope = _ } -> Ok Runtime_schema.Memory_recall_off
-  | Ok { switch = true; scope = Some scope } -> Ok (Runtime_schema.Memory_recall_on scope)
-  | Ok { switch = true; scope = None } ->
-    Error
-      (error
-         (memory_recall_scope_key path)
-         "memory_recall = true needs memory_recall_scope: \"all\" or \"listed\" with \
-          memory_recall_keepers")
+    if bad = [] then Ok names else Error bad
 ;;
 
 (* One entry of [destinations]: the table naming where to post, which model
@@ -990,7 +900,6 @@ let parse_typesafeai (toml : Otoml.t)
       typed_find_or "a boolean" path tbl "workspace_memory_selection_enabled" Otoml.get_boolean
         ~default:d.workspace_memory_selection_enabled
     in
-    let memory_recall = parse_typesafeai_memory_recall ~path tbl in
     (match
        ( unknown
        , enabled
@@ -1000,7 +909,6 @@ let parse_typesafeai (toml : Otoml.t)
        , context_review
        , skill_applicability
        , workspace_memory_selection_enabled
-       , memory_recall
        , excluded_keepers )
      with
      | ( []
@@ -1011,7 +919,6 @@ let parse_typesafeai (toml : Otoml.t)
        , Ok context_review
        , Ok skill_applicability
        , Ok workspace_memory_selection_enabled
-       , Ok memory_recall
        , Ok excluded_keepers ) ->
        Ok
          { Runtime_schema.lane_enabled
@@ -1021,11 +928,9 @@ let parse_typesafeai (toml : Otoml.t)
          ; context_review
          ; skill_applicability
          ; workspace_memory_selection_enabled
-         ; memory_recall
          ; excluded_keepers
          }
      | ( ([] | _ :: _)
-       , (Ok _ | Error _)
        , (Ok _ | Error _)
        , (Ok _ | Error _)
        , (Ok _ | Error _)
@@ -1043,7 +948,6 @@ let parse_typesafeai (toml : Otoml.t)
           @ result_errors context_review
           @ result_errors skill_applicability
           @ result_errors workspace_memory_selection_enabled
-          @ result_errors memory_recall
           @ result_errors excluded_keepers))
   | Some (Otoml.TomlString _) | Some (Otoml.TomlInteger _) | Some (Otoml.TomlFloat _)
   | Some (Otoml.TomlBoolean _) | Some (Otoml.TomlOffsetDateTime _)
@@ -1239,24 +1143,6 @@ let parse_string (content : string) : (Runtime_schema.config, parse_error list) 
     unparsable (Otoml.Parser.format_parse_error position message)
   | Duplicate_key_refused message -> unparsable message
   | Otoml_failed message -> unparsable (Printf.sprintf "otoml internal error: %s" message)
-;;
-
-let memory_recall_declaration_of_string (content : string)
-  : (memory_recall_declaration, parse_error list) result
-  =
-  match Otoml.Parser.from_string_result content with
-  | Error msg -> Error [ { path = "<parse>"; message = msg } ]
-  | Ok toml ->
-    let path = Ns.(key Typesafeai) in
-    (match Otoml.find_opt toml Fun.id [ path ] with
-     | None -> Ok { switch = false; scope = None }
-     | Some ((Otoml.TomlTable _ | Otoml.TomlInlineTable _) as tbl) ->
-       parse_typesafeai_memory_recall_declaration ~path tbl
-     | Some
-         ( Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _
-         | Otoml.TomlBoolean _ | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _
-         | Otoml.TomlLocalDate _ | Otoml.TomlLocalTime _ | Otoml.TomlArray _
-         | Otoml.TomlTableArray _ ) -> Error (error path "[typesafeai] must be a TOML table"))
 ;;
 
 (* The legacy keys this text still carries, dotted paths like

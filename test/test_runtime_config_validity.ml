@@ -7112,7 +7112,6 @@ let typesafeai_table =
    ]\n\
    board_attention = false\nboard_attention_confidence_floor = 0.45\n\
    context_review = true\nskill_applicability = true\nworkspace_memory_selection_enabled = true\n\
-   memory_recall = true\nmemory_recall_scope = \"listed\"\nmemory_recall_keepers = [\"won-chik\", \"goo-yang-bong\"]\n\
    excluded_keepers = [\"kidsnote-slack-context-collector\", \"other\"]\n"
 ;;
 
@@ -7131,8 +7130,6 @@ let test_typesafeai_absent_is_the_default () =
     check bool "Context review is off" false t.Runtime_schema.context_review;
     check bool "Skill applicability is off" false t.Runtime_schema.skill_applicability;
     check bool "Shared memory selection is off" false t.Runtime_schema.workspace_memory_selection_enabled;
-    check bool "Memory recall is off" true
-      (Runtime_schema.equal_memory_recall Runtime_schema.Memory_recall_off t.Runtime_schema.memory_recall);
     check (list string) "nobody is excluded" [] t.Runtime_schema.excluded_keepers
 ;;
 
@@ -7158,50 +7155,9 @@ let test_typesafeai_reads_the_whole_table () =
     check bool "Context review enabled" true t.Runtime_schema.context_review;
     check bool "Skill applicability enabled" true t.Runtime_schema.skill_applicability;
     check bool "Shared memory selection enabled" true t.Runtime_schema.workspace_memory_selection_enabled;
-    check bool "Memory recall listed, in order" true
-      (Runtime_schema.equal_memory_recall
-         (Runtime_schema.Memory_recall_on
-            (Runtime_schema.Listed_keepers ("won-chik", [ "goo-yang-bong" ])))
-         t.Runtime_schema.memory_recall);
     check (list string) "excluded keepers, in order"
       [ "kidsnote-slack-context-collector"; "other" ]
       t.Runtime_schema.excluded_keepers
-;;
-
-(* Switching recall on names the keepers it reaches. Each way to write the
-   scope is read to the value it means; the scope keys of a switch that is off
-   are read too, but they reach nobody. *)
-let test_typesafeai_reads_the_memory_recall_scope () =
-  List.iter
-    (fun (label, tail, expected) ->
-       match Runtime_toml.parse_string (lsp_probe_config ("[typesafeai]\n" ^ tail)) with
-       | Error errors -> failf "%s must parse: %s" label (error_messages errors)
-       | Ok config ->
-         check bool label true
-           (Runtime_schema.equal_memory_recall expected
-              config.Runtime_schema.typesafeai.Runtime_schema.memory_recall))
-    [ ( "no key is off"
-      , ""
-      , Runtime_schema.Memory_recall_off )
-    ; ( "false is off"
-      , "memory_recall = false\n"
-      , Runtime_schema.Memory_recall_off )
-    ; ( "false keeps no scope"
-      , "memory_recall = false\nmemory_recall_scope = \"listed\"\nmemory_recall_keepers = [\"a\"]\n"
-      , Runtime_schema.Memory_recall_off )
-    ; ( "a scope without the switch is off"
-      , "memory_recall_scope = \"all\"\n"
-      , Runtime_schema.Memory_recall_off )
-    ; ( "all keepers"
-      , "memory_recall = true\nmemory_recall_scope = \"all\"\n"
-      , Runtime_schema.Memory_recall_on Runtime_schema.All_keepers )
-    ; ( "one listed keeper"
-      , "memory_recall = true\nmemory_recall_scope = \"listed\"\nmemory_recall_keepers = [\"a\"]\n"
-      , Runtime_schema.Memory_recall_on (Runtime_schema.Listed_keepers ("a", [])) )
-    ; ( "listed keepers keep their order"
-      , "memory_recall = true\nmemory_recall_scope = \"listed\"\nmemory_recall_keepers = [\"b\", \"a\"]\n"
-      , Runtime_schema.Memory_recall_on (Runtime_schema.Listed_keepers ("b", [ "a" ])) )
-    ]
 ;;
 
 let test_typesafeai_reads_destinations_written_as_table_headers () =
@@ -7243,165 +7199,6 @@ let test_typesafeai_refuses_a_stray_key () =
   typesafeai_rejects ~what:"nonboolean shared-memory selection opt-in"
     "[typesafeai]\nworkspace_memory_selection_enabled = \"true\"\n"
     "workspace_memory_selection_enabled must be a boolean"
-;;
-
-(* No way of leaving a key out or writing it empty reaches every keeper, and a
-   list is never read as a limit it does not make. *)
-let test_typesafeai_refuses_a_memory_recall_that_names_no_keepers () =
-  typesafeai_rejects ~what:"the switch without a scope"
-    "[typesafeai]\nmemory_recall = true\n" "typesafeai.memory_recall_scope: memory_recall = true needs memory_recall_scope";
-  typesafeai_rejects ~what:"a listed scope without keepers"
-    "[typesafeai]\nmemory_recall = true\nmemory_recall_scope = \"listed\"\n"
-    "an empty list does not mean every keeper";
-  typesafeai_rejects ~what:"a listed scope with an empty list"
-    "[typesafeai]\nmemory_recall = true\nmemory_recall_scope = \"listed\"\nmemory_recall_keepers = []\n"
-    "an empty list does not mean every keeper";
-  typesafeai_rejects ~what:"a listed scope with an empty list while the switch is off"
-    "[typesafeai]\nmemory_recall_scope = \"listed\"\nmemory_recall_keepers = []\n"
-    "an empty list does not mean every keeper";
-  typesafeai_rejects ~what:"keepers next to the all scope"
-    "[typesafeai]\nmemory_recall = true\nmemory_recall_scope = \"all\"\nmemory_recall_keepers = [\"a\"]\n"
-    "typesafeai.memory_recall_keepers: needs memory_recall_scope = \"listed\"";
-  typesafeai_rejects ~what:"keepers with no scope"
-    "[typesafeai]\nmemory_recall = true\nmemory_recall_keepers = [\"a\"]\n"
-    "typesafeai.memory_recall_keepers: needs memory_recall_scope = \"listed\"";
-  typesafeai_rejects ~what:"keepers with no scope while the switch is off"
-    "[typesafeai]\nmemory_recall_keepers = [\"a\"]\n"
-    "typesafeai.memory_recall_keepers: needs memory_recall_scope = \"listed\""
-;;
-
-let test_typesafeai_refuses_a_memory_recall_value_that_names_nothing () =
-  typesafeai_rejects ~what:"a scope that is neither all nor listed"
-    "[typesafeai]\nmemory_recall = true\nmemory_recall_scope = \"everyone\"\n"
-    "memory_recall_scope: must be \"all\" or \"listed\", got \"everyone\"";
-  typesafeai_rejects ~what:"a misspelt scope while the switch is off"
-    "[typesafeai]\nmemory_recall_scope = \"All\"\n"
-    "must be \"all\" or \"listed\", got \"All\"";
-  typesafeai_rejects ~what:"a scope that is not a string"
-    "[typesafeai]\nmemory_recall_scope = 1\n" "memory_recall_scope must be a string";
-  typesafeai_rejects ~what:"a switch that is not a boolean"
-    "[typesafeai]\nmemory_recall = \"true\"\nmemory_recall_scope = \"all\"\n"
-    "memory_recall must be a boolean";
-  typesafeai_rejects ~what:"a non-string keeper list"
-    "[typesafeai]\nmemory_recall_scope = \"listed\"\nmemory_recall_keepers = [1]\n"
-    "memory_recall_keepers must be an array of strings";
-  typesafeai_rejects ~what:"a recall keeper name with whitespace"
-    "[typesafeai]\nmemory_recall_scope = \"listed\"\nmemory_recall_keepers = [\"a b\"]\n"
-    "typesafeai.memory_recall_keepers: keeper name \"a b\" must be non-empty without whitespace";
-  typesafeai_rejects ~what:"a blank recall keeper name"
-    "[typesafeai]\nmemory_recall_scope = \"listed\"\nmemory_recall_keepers = [\"\"]\n"
-    "keeper name \"\" must be non-empty without whitespace"
-;;
-
-(* The declaration keeps what the decision drops: a switch that is off has no
-   scope for the gate, but a list the file keeps while it is off is still
-   there to read (the TUI form restores it). Both readers share one parser,
-   so the declaration and [parse_string] decide alike. *)
-let memory_recall_scope =
-  testable
-    (Fmt.of_to_string Runtime_schema.show_memory_recall_scope)
-    Runtime_schema.equal_memory_recall_scope
-;;
-
-let declared_memory_recall tail =
-  match
-    Runtime_toml.memory_recall_declaration_of_string (lsp_probe_config ("[typesafeai]\n" ^ tail))
-  with
-  | Ok declaration -> declaration
-  | Error errors -> failf "the declaration must read: %s" (error_messages errors)
-;;
-
-let test_memory_recall_declaration_keeps_the_scope_of_a_switch_that_is_off () =
-  (match Runtime_toml.memory_recall_declaration_of_string (lsp_probe_config "") with
-   | Ok { Runtime_toml.switch; scope } ->
-     check bool "no table: the switch is off" false switch;
-     check (option memory_recall_scope) "no table: no scope" None scope
-   | Error errors -> failf "no table must read: %s" (error_messages errors));
-  let off_with_list =
-    declared_memory_recall
-      "memory_recall = false\nmemory_recall_scope = \"listed\"\nmemory_recall_keepers = [\"a\", \"b\"]\n"
-  in
-  check bool "off: the switch" false off_with_list.Runtime_toml.switch;
-  check (option memory_recall_scope) "off: the list is kept"
-    (Some (Runtime_schema.Listed_keepers ("a", [ "b" ])))
-    off_with_list.Runtime_toml.scope;
-  let off_with_all = declared_memory_recall "memory_recall_scope = \"all\"\n" in
-  check (option memory_recall_scope) "a scope without the switch is kept"
-    (Some Runtime_schema.All_keepers) off_with_all.Runtime_toml.scope;
-  let on_with_all = declared_memory_recall "memory_recall = true\nmemory_recall_scope = \"all\"\n" in
-  check bool "on: the switch" true on_with_all.Runtime_toml.switch;
-  (* A switch that is on without a scope is a declaration: the decision, not
-     the reading, refuses it. *)
-  let on_without_scope = declared_memory_recall "memory_recall = true\n" in
-  check bool "on without a scope: the switch" true on_without_scope.Runtime_toml.switch;
-  check (option memory_recall_scope) "on without a scope: none" None on_without_scope.Runtime_toml.scope
-;;
-
-let test_memory_recall_declaration_is_refused_where_the_loader_refuses () =
-  let pairs errors =
-    List.map (fun (error : Runtime_toml.parse_error) -> error.path, error.message) errors
-  in
-  List.iter
-    (fun (label, tail) ->
-       let text = lsp_probe_config ("[typesafeai]\n" ^ tail) in
-       match
-         ( Runtime_toml.memory_recall_declaration_of_string text
-         , Runtime_toml.parse_string text )
-       with
-       | Ok _, _ -> failf "%s: the declaration must be refused" label
-       | _, Ok _ -> failf "%s: the loader must refuse it too" label
-       | Error declared, Error loaded ->
-         check bool (label ^ ": the declaration says why") true (declared <> []);
-         List.iter
-           (fun (path, message) ->
-              check bool
-                (Printf.sprintf "%s: the loader says %s as well" label path)
-                true
-                (List.mem (path, message) (pairs loaded)))
-           (pairs declared))
-    [ "a scope that names nothing", "memory_recall_scope = \"everyone\"\n"
-    ; "a listed scope with an empty list", "memory_recall_scope = \"listed\"\nmemory_recall_keepers = []\n"
-    ; "a list next to all", "memory_recall_scope = \"all\"\nmemory_recall_keepers = [\"a\"]\n"
-    ; "a list with no scope", "memory_recall_keepers = [\"a\"]\n"
-    ; "a keeper name with whitespace", "memory_recall_scope = \"listed\"\nmemory_recall_keepers = [\"a b\"]\n"
-    ]
-;;
-
-let test_memory_recall_declaration_and_parse_string_decide_alike () =
-  let off = Some Runtime_schema.Memory_recall_off in
-  let on scope = Some (Runtime_schema.Memory_recall_on scope) in
-  let decision =
-    option (testable Runtime_schema.pp_memory_recall Runtime_schema.equal_memory_recall)
-  in
-  List.iter
-    (fun (tail, expected) ->
-       let decided =
-         match
-           Runtime_toml.parse_string (lsp_probe_config ("[typesafeai]\n" ^ tail))
-         with
-         | Ok config ->
-           Some config.Runtime_schema.typesafeai.Runtime_schema.memory_recall
-         | Error _ -> None
-       in
-       let from_declaration =
-         match declared_memory_recall tail with
-         | { Runtime_toml.switch = false; scope = _ } -> Some Runtime_schema.Memory_recall_off
-         | { Runtime_toml.switch = true; scope = Some scope } ->
-           Some (Runtime_schema.Memory_recall_on scope)
-         | { Runtime_toml.switch = true; scope = None } -> None
-       in
-       check decision (tail ^ " (the loader)") expected decided;
-       check decision (tail ^ " (the declaration)") expected from_declaration)
-    [ "", off
-    ; "memory_recall = false\n", off
-    ; ( "memory_recall = false\nmemory_recall_scope = \"listed\"\nmemory_recall_keepers = [\"a\"]\n"
-      , off )
-    ; "memory_recall_scope = \"all\"\n", off
-    ; "memory_recall = true\nmemory_recall_scope = \"all\"\n", on Runtime_schema.All_keepers
-    ; ( "memory_recall = true\nmemory_recall_scope = \"listed\"\nmemory_recall_keepers = [\"b\", \"a\"]\n"
-      , on (Runtime_schema.Listed_keepers ("b", [ "a" ])) )
-    ; "memory_recall = true\n", None
-    ]
 ;;
 
 (* otoml's strict float getter still reads a TOML integer, so the two
@@ -8573,21 +8370,9 @@ let () =
     ; ( "typesafeai"
       , [ test_case "absent is the default" `Quick test_typesafeai_absent_is_the_default
         ; test_case "reads the whole table" `Quick test_typesafeai_reads_the_whole_table
-        ; test_case "reads the memory recall scope" `Quick
-            test_typesafeai_reads_the_memory_recall_scope
         ; test_case "reads destinations written as table headers" `Quick
             test_typesafeai_reads_destinations_written_as_table_headers
         ; test_case "refuses a stray key" `Quick test_typesafeai_refuses_a_stray_key
-        ; test_case "refuses a memory recall that names no keepers" `Quick
-            test_typesafeai_refuses_a_memory_recall_that_names_no_keepers
-        ; test_case "refuses a memory recall value that names nothing" `Quick
-            test_typesafeai_refuses_a_memory_recall_value_that_names_nothing
-        ; test_case "the memory recall declaration keeps the scope of a switch that is off" `Quick
-            test_memory_recall_declaration_keeps_the_scope_of_a_switch_that_is_off
-        ; test_case "the memory recall declaration is refused where the loader refuses" `Quick
-            test_memory_recall_declaration_is_refused_where_the_loader_refuses
-        ; test_case "the memory recall declaration and parse_string decide alike" `Quick
-            test_memory_recall_declaration_and_parse_string_decide_alike
         ; test_case "reads integer confidence floor boundaries" `Quick
             test_typesafeai_reads_integer_confidence_floor_boundaries
         ; test_case "refuses a confidence floor outside 0 to 1" `Quick

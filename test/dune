@@ -4566,7 +4566,6 @@
   test_install_local_build_checkout_shim.py
   test_install_local_build.py
   ../scripts/install-local-build.sh
-  ../scripts/check-runtime-deployment-preflight.sh
   ../scripts/lib/install-workspace-dashboard.sh)
  (action
   (run python3 %{dep:test_install_local_build_checkout_shim.py})))

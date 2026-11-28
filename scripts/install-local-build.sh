@@ -46,8 +46,8 @@
 # the replaced shim does not come back that way, and the server runs the shim
 # without one.
 #
-# No release is asked for. scripts/install.sh places a release shim, and this
-# script only rebuilds a shim from the checkout.
+# scripts/install.sh places a release shim. This script only rebuilds a shim
+# from the checkout.
 #
 # The dashboard bundle goes the same way (scripts/lib/install-workspace-dashboard.sh,
 # #49980). A workspace that holds <workspace>/assets/dashboard gets this
@@ -93,7 +93,7 @@
 #   --print-build-targets print the exact Dune inputs for this install and exit
 #                   without locking, building, checking or changing a workspace
 #
-#   By default a workspace guest exec shim is rebuilt from this checkout
+#   A workspace guest exec shim is rebuilt from this checkout
 #   (scripts/remote-ssh/build-shim.sh, which needs Docker) when it declares
 #   another source than this build, and the sha256 sidecar of a release shim
 #   replaced this way is removed. A failed rebuild installs nothing.

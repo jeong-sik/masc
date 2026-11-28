@@ -11,7 +11,6 @@ import unittest
 import test_install_local_build as local_build
 
 SCRIPT = local_build.SCRIPT
-VERSION = "9.8.7"
 ARM64 = "masc-exec-shim-linux-arm64"
 OLD_SHIM = b"shim of an older release\n"
 # The source identity the fixture build declares. Its own value, so a test
@@ -68,20 +67,20 @@ def sha256(content):
 
 # The server binary links the same Source_identity as the shim, so it carries
 # the same declaration; [source] None is a build that carries none.
-def server_naming(build, version, source=BUILD_SOURCE):
+def server_declaring(build, source=BUILD_SOURCE):
     server = build / "main_eio.exe"
     declaration = "" if source is None else f"# {declaring(source).decode()}\n"
-    server.write_text(f'#!/bin/sh\n{declaration}if [ "$1" = --version ]; then echo {version}; fi\n')
+    server.write_text(f"#!/bin/sh\n{declaration}")
     server.chmod(0o755)
 
 
-# A build whose server names [version] the way masc --version does.
+# A build whose server declares [source].
 # [unnamed_workspace] is what the helper answers when --base-path is not given.
-def build_naming(root, version=VERSION, source=BUILD_SOURCE, unnamed_workspace=None):
+def build_naming(root, source=BUILD_SOURCE, unnamed_workspace=None):
     build = root / "build"
     build.mkdir()
     local_build.binaries(build)
-    server_naming(build, version, source)
+    server_declaring(build, source)
     local_build.preflight_helper(build, unnamed_workspace=unnamed_workspace)
     return build
 

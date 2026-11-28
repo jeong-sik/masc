@@ -44,13 +44,14 @@ val load_persisted_posts : store -> (int, string * exn) result
     Refused while deletion persistence is pending; open a fresh store instead
     of replacing just one part of its applied deletion model. *)
 
-val load_comments_deriving :
+val load_comments_under_persistence :
   store -> derive:(unit -> unit) -> (int, string * exn) result
-(** {!load_persisted_comments}, with [derive] run under the state lock right
-    after a complete read replaced the comments, so the counts other tables
-    hold of them change in the same interval. An exception from [derive] is a
-    model projection failure. [derive] is not run for a read that is not
-    complete. *)
+(** {!load_persisted_comments} for a caller that holds persistence. [derive]
+    runs under the state lock right after a complete read replaced the
+    comments, so the counts other tables hold of them change in the same
+    interval. An exception from [derive] crosses the state mutex and poisons
+    it, as an exception during model projection does. [derive] is not run for
+    a read that is not complete. *)
 
 val load_persisted_comments : store -> (int, string * exn) result
 (** Explicit source read and model publication under persist then state.

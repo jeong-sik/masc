@@ -34,7 +34,8 @@ val validate_path :
     No caller identity or product metadata is accepted at this boundary.
     [extra_roots] are further allowed roots on the machine the command runs
     on (for an ssh target, the Keeper's root on the endpoint and the
-    endpoint's declared [allowed_paths]); they and the path are
+    endpoint's declared [allowed_paths]; for a microVM target, the Keeper's
+    root in the guest); they and the path are
     compared lexically, without host symlink resolution. So a symlink under
     an extra root that points elsewhere is not followed: on an endpoint that
     is this same machine, an extra root is weaker than the workdir, which is

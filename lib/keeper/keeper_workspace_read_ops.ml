@@ -311,8 +311,8 @@ let try_handle_with_authority
                   in
                   let shown_path =
                     match meta.sandbox_profile with
-                    | Remote_ssh -> cpath
-                    | Docker | Micro_vm -> target
+                    | Remote_ssh | Micro_vm -> cpath
+                    | Docker -> target
                   in
                   let payload =
                     `Assoc

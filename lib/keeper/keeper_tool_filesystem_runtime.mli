@@ -260,8 +260,7 @@ val read_sandbox_raw_prefix :
   (string, Keeper_sandbox_read_backend.read_error) result
 (** Contained raw binary prefix, bounded before endpoint or Docker capture.
     Resolves like Read and never falls back to a host read. The bytes are the
-    file's own: unlike Read's line window, nothing rewrites paths in them. A
-    path that does not exist or is not a regular file comes back as
+    file's own. A path that does not exist or is not a regular file comes back as
     [Missing_file] or [Not_a_file] so callers can refuse instead of reporting
     a runtime fault; [Read_failed] stays a transport or capture fault. A
     remote Keeper's path under its endpoint's declared roots

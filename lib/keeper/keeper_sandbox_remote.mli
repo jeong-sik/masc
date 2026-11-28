@@ -456,8 +456,10 @@ module Stdio_request : sig
   val record_incomplete : t -> failure:dispatch_failure -> detail:string -> unit
 end
 
-type stdout_mode = Text_paths | Binary_bytes
-(** Binary_bytes collects raw stdout chunks without text capture limits or path rewriting. *)
+type stdout_mode = Text_capture | Binary_bytes
+(** [Text_capture] keeps stdout in the bounded head/tail capture.
+    [Binary_bytes] collects every raw stdout chunk without those limits. Both
+    carry the endpoint's bytes unchanged. *)
 
 val runner :
   ?stdout_mode:stdout_mode ->

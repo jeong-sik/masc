@@ -230,8 +230,7 @@ let test_overwrite_sends_content_on_stdin () =
   check bool "ok" true (member "ok" result = `Bool true);
   check bool "mode" true (member "mode" result = `String "overwrite");
   check bool "via names the profile" true (member "via" result = `String "remote_ssh");
-  check string "guest bookkeeping path is preserved"
-    (Filename.concat (Keeper_sandbox.host_root_abs_of_meta ~config:f.config f.meta) "src/a.ml")
+  check string "the returned path names the guest's file" remote_target
     (Yojson.Safe.Util.to_string (member "path" result));
   check bool "evidence records the write" true
     (Option.is_some result.file_change_evidence);

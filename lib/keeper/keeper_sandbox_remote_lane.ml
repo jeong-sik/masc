@@ -111,6 +111,13 @@ let workspace_root ~(config : Workspace.config) ~(meta : keeper_meta) =
   Ok (Filename.concat root (Playground_paths.sanitize_keeper_name meta.name))
 ;;
 
+let path_lane (meta : keeper_meta) =
+  match meta.sandbox_profile with
+  | Docker -> Error (docker_has_no_remote_lane meta)
+  | Remote_ssh -> Ok Keeper_remote_path.Ssh_endpoint
+  | Micro_vm -> Ok Keeper_remote_path.Microvm_guest
+;;
+
 (* #38593: an OpenSSH endpoint's declared roots ([allowed_paths]) name
    endpoint paths outside the keeper's tree that its commands may use, such
    as a Terminal-Bench task's /app. A file read there names the endpoint's own

@@ -196,9 +196,9 @@ val run_command_with_status :
   (Unix.process_status * string, string) result
 
 (** [run_command_with_status] with the capture mode chosen by [max_bytes]:
-    [Some n] captures text, rewriting the endpoint's root to the host path,
-    and keeps at most [n] bytes; [None] keeps the stdout bytes exactly as the
-    command wrote them, so the command itself must bound what it prints. *)
+    [Some n] keeps the bounded text capture, cut to at most [n] bytes; [None]
+    keeps every stdout byte the command wrote, so the command itself must
+    bound what it prints. *)
 val run_command_with_capture :
   ?read_authority:Keeper_sandbox_remote_lane.read_authority ->
   ?turn_sandbox_factory:Keeper_sandbox_factory.t ->

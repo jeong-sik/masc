@@ -67,17 +67,30 @@ let keeper_default_write_root ~(config : Workspace.config) ~(meta : keeper_meta)
    [Keeper_sandbox.container_root]. The host side of that mount is
    [Keeper_sandbox.host_root_abs_of_meta], the same root the Docker command
    rewrite and the file tools' default cwd use, so a container path maps back
-   onto it. A tree the endpoint owns has no host mount: its absolute paths keep
-   their identity and the remote lane translates them. Pure path computation;
+   onto it. A microVM Keeper's commands run in its guest root
+   ([Keeper_sandbox_microvm.keeper_work_root]), the root Execute reports its
+   cwd in; a path under it maps back onto the same bookkeeping bundle, which
+   the remote lane translates into the guest again. An ssh endpoint's root is
+   endpoint configuration: its absolute paths keep their identity here and are
+   projected against the captured endpoint
+   ([Keeper_workspace_namespace.project_input]). Pure path computation;
    nothing is created on disk. *)
 let host_path_of_container_path
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
       raw_path
   =
-  match Keeper_types_profile_sandbox.tree_location_of_profile meta.sandbox_profile with
-  | Keeper_types_profile_sandbox.Endpoint_owned -> raw_path
-  | Keeper_types_profile_sandbox.Shared_mount ->
+  match meta.sandbox_profile with
+  | Keeper_types_profile_sandbox.Remote_ssh -> raw_path
+  | Micro_vm ->
+    (match
+       Keeper_remote_path.endpoint_to_host ~base_path:config.base_path
+         ~remote_workspace_root:(Keeper_sandbox_microvm.keeper_work_root ~keeper_name:meta.name)
+         ~keeper:meta.name raw_path
+     with
+     | Some host_path -> host_path
+     | None -> raw_path)
+  | Docker ->
     let normalize path = Keeper_alerting_path.normalize_path_for_check_stripped path in
     let container_root = Keeper_sandbox.container_root meta.name |> normalize in
     let raw_norm = normalize raw_path in
@@ -143,6 +156,8 @@ let user_message_error (rej : Keeper_alerting_path.keeper_path_rejection) =
    attribution of a tool call all come through here, so the same spelling
    names the same host location whichever reader receives it (#52082):
    - a Docker Keeper's container-visible absolute path maps to its host mount;
+   - a microVM Keeper's absolute path under its guest root maps to the same
+     root;
    - any other absolute path keeps its identity;
    - a relative path joins [host_cwd] when the tool resolved one, and the
      Keeper's playground root otherwise.

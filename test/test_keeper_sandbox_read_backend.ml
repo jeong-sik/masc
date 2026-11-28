@@ -1701,8 +1701,11 @@ esac
 (* Exercise the public result producers through real endpoint dispatch, with
    the existing SSH shim fixture and an Apple-container CLI fixture. *)
 let test_read_and_grep_report_the_endpoint_profile ~fs ~net () =
-  let check_results ~config ~meta ~expected =
-    let check tool body_field expected_body (result : Masc.Keeper_tool_execution.t) =
+  (* [root] is the Keeper's root where its commands run: both tools name a
+     file the way those commands reach it. *)
+  let check_results ~config ~meta ~expected ~root =
+    let check tool body_field expected_body expected_path
+          (result : Masc.Keeper_tool_execution.t) =
       let json = Yojson.Safe.from_string result.raw_output in
       let open Yojson.Safe.Util in
       (match json |> member "ok" with
@@ -1711,9 +1714,12 @@ let test_read_and_grep_report_the_endpoint_profile ~fs ~net () =
       Alcotest.(check string) (tool ^ " backend") expected
         (json |> member "via" |> to_string);
       Alcotest.(check bool) (tool ^ " endpoint output") true
-        (member body_field json = expected_body)
+        (member body_field json = expected_body);
+      Alcotest.(check string) (tool ^ " names the Keeper's own path") expected_path
+        (json |> member "path" |> to_string)
     in
     check "Read" "content" (`String "remote-file-content")
+      (Filename.concat root "read-target.txt")
       (Masc.Keeper_tool_filesystem_runtime.handle_read_file_with_outcome
          ~turn_sandbox_factory:None ~config ~meta
          ~args:(`Assoc [ "path", `String "read-target.txt" ]));
@@ -1724,13 +1730,14 @@ let test_read_and_grep_report_the_endpoint_profile ~fs ~net () =
     with
     | None -> Alcotest.fail "Grep was not dispatched"
     | Some result ->
-      check "Grep" "matches" (`List [ `String "remote-file-content" ]) result
+      check "Grep" "matches" (`List [ `String "remote-file-content" ]) root result
   in
   with_env "MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED" "false" @@ fun () ->
   let base, config, meta = remote_reader_at ~base:(agent_temp_dir ()) ~allowed_paths:(fun _ -> []) in
   Fun.protect ~finally:(fun () -> cleanup_fixture_dir base) @@ fun () ->
   with_fake_ssh fake_ssh_success_script (fun () ->
-    check_results ~config ~meta ~expected:"remote_ssh");
+    check_results ~config ~meta ~expected:"remote_ssh"
+      ~root:"/srv/masc/playground/remote-reader");
   let meta =
     { meta with
       sandbox_profile = Keeper_types_profile_sandbox.Micro_vm;
@@ -1758,7 +1765,8 @@ sandbox_profile = "microvm"
   Fs_compat.set_fs fs;
   with_env "PATH" path (fun () ->
     initialize_apple_attached_read_fixture ~sw ~net ~base ~config ~meta;
-    check_results ~config ~meta ~expected:"microvm")
+    check_results ~config ~meta ~expected:"microvm"
+      ~root:(Masc.Keeper_sandbox_microvm.keeper_work_root ~keeper_name:meta.name))
 
 let test_read_of_a_declared_path_asks_the_endpoint_for_that_path () =
   let base, config, meta = remote_reader_with_allowed_paths ~allowed_paths:(fun _ -> [ "/app" ]) in

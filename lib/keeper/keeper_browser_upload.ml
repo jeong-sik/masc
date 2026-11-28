@@ -37,8 +37,8 @@ let backend_read ~turn_sandbox_factory ~config ~(meta : Keeper_meta_contract.kee
   let* confined = Keeper_sandbox_read_runner.confined_path_of_host ~config ~meta ~host_path in
   let profile_label =
     Keeper_types_profile.sandbox_profile_to_string meta.sandbox_profile in
-  (* Endpoint stdout rewrites visible paths, so raw binary `cat` is unsuitable.
-     POSIX od's hex alphabet cannot contain a path. Keep each chunk's encoded
+  (* Each chunk travels as POSIX od hex text through the read runner's text
+     capture. Keep each chunk's encoded
      output inside Process_eio's retained head; increasing run_command's limit
      cannot recover bytes that its subprocess capture has already elided.
      BSD od uses indentation and double spaces (more than four output bytes

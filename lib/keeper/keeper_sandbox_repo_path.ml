@@ -99,30 +99,38 @@ let location_json
     ; "repo_root", Json_util.string_opt_to_json repo_root
     ]
 
+(* An ssh endpoint or a microVM guest runs the command in the Keeper's root
+   there, so the location names that root: the model reuses a name the
+   process can reach. The host bookkeeping cwd stays internal. *)
+let endpoint_location_json ~lane ~unresolved ~remote_workspace_root ~config ~meta ~args ~cwd =
+  let location = match remote_workspace_root with
+    | None -> Error unresolved
+    | Some playground ->
+      Keeper_remote_path.host_to_remote ~lane ~base_path:config.Workspace.base_path
+        ~remote_workspace_root:playground ~keeper:meta.Keeper_meta_contract.name cwd
+      |> Result.map_error Keeper_remote_path.jail_refusal_to_string
+      |> Result.map (fun cwd -> location_json
+        ~normalize:Keeper_remote_path.normalize_remote ~playground ~args ~cwd)
+  in
+  match location with
+  | Ok location -> location
+  | Error reason -> `Assoc [ "cwd", `Null; "playground_root", `Null
+    ; "repo_root", `Null; "relative_cwd", `Null; "scope", `String "unavailable"
+    ; "reason", `String reason ]
+
 let execution_location_json ~remote_workspace_root ~config ~meta ~args ~cwd =
   match meta.Keeper_meta_contract.sandbox_profile with
   | Keeper_types_profile_sandbox.Remote_ssh ->
-    let location = match remote_workspace_root with
-      | None -> Error "remote_ssh_namespace_unresolved"
-      | Some playground ->
-        Keeper_remote_path.host_to_remote ~base_path:config.Workspace.base_path
-          ~remote_workspace_root:playground ~keeper:meta.name cwd
-        |> Result.map (fun cwd -> location_json
-          ~normalize:Keeper_remote_path.normalize_remote ~playground ~args ~cwd)
-    in
-    (match location with
-     | Ok location -> location
-     | Error reason -> `Assoc [ "cwd", `Null; "playground_root", `Null
-       ; "repo_root", `Null; "relative_cwd", `Null; "scope", `String "unavailable"
-       ; "reason", `String reason ])
-  | Micro_vm | Docker ->
-  let host_location = location_json ~normalize:normalize_path
-    ~playground:(playground_root_no_create ~config ~meta) ~args ~cwd in
-  match Keeper_types_profile_sandbox.tree_location_of_profile meta.sandbox_profile with
-  (* The execution location is the host bookkeeping bundle: the only
-     keeper-visible namespace this side has for a tree the endpoint owns. *)
-  | Keeper_types_profile_sandbox.Endpoint_owned -> host_location
-  | Keeper_types_profile_sandbox.Shared_mount ->
+    endpoint_location_json ~lane:Keeper_remote_path.Ssh_endpoint
+      ~unresolved:"remote_ssh_namespace_unresolved"
+      ~remote_workspace_root ~config ~meta ~args ~cwd
+  | Micro_vm ->
+    endpoint_location_json ~lane:Keeper_remote_path.Microvm_guest
+      ~unresolved:"microvm_namespace_unresolved"
+      ~remote_workspace_root ~config ~meta ~args ~cwd
+  | Docker ->
+    let host_location = location_json ~normalize:normalize_path
+      ~playground:(playground_root_no_create ~config ~meta) ~args ~cwd in
     let host_root = normalize_path (playground_root_no_create ~config ~meta) in
     let visible_root =
       Keeper_sandbox.container_root meta.name

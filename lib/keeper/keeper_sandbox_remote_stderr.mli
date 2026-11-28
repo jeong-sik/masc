@@ -9,7 +9,7 @@
     final RS pair can look like a trailer; this decoder does not authenticate
     it. When the final suffix cannot be split into a trailer, the finite and
     interactive remote callers preserve it through their normal stderr
-    delivery; finite-path rewriting still applies. It may contain
+    delivery. It may contain
     control-looking bytes: discarding them would also discard
     indistinguishable payload bytes. This is not a valid receipt; callers
     still validate the actual transport outcome and completion. *)

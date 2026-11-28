@@ -60,7 +60,9 @@ val cwd_existence : meta:Keeper_meta_contract.keeper_meta -> string -> cwd_exist
     one host location whichever reader receives it (#52082).
 
     - A Docker Keeper's container-visible absolute path maps to its host
-      mount; any other absolute path keeps its identity.
+      mount, and a microVM Keeper's absolute path under its guest root
+      ({!Keeper_sandbox_microvm.keeper_work_root}) maps to the same root;
+      any other absolute path keeps its identity.
     - A relative path joins [host_cwd] (a host directory this function
       already returned) when given, and the Keeper's playground root
       otherwise.

@@ -234,26 +234,23 @@ let reloaded result =
 
    A source is asked before persistence is taken and again once it is held, so
    a call that waited behind another call's read finds the source readable and
-   reads nothing. A store with a deletion pending may not replace its model;
-   nothing is attempted for it and the operation's own refusal stands. *)
+   reads nothing. A loader refuses before it reads while a deletion is
+   pending; that refusal is returned like a read that failed. *)
 let reobserve store =
-  let may_read file ~due =
-    due store
-    && Result.is_ok
-         (Board_core_persist.require_model_reload_allowed store
-            ~path:(Board_paths.store_file_path store file))
-  in
-  let read_again file ~due ~load () =
-    if not (may_read file ~due)
+  let read_again ~due ~load () =
+    if not (due store)
     then Ok ()
-    else
-      with_persist_lock store (fun () ->
-        if may_read file ~due then reloaded (load store) else Ok ())
+    else with_persist_lock store (fun () -> if due store then reloaded (load store) else Ok ())
   in
+  (* [reobserve_posts] asks again under persistence. It also answers for a
+     write whose outcome is unknown: the restart that needs is reported at
+     each operation, as it was before this function. *)
   let posts () =
-    if may_read Board_paths.Posts ~due:Board_posts_source.reobservation_due
-    then reobserve_posts store
-    else Ok ()
+    match store.posts_source with
+    | Posts_unobserved | Posts_readable _ -> Ok ()
+    | Posts_unsettled _ -> reobserve_posts store
+    | Posts_refused _ ->
+      if Board_posts_source.reobservation_due store then reobserve_posts store else Ok ()
   in
   (* As at startup, and in the interval that replaces the comments: reply
      counts are held on posts, and the vote counts of the comments just loaded
@@ -270,15 +267,15 @@ let reobserve store =
        | Error error -> Some (file, error))
     [ Board_paths.Posts, posts
     ; ( Board_paths.Comments
-      , read_again Board_paths.Comments ~due:Board_comments_source.reobservation_due
+      , read_again ~due:Board_comments_source.reobservation_due
           ~load:load_comments )
     ; ( Board_paths.Votes
-      , read_again Board_paths.Votes ~due:Board_votes_source.reobservation_due
+      , read_again ~due:Board_votes_source.reobservation_due
           ~load:load_votes_under_persistence )
     ; ( Board_paths.Reactions
-      , read_again Board_paths.Reactions ~due:Board_reactions_source.reobservation_due
+      , read_again ~due:Board_reactions_source.reobservation_due
           ~load:load_reactions_under_persistence )
     ; ( Board_paths.Sub_boards
-      , read_again Board_paths.Sub_boards ~due:Board_sub_boards_source.reobservation_due
+      , read_again ~due:Board_sub_boards_source.reobservation_due
           ~load:Board_sub_boards.reload_sub_boards_under_persistence )
     ]

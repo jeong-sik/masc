@@ -29,9 +29,11 @@ val reobserve :
 (** One fresh read for each source that is due, in the order startup loads
     them: posts, comments, votes, reactions, sub-board policy. A source is due
     when it is refused for a cause {!Board_posts_source.fresh_read_can_clear}
-    accepts and no deletion is pending. A complete read replaces that source's
-    model as at startup and becomes its new write observation; a comments read
-    that is not complete merges its rows and re-derives no counts. Returns the
-    reads that were attempted and failed, each with its cause; a source that
-    was not due is not in the list, whatever its state. The caller must hold
+    accepts. A complete read replaces that source's model as at startup and
+    becomes its new write observation; a comments read that is not complete
+    merges its rows and re-derives no counts. Returns the sources that were
+    due and are still not readable, each with its cause: a read that failed,
+    or a pending deletion, during which no source is read again. Posts are
+    also returned while a write of unknown outcome needs a restart. A source
+    refused for any other cause is not in the list. The caller must hold
     neither persistence nor the state lock (#55449). *)

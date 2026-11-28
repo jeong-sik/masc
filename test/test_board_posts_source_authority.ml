@@ -1265,6 +1265,11 @@ let test_unsettled_reobservation_names_restart base_path _workspace =
      Alcotest.(check bool) "the refusal names the needed restart" true
        (mentions "Restart the server")
    | Error error -> Alcotest.fail (Board.show_board_error error));
+  (* #55449: the read every Board operation starts from reports it too. *)
+  (match Board.reobserve store with
+   | [ Paths.Posts, Board.Io_error _ ] -> ()
+   | [] -> Alcotest.fail "the needed restart is no longer reported at each operation"
+   | (_, error) :: _ -> Alcotest.fail (Board.show_board_error error));
   Alcotest.(check bool) "unsettled evidence is retained unchanged" true
     (store.Board.posts_source == retained);
   require_pre_effect (create store "still refused while unsettled")

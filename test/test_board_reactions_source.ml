@@ -144,6 +144,27 @@ let test_dispatch_entries_reobserve base_path =
   Alcotest.(check (list (pair string int))) "a fresh load holds every writer's reaction once"
     ["👍", 2; "🔥", 2] (emoji_counts restarted parent "stale-reactor")
 
+(* Every caller reaches the store through [Board_dispatch.backend], so the
+   comment read the Keeper's world observation makes answers after a stale
+   refusal without any other operation running first. *)
+let test_dispatch_comment_read_reobserves base_path =
+  let store = fresh_store base_path in
+  let parent = post store "Dispatch reads a stale comments source again" in
+  let post_id = Board.Post_id.to_string parent.id in
+  let comment store content =
+    Board.add_comment ~reader:Masc_board_handlers.Board_access.Operator store
+      ~lookup:Recipient_lookup.none_declared ~post_id ~author:"comment-writer"
+      ~content ~ttl_hours:0 () in
+  ignore (require (comment store "this store's comment"));
+  let other = Board.create_store ~base_path () in
+  require (Board.initialize_store other);
+  ignore (require (comment other "another writer's comment"));
+  require_io_error (comment store "refused against the stale cursor");
+  match Board_dispatch.read_comments_unchecked ~post_id with
+  | Ok comments ->
+    Alcotest.(check int) "the read answers with both writers' comments" 2 (List.length comments)
+  | Error error -> Alcotest.fail (Board.show_board_read_error error)
+
 let test_stale_flush_preserves_accepted_reaction base_path =
   let stale = fresh_store base_path in
   let parent = post stale "a stale ordinary flush cannot compact away another reaction" in
@@ -363,6 +384,8 @@ let () =
          (with_fixture test_stale_toggle_is_reobserved);
        Alcotest.test_case "Dispatch reads and writes read a stale source again" `Quick
          (with_fixture test_dispatch_entries_reobserve);
+       Alcotest.test_case "Dispatch comment read reads a stale source again" `Quick
+         (with_fixture test_dispatch_comment_read_reobserves);
        Alcotest.test_case "stale compaction retains another writer's reaction" `Quick
          (with_fixture test_stale_flush_preserves_accepted_reaction);
        Alcotest.test_case "valid orphan survives compaction and restart" `Quick

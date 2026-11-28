@@ -375,9 +375,6 @@ export function computeScopeImpact(
       if (a.resolved.kind === 'lane' && a.resolved.id !== null) {
         return laneIdSet.has(a.resolved.id) || runtimeIdSet.has(a.resolved.id)
       }
-      if (a.resolved.kind === 'single_runtime' && a.resolved.id !== null) {
-        return runtimeIdSet.has(a.resolved.id)
-      }
       return false
     })
     .map((a) => a.keeper)

@@ -14,13 +14,6 @@ open Tool_args
 
 (** {1 Individual Handlers} *)
 
-(* Handlers in this module return typed
-   [Tool_result.result]. Missing run initialization is a workflow precondition;
-   damaged records and storage errors remain Runtime_failure. The
-   "task_id is required" caller-input rejections are Workflow_rejection.
-
-   JSON responses flow as typed [~data:json] directly. *)
-
 let task_id_required ~tool_name ~start_time : Tool_result.result =
   Tool_result.make_err
     ~tool_name

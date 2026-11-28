@@ -1006,41 +1006,6 @@ its operation, an interrupted execution that holds no native call, checkpoint
 or Gate approval no longer holds back clearing the Keeper's history or retiring
 the Keeper.
 
-## Resume a refused counterpart-only history read
-
-If the Librarian reports `Counterpart_input_capacity_refused`, its actual
-provider or transport refused the complete counterpart input. The original
-request, source, range coordinates and refusal remain durable. Later ticks,
-worker/server restarts, appended chat and turning the Addon Off/On report the
-same refusal without another model request. Retained-input restoration and
-validation still require I/O; this does not impose a chat capture size limit.
-
-Arrange a provider or transport that accepts the full input, then explicitly
-change the completed-history Addon's semantic configuration, such as its
-declaration's `run_id`, and apply that configuration. This permits a fresh
-request under the current authority checks; it does not prove improved capacity.
-One installation serves every Keeper, so the change reaches the other Keepers'
-requests too. A history question that its worker already holds, with no
-result and no call under way, ends as not allowed once the replacement worker
-is attached. Its Keeper then reads the same range again under the new
-configuration, whole, without waiting for another turn. A history question
-that no worker has received yet is ended by its Keeper's next pass and read
-again the same way. A history question whose model call was under way at the
-change is cut off. After confirming the original host outcome, execution
-proofs and ready replacement, its Keeper stores an ending that leaves the
-input unread. A later pass reads the range again with a new model request.
-Putting the old configuration back preserves an ending already stored;
-linked work follows its saved child intent. Memory publication and source
-acknowledgement are verified separately. A message-floor step that its worker
-holds ends as not allowed too, and its Keeper asks that step again at its
-next pass.
-Changing only the provider registry, a comment or `enabled` does not authorize
-retry. Returning to an already-refused configuration remains stopped while
-that original range is relevant. A later actual Memory-backed reader frontier
-and external ACK can settle the old refusal so it does not block future ranges;
-accounted unread messages retain their ledger entries. Source, progress and
-external ACKs are preserved until ordinary successful publication.
-
 ## Retrieve memory for a purpose
 
 When available in the Keeper's tool surface, `keeper_memory_select` accepts a

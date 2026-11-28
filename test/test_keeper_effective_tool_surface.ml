@@ -131,7 +131,6 @@ let instruction_entries snapshot references =
   match Keeper_task_skill_turn.resolve ~snapshot references with
   | Error error -> fail (Keeper_task_skill_turn.error_to_string error)
   | Ok selection ->
-    let partition = Keeper_task_skill_turn.partition selection in
     List.map
       (fun (selected : Keeper_task_skill_turn.selected) ->
          Keeper_instruction_skill.instruction_skill
@@ -139,7 +138,7 @@ let instruction_entries snapshot references =
            ~description:selected.skill.description
            ~body:selected.skill.body
            ())
-      partition.instructions
+      selection.Keeper_task_skill_turn.selected
 ;;
 
 let names (surface : Keeper_effective_tool_surface.t) =

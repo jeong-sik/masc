@@ -11,7 +11,7 @@
 
 import { html } from 'htm/preact'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
-import { decodeRuntimeObservables, type RuntimeObservablesStoreEntry } from '../../api/runtime-observables'
+import { decodeHostStorageObservables, type RuntimeObservablesStoreEntry } from '../../api/host-storage-observables'
 import { currentSessionEpoch, isEpochCurrent, sessionEpoch } from '../../core/auth'
 import { apiGet } from '../../core/transport'
 import {
@@ -138,7 +138,7 @@ export function HostStorageCard(props: HostStorageCardProps) {
       setStoresState({ kind: 'unavailable', reason: res.error.message })
       return
     }
-    const parsed = decodeRuntimeObservables(res.value)
+    const parsed = decodeHostStorageObservables(res.value)
     if (!parsed) {
       setStoresState({ kind: 'unavailable', reason: 'runtime-observables 미보고' })
       return

@@ -846,12 +846,12 @@ let declared_request_reserve_bytes ~system_prompt ~tools =
    (RFC-0363 §3.4.1), with one exception: a tool result of
    [aged_result_min_bytes] or more that belongs to a turn that ended leaves
    as its marker ([finished_turn_results], RFC-tool-results-age-out-of-context).
-   Each such result changes once, on the first request whose window moved
-   after its turn ended, and goes as the same marker on every later request.
-   Verified arguments of closed calls in ended turns also go as stored
-   references below the same boundary, unless signed reasoning requires
-   their original prefix. A window that stays keeps both where it last sent
-   them, so its prefix holds across turns.
+   Each such result changes once, on the first request after its turn ended,
+   and goes as the same marker on every later request, whether the window
+   stayed or moved. Verified arguments of closed calls in ended turns also go
+   as stored references below the same boundary, unless signed reasoning
+   requires their original prefix. A window that stays therefore changes
+   its prefix once a turn, from the first result of the turn that just ended.
    Other bodies stay as the range first sent them. The range shrinks
    only where its front moves, or as the answer to a size refusal.
 
@@ -1407,13 +1407,12 @@ let past_max_context
 (* What a window that stays keeps where it last sent it. *)
 type held_window =
   { window_opened_at : int
-  ; markers_before : int
   ; working_state : string option
   }
 
 (* At a turn's first request a window holds only while the size signal
-   watches it. Without the signal, a window that keeps its results whole
-   grows until the provider refuses it. Later in the turn it holds where the
+   watches it. Without the signal, a window whose start never moves grows
+   until the provider refuses it. Later in the turn it holds where the
    turn's first request opened it, which the ledger's last request
    records. *)
 let held_window ~opens_turn ~(input_limit : Llm_provider.Input_budget.t option) ~history_digest_at
@@ -1430,7 +1429,6 @@ let held_window ~opens_turn ~(input_limit : Llm_provider.Input_budget.t option) 
     then
       Some
         { window_opened_at = ledger.last.first_atom
-        ; markers_before = ledger.last.demote_before
         ; working_state = ledger.last.working_state
         }
     else None
@@ -1642,22 +1640,6 @@ let drop_atoms_from_projection
       { projection with messages }, Some bytes))
 ;;
 
-(* Where the results and arguments of turns that ended go as markers. A window
-   that stays keeps them below the boundary it last sent, and the arguments
-   the attempt bound at the turn boundary narrow to it. A window that moved
-   demotes every turn that ended. *)
-let finished_boundary ~held_window ~start ~atom_count ~turn_boundary completed_arguments
-      messages =
-  match held_window with
-  | Some { window_opened_at; markers_before; _ } when stays_at ~opened_at:window_opened_at start ->
-    let before = Keeper_carried_front.clamp ~atom_count markers_before in
-    ( before
-    , Option.map
-        (Keeper_model_input_demotion.arguments_before ~atom:before messages)
-        completed_arguments )
-  | Some _ | None -> finished_turn_atoms ~atom_count turn_boundary, completed_arguments
-;;
-
 let compose_carried_model_input_internal
       ?continuity
       ?compaction_anchor
@@ -1713,8 +1695,8 @@ let compose_carried_model_input_internal
      smallest this range can carry, and the attempt's later requests keep the
      same markers. Any other request carries what the range already sent,
      unchanged (RFC-0363 §3.4.1), but for the results and arguments of turns
-     that ended when the caller asks for them as markers: they change only
-     when the window moves ([finished_boundary]). *)
+     that ended when the caller asks for them as markers: they change on the
+     first request after their turn ended ([finished_turn_atoms]). *)
   let planned, demote_before =
     match in_turn_demotion with
     | Demote_closed_current_turn_tools { refused_atom_count }
@@ -1758,10 +1740,7 @@ let compose_carried_model_input_internal
          (match finished_turn_results with
           | Finished_turns_verbatim -> { Keeper_model_input_demotion.messages; pending = [] }, 0
           | Finished_turns_as_markers ->
-            let finished, completed_arguments =
-              finished_boundary ~held_window ~start ~atom_count:history_atom_count ~turn_boundary
-                completed_arguments messages
-            in
+            let finished = finished_turn_atoms ~atom_count:history_atom_count turn_boundary in
             ( demotion_plan ?completed_arguments ~min_result_bytes:aged_result_min_bytes ~measure_message_bytes
                 ~measure_wire_bytes
                 ~base_path ~demote_before:finished messages
@@ -2469,7 +2448,7 @@ let bounded_model_input_projection
       else None
     in
     (* Read before this request moves the ledger: where a window that stays
-       last sent its markers and what working state it carried. *)
+       opened and what working state it carried. *)
     let held_window =
       held_window ~opens_turn ~input_limit:(Lazy.force input_limit) ~history_digest_at
         !(state.ledger)

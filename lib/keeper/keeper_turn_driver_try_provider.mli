@@ -247,8 +247,6 @@ val past_max_context :
 type held_window =
   { window_opened_at : int
         (** Where the ledger's last request opened its range. *)
-  ; markers_before : int
-        (** The boundary that request demoted below. *)
   ; working_state : string option
         (** The working state that request carried; [None] when it carried
             none. *)
@@ -264,10 +262,9 @@ val held_window :
     at a turn's first request ([opens_turn]), the size signal watches the
     window: [input_limit] is resolved and the ledger knows how much one turn
     grows ({!Keeper_model_input_ledger.next_turn_peak}). Without the signal,
-    a window that keeps its results whole grows until the provider refuses
-    it, so that request demotes the turns that ended. Later in the turn the
-    window holds where its first request opened it, which the ledger's last
-    request records. Pure. *)
+    a window whose start never moves grows until the provider refuses it.
+    Later in the turn the window holds where its first request opened it,
+    which the ledger's last request records. Pure. *)
 
 val choose_range_start :
   past_max_context:past_max_context option ->
@@ -756,12 +753,11 @@ type finished_turn_results =
       (** A result of turns that ended, in an atom before the boundary and
           never the newest atom, goes as its externalized marker when its
           body is at least {!aged_result_min_bytes} bytes. The boundary is
-          the one the window last sent while the window stays
-          ({!held_window}), and the turn boundary once it moves.
+          the turn boundary, whether the window stayed or moved.
           The same result is the same marker on every later request, so it
-          changes once, on the first request whose window moved after its
-          turn ended (RFC-tool-results-age-out-of-context). With an unknown
-          turn boundary a window that moves demotes nothing. *)
+          changes once, on the first request after its turn ended
+          (RFC-tool-results-age-out-of-context). With an unknown turn
+          boundary nothing is demoted. *)
 
 val finished_turn_results_for : reader_available:bool -> finished_turn_results
 (** {!Finished_turns_as_markers} for a Keeper that can read markers back
@@ -884,9 +880,8 @@ type composed =
   ; demote_before : int
         (** The boundary the demotion applied: 0 under {!Current_turn_verbatim}
             with {!Finished_turns_verbatim} or with no store; under
-            {!Finished_turns_as_markers} the held boundary while the window
-            stays, else the last ended turn's end; the refused request's atom
-            count under {!Current_turn_demoted}. *)
+            {!Finished_turns_as_markers} the last ended turn's end; the
+            refused request's atom count under {!Current_turn_demoted}. *)
   ; working_state : string option
         (** The working state the range carried ahead of its atoms
             ({!carried_working_state}). *)
@@ -1014,10 +1009,9 @@ module For_testing : sig
       demotion plan, on the range the checkpoint history chose.
       [past_max_context] goes to {!choose_range_start}; omitted, no window
       moves for size. The turn driver passes it at a turn's first request.
-      [held_window] keeps the markers, arguments and working state of a
-      window that stays where they were last sent; omitted, the markers and
-      arguments follow the turn boundary and the working state is the
-      snapshot's. *)
+      [held_window] keeps the working state of a window that stays as it
+      was last sent; omitted, the working state is the snapshot's. The
+      markers and arguments follow the turn boundary either way. *)
 
   type in_turn_overflow_demotion =
     | No_in_turn_demotion

@@ -627,12 +627,12 @@ let test_memory_receipt_failure_fences_enclosing_recovery () =
    The pair's ledger last carried a window that opened at atom 4; the last
    completed turn ended at atom 8. Under that window the second turn grew
    from 1,500 to 2,400, so the next turn is expected at 2,400 + 900. *)
-let window_ledger ?(demote_before = 0) ~history ~first_atom counts =
+let window_ledger ~history ~first_atom counts =
   let atom_count, digest_at = Window.atom_opening_index history in
   List.fold_left
     (fun ledger (turn_context, input_tokens) ->
        let request =
-         { (request ~digest_at ~first_atom ~atom_count) with turn_context; demote_before }
+         { (request ~digest_at ~first_atom ~atom_count) with turn_context }
        in
        Some
          (Ledger.observe ~digest_at ledger request
@@ -802,7 +802,7 @@ let test_the_size_signal_moves_only_a_window_that_stays () =
 let test_a_window_that_stays_holds_behind_the_librarian_point () =
   let history = exchanges ~from:0 10 in
   let held at =
-    Some { Try_provider.window_opened_at = at; markers_before = 0; working_state = None }
+    Some { Try_provider.window_opened_at = at; working_state = None }
   in
   let start ~held_window ~point accepted =
     let { Try_provider.start; _ } =
@@ -848,8 +848,7 @@ let test_the_size_signal_moves_to_the_librarian_point () =
     let choice =
       Try_provider.choose_range_start ~past_max_context
         ~held_window:
-          (Some
-             { Try_provider.window_opened_at = held_at; markers_before = 0; working_state = None })
+          (Some { Try_provider.window_opened_at = held_at; working_state = None })
         ~continuity:(Some (absorbed_at ~point)) ~front:None ~accepted:(Some accepted)
         ~history_digest_at:(Window.atom_opening_digest history) ~turn_boundary:boundary_8
         ~this_turn_start:None
@@ -866,27 +865,25 @@ let test_the_size_signal_moves_to_the_librarian_point () =
     (choose ~held_at:6 ~point:7 held_front)
 ;;
 
-(* Markers wait for the window to move only while the size signal watches
-   it. *)
-let test_markers_wait_only_while_the_size_signal_watches () =
+(* A window holds where it opened only while the size signal watches it. *)
+let test_a_window_holds_only_while_the_size_signal_watches () =
   let history = exchanges ~from:0 10 in
   let held ?(opens_turn = true) ?(input_limit = input_limit_of (Some 400_000)) ledger =
     Option.map
-      (fun (held : Try_provider.held_window) -> held.window_opened_at, held.markers_before)
+      (fun (held : Try_provider.held_window) -> held.window_opened_at)
       (Try_provider.held_window ~opens_turn ~input_limit
          ~history_digest_at:(Window.atom_opening_digest history) ledger)
   in
-  let at = option (pair int int) in
-  let grown = window_ledger ~demote_before:6 ~history ~first_atom:4 grown_turns in
-  check at "the signal watches: the markers stay where the window sent them" (Some (4, 6))
-    (held grown);
-  check at "no derived input limit: a turn's first request demotes the ended turns" None
+  let at = option int in
+  let grown = window_ledger ~history ~first_atom:4 grown_turns in
+  check at "the signal watches: the window holds where it opened" (Some 4) (held grown);
+  check at "no derived input limit: a turn's first request holds nothing" None
     (held ~input_limit:None grown);
   let unmeasured =
-    window_ledger ~demote_before:6 ~history ~first_atom:4 [ true, 1_000; false, 2_900 ]
+    window_ledger ~history ~first_atom:4 [ true, 1_000; false, 2_900 ]
   in
   check at "no turn has grown under the ledger yet: the same" None (held unmeasured);
-  check at "later in the turn they stay where its first request put them" (Some (4, 6))
+  check at "later in the turn it holds where its first request opened it" (Some 4)
     (held ~opens_turn:false ~input_limit:None unmeasured);
   check at "no ledger holds nothing" None (held ~opens_turn:false None);
   check at "a ledger this history does not hold holds nothing" None
@@ -1322,9 +1319,9 @@ let () =
         ; test_case "it moves only a window that stays" `Quick
             test_the_size_signal_moves_only_a_window_that_stays
         ] )
-    ; ( "held markers"
-      , [ test_case "they wait only while the size signal watches" `Quick
-            test_markers_wait_only_while_the_size_signal_watches
+    ; ( "held window watch"
+      , [ test_case "a window holds only while the size signal watches" `Quick
+            test_a_window_holds_only_while_the_size_signal_watches
         ] )
     ; ( "held window"
       , [ test_case "it stays behind the Librarian point" `Quick

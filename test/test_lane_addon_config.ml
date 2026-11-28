@@ -21,8 +21,9 @@ let with_directory f =
 (* [with_directory] keeps the package folders beside the declarations, so a
    declaration that names a carried package finds it there too. *)
 let packages_beside directory = Filename.concat (Filename.dirname directory) "packages"
-let load_declaration ~path = Config.load_file ~packages:(packages_beside (Filename.dirname path)) ~path
-let load_declarations ~directory = Config.load ~packages:(packages_beside directory) ~directory
+let load_declaration ~path = Config.load_file ~packages:(packages_beside (Filename.dirname path))
+  ~workspace:(Filename.dirname (Filename.dirname path)) ~path
+let load_declarations ~directory = Config.load ~packages:(packages_beside directory) ~workspace:(Filename.dirname directory) ~directory
 let package ?(title = "Example observer") () =
   Printf.sprintf {|id = "example"
 revision = "1"
@@ -1462,7 +1463,7 @@ contributions=["observe"]
 max_reply_bytes=4096
 |};
   let path=Filename.concat directory "ego.toml" in
-  let load space=Config.load_source ~packages:(packages_beside (Filename.dirname path)) ~manifest_scope:Config.Operator_declared ~source_path:path ~source_text:(declaration ("[binding]\nsources=[]\n" ^ space)) in
+  let load space=Config.load_source ~packages:(packages_beside (Filename.dirname path)) ~manifest_scope:(Config.Declared_authority (Filename.dirname directory)) ~source_path:path ~source_text:(declaration ("[binding]\nsources=[]\n" ^ space)) in
   let workspace=unwrap (load "") and first=unwrap (load "space=\"first Goal\"\n")
   and second=unwrap (load "space=52\n") in
   check bool "Space is retained in declaration binding" true (Yojson.Safe.Util.member "space" second.binding=`Int 52);

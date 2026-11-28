@@ -115,7 +115,7 @@ schema = "out.json"
 schema = "out.json"
 |};
   write (Filename.concat directory "quiz.toml") (declaration manifest "quiz");
-  let declarations = Config.load ~packages:(Config_dir_resolver.packages_dir ~base_path:root) ~directory in
+  let declarations = Config.load ~packages:(Config_dir_resolver.packages_dir ~base_path:root) ~workspace:root ~directory in
   let d = match declarations.declarations with
     | [d] -> d
     | _ -> fail (String.concat "; " (List.map (fun (issue : Config.issue) -> issue.message) declarations.issues)) in
@@ -147,7 +147,7 @@ schema = "out.json"
 let application_is_bound_to_the_observed_declaration () = with_fixture (fun _env _sw _config root directory ->
   let manifest = package root in
   write (Filename.concat directory "off.toml") ("enabled = false\n" ^ declaration manifest "off");
-  let declarations = Config.load ~packages:(Config_dir_resolver.packages_dir ~base_path:root) ~directory in
+  let declarations = Config.load ~packages:(Config_dir_resolver.packages_dir ~base_path:root) ~workspace:root ~directory in
   let d = match declarations.declarations with [d] -> d | _ -> fail "one valid declaration" in
   let observed application : Addon.configuration_application =
     {owner={id=d.id;source_path=d.source_path;revision=d.revision};
@@ -199,7 +199,7 @@ let retained_metadata () = with_fixture (fun _env _sw config root directory ->
   check bool "retained files do not create a manager" false owner.owner_present;
   check bool "bad sibling is partial" false owner.complete;
   check int "readable sibling metadata remains" 2 (List.length owner.instances);
-  let rows = Inventory.For_testing.package_rows ~applications:[] ~declarations:(Config.load ~packages:(Config_dir_resolver.packages_dir ~base_path:root) ~directory) ~instances:owner.instances
+  let rows = Inventory.For_testing.package_rows ~applications:[] ~declarations:(Config.load ~packages:(Config_dir_resolver.packages_dir ~base_path:root) ~workspace:root ~directory) ~instances:owner.instances
     ~exact_outputs:(fun _ -> []) in
   check bool "manual selection keeps exact incarnation" true
     (List.exists (fun (row : Inventory.row) -> row.selection=Inventory.Manual_instance {instance_id="manual";incarnation="manual"}) rows);
@@ -405,7 +405,7 @@ let suffix_only_declaration_is_editable () = with_fixture (fun _ _ config root d
   let observed = Inventory.snapshot ~config |> Inventory.to_json in
   check bool "loader exposes suffix-only direct child" true
     (List.exists (fun row -> member "source_path" (member "selection" row)=`String source_path) (values "rows" observed));
-  match Lane_addon_declaration.read ~packages:(Config_dir_resolver.packages_dir ~base_path:root) ~directory ~source_path with
+  match Lane_addon_declaration.read ~packages:(Config_dir_resolver.packages_dir ~base_path:root) ~workspace:root ~directory ~source_path with
   | Ok document -> check string "same enumerated source can be opened" ".toml" document.file_name
   | Error e -> fail e.message)
 
@@ -524,7 +524,7 @@ max_reply_bytes = 4096
   let path = Filename.concat directory "work.toml" in
   let read text =
     write path text;
-    let loaded = Config.load ~packages:(Config_dir_resolver.packages_dir ~base_path:root) ~directory in
+    let loaded = Config.load ~packages:(Config_dir_resolver.packages_dir ~base_path:root) ~workspace:root ~directory in
     if loaded.issues <> [] then
       fail (String.concat "; " (List.map (fun (issue : Config.issue) -> issue.message) loaded.issues));
     live_presence ~declarations:loaded ~applications:(fun () -> []) in
@@ -537,7 +537,7 @@ max_reply_bytes = 4096
      = Browser_addon_presence.Not_running Browser_addon_presence.Not_known);
   (* How the maintenance pass applied that declaration says why it is not
      running; an observation of another revision says nothing. *)
-  let on = Config.load ~packages:(Config_dir_resolver.packages_dir ~base_path:root) ~directory in
+  let on = Config.load ~packages:(Config_dir_resolver.packages_dir ~base_path:root) ~workspace:root ~directory in
   let applied ?(revision=fun (d : Config.declaration) -> d.revision) application =
     List.map (fun (d : Config.declaration) ->
       ({owner={id=d.id;source_path=d.source_path;revision=revision d};source_revision=d.source_revision;
@@ -563,7 +563,7 @@ max_reply_bytes = 4096
   (* A switched-off browser Add-on beside a declaration that could not be read
      is not proof that none is on: the unread one may be a browser switched on. *)
   write path ("enabled = false\n" ^ declaration browser "browser-work");
-  let switched_off = Config.load ~packages:(Config_dir_resolver.packages_dir ~base_path:root) ~directory in
+  let switched_off = Config.load ~packages:(Config_dir_resolver.packages_dir ~base_path:root) ~workspace:root ~directory in
   check bool "a switched-off browser Add-on in an incomplete read is not taken for off" true
     (match live_presence ~declarations:{switched_off with complete=false}
              ~applications:(fun () -> []) with

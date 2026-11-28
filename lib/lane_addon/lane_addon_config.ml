@@ -28,7 +28,7 @@ type snapshot = {
   complete : bool;
 }
 
-type manifest_scope = Operator_declared | Within_workspace of string
+type manifest_scope = Within_workspace of string | Declared_authority of string
 
 type failure = { issue : issue; unreadable : bool }
 open Result.Syntax
@@ -192,9 +192,12 @@ let decode ~packages ~manifest_scope ~source_path ~source_revision ~id fields =
     | Manifest_path ->
         let* manifest_path = text fields "manifest_path" in
         let manifest_path = absolute_from ~directory manifest_path in
-        (match manifest_scope with
-         | Operator_declared -> Ok manifest_path
-         | Within_workspace workspace ->
+        (* RFC lane-declaration-operator-authority 6.3: only the operator's
+           line lets a declaration file point outside the workspace. *)
+        (match manifest_scope, authority with
+         | Declared_authority _, Operator_marked -> Ok manifest_path
+         | Declared_authority workspace, Unmarked
+         | Within_workspace workspace, (Operator_marked | Unmarked) ->
              Lane_addon_manifest.resolve_in_workspace ~workspace manifest_path
              |> Option.to_result ~none:Lane_addon_manifest.outside_workspace) in
   let* package = Lane_addon_manifest.load ~path:manifest_path
@@ -282,14 +285,14 @@ let load_source ~packages ~manifest_scope ~source_path ~source_text =
   parse_declaration ~packages ~manifest_scope ~source_path:(absolute source_path) source_text
   |> Result.map_error (fun failure -> failure.issue.message)
 
-let read_declaration ~packages ~path =
+let read_declaration ~packages ~workspace ~path =
   let source_path = absolute path in
   match read_document source_path with
   | Error message -> Error {issue={source_path;id=None;message};unreadable=true}
-  | Ok bytes -> parse_declaration ~packages ~manifest_scope:Operator_declared ~source_path bytes
+  | Ok bytes -> parse_declaration ~packages ~manifest_scope:(Declared_authority workspace) ~source_path bytes
 
-let load_file ~packages ~path =
-  read_declaration ~packages ~path |> Result.map_error (fun failure -> failure.issue.message)
+let load_file ~packages ~workspace ~path =
+  read_declaration ~packages ~workspace ~path |> Result.map_error (fun failure -> failure.issue.message)
 
 (* The declaration files of [directory], in name order. *)
 let declaration_paths directory =
@@ -309,14 +312,14 @@ let declaration_paths directory =
        | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok []
        | exception Unix.Unix_error _ -> Error message)
 
-let load ~packages ~directory =
+let load ~packages ~workspace ~directory =
   let directory = absolute directory in
   match declaration_paths directory with
   | Error message ->
       { declarations = []; issues = [{source_path = directory; id = None; message}];
         paths = []; complete = false }
   | Ok paths ->
-      let results = List.map (fun path -> path, read_declaration ~packages ~path) paths in
+      let results = List.map (fun path -> path, read_declaration ~packages ~workspace ~path) paths in
       let id_of_result = function
         | Ok (declaration : declaration) -> Some declaration.id
         | Error failure -> failure.issue.id in

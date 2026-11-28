@@ -651,7 +651,7 @@ let authorize_captured_exact_dispatch ~store ~declaration_id ~package_id ~config
       match m.configuration_status with
       | None -> not_now "Original Add-on configuration has not been observed"
       | Some reading ->
-      let snapshot=offload (fun () -> Lane_addon_config.load ~packages:(carried_packages m) ~directory:reading.directory) in
+      let snapshot=offload (fun () -> Lane_addon_config.load ~packages:(carried_packages m) ~workspace:m.base_path ~directory:reading.directory) in
       if not snapshot.complete
       then not_now "Original Exact dispatch requires a complete fresh Add-on configuration"
       else
@@ -2224,7 +2224,7 @@ let with_operator_connection ~config ~access ~instance_id ~expected_incarnation 
         | None -> Ok ()
         | Some owner ->
             let* reading = Option.to_result ~none:Operator_unavailable m.configuration_status in
-            let snapshot = offload (fun () -> Lane_addon_config.load ~packages:(carried_packages m) ~directory:reading.directory) in
+            let snapshot = offload (fun () -> Lane_addon_config.load ~packages:(carried_packages m) ~workspace:m.base_path ~directory:reading.directory) in
             if snapshot.complete && List.exists (fun (d : Lane_addon_config.declaration) ->
                 d.id=owner.id && d.source_path=owner.source_path && d.revision=owner.revision
                 && d.enabled && same_execution_package d.package e.package) snapshot.declarations
@@ -2500,7 +2500,7 @@ let with_tool_request_destination_on_owner ~config ~access ~reserved ~(export : 
       let* directory = match m.configuration_status with
         | None -> Error (Unavailable "Add-on configuration has not been observed")
         | Some reading -> Ok reading.directory in
-      let snapshot = offload (fun () -> Lane_addon_config.load ~packages:(carried_packages m) ~directory) in
+      let snapshot = offload (fun () -> Lane_addon_config.load ~packages:(carried_packages m) ~workspace:m.base_path ~directory) in
       let* () = if snapshot.complete then Ok ()
         else Error (Unavailable "New work requires a complete fresh Add-on declaration reading") in
       let* declaration = match List.find_opt (fun (d : Lane_addon_config.declaration) ->
@@ -3777,7 +3777,7 @@ let authorize_document m ~workspace ~access (document : Lane_addon_declaration.d
                  message="Lane declaration is unavailable to this caller";current=None})
       | None ->
       let* declaration = offload (fun () -> Lane_addon_config.load_source ~packages:(carried_packages m)
-        ~manifest_scope:Lane_addon_config.Operator_declared
+        ~manifest_scope:(Lane_addon_config.Declared_authority workspace)
         ~source_path:document.source_path ~source_text:document.source_text)
         |> Result.map_error (fun _ -> {Lane_addon_declaration.code=Invalid_request;
             message="Lane declaration is unavailable to this caller";current=None}) in
@@ -3795,7 +3795,7 @@ let read_declaration ?(access = Lane_addon_sources.Unauthenticated) ~config json
   Eio.Mutex.use_ro m.configuration_mutex (fun () ->
     let denied = {Lane_addon_declaration.code=Invalid_request;
       message="Lane declaration is unavailable to this caller";current=None} in
-    let* document = offload (fun () -> Lane_addon_declaration.read ~packages:(carried_packages m) ~directory ~source_path)
+    let* document = offload (fun () -> Lane_addon_declaration.read ~packages:(carried_packages m) ~workspace:m.base_path ~directory ~source_path)
       |> Result.map_error (fun error -> match access, error.Lane_addon_declaration.code with
         | (Keeper _ | Unauthenticated), Not_found -> denied
         | ((Lane_addon_sources.Keeper _ | Lane_addon_sources.Unauthenticated), (Lane_addon_declaration.Invalid_request | (Lane_addon_declaration.Revision_conflict | (Lane_addon_declaration.Invalid_declaration | Lane_addon_declaration.Io_error))))
@@ -3814,7 +3814,7 @@ let save_declaration ?(access = Lane_addon_sources.Unauthenticated) ~config json
   let* directory = edit_directory config in
   let m = manager config in
   Eio.Mutex.use_ro m.configuration_mutex (fun () ->
-    let* current = match offload (fun () -> Lane_addon_declaration.read ~packages:(carried_packages m) ~directory
+    let* current = match offload (fun () -> Lane_addon_declaration.read ~packages:(carried_packages m) ~workspace:m.base_path ~directory
       ~source_path:(Filename.concat directory request.file_name)) with
       | Ok current ->
           let* () = match access with
@@ -3883,14 +3883,14 @@ let save_declaration ?(access = Lane_addon_sources.Unauthenticated) ~config json
               ~prior_revision:(Option.map (fun (d : Lane_addon_declaration.document) -> d.source_revision) current)
               ~proposed_revision:(Lane_addon_store.digest request.source_text))
           |> Result.map_error ownership_error in
-    let* receipt = offload (fun () -> write ~packages:(carried_packages m) ~directory request)
+    let* receipt = offload (fun () -> write ~packages:(carried_packages m) ~workspace:m.base_path ~directory request)
       |> Result.map_error (fun error -> match access with
           | Lane_addon_sources.Operator_configuration -> error
           | Keeper _ | Unauthenticated -> {error with Lane_addon_declaration.current=None}) in
     let* () = match candidate_owner, receipt.durability with
       | Some keeper, Lane_addon_declaration.Durable ->
           offload (fun () ->
-            let* observed = Lane_addon_declaration.read ~packages:(carried_packages m) ~directory ~source_path in
+            let* observed = Lane_addon_declaration.read ~packages:(carried_packages m) ~workspace:m.base_path ~directory ~source_path in
             if observed.source_revision <> receipt.document.source_revision
             then Error (ownership_error "declaration changed before ownership admission completed")
             else Lane_addon_document_owner.complete ~root:(Lane_addon_store.root m.store)
@@ -3898,7 +3898,7 @@ let save_declaration ?(access = Lane_addon_sources.Unauthenticated) ~config json
               |> Result.map_error ownership_error)
       | None, (Durable | Unconfirmed _) ->
           offload (fun () ->
-            let* observed = Lane_addon_declaration.read ~packages:(carried_packages m) ~directory ~source_path in
+            let* observed = Lane_addon_declaration.read ~packages:(carried_packages m) ~workspace:m.base_path ~directory ~source_path in
             if observed.source_revision <> receipt.document.source_revision
             then Error (ownership_error "declaration changed before shared ownership withdrawal")
             else Lane_addon_document_owner.revoke ~root:(Lane_addon_store.root m.store) ~source_path
@@ -3914,8 +3914,8 @@ let save_declaration ?(access = Lane_addon_sources.Unauthenticated) ~config json
    declaration, if any. Detach asks this before it stops anything, so a
    declaration that changed or became invalid since it was applied is refused
    while the worker still runs. *)
-let removable_declaration ~packages ~access ~directory (owner : configuration_owner) =
-  let snapshot = Lane_addon_config.load ~packages ~directory in
+let removable_declaration ~packages ~access ~workspace ~directory (owner : configuration_owner) =
+  let snapshot = Lane_addon_config.load ~packages ~workspace ~directory in
   if not snapshot.complete then Error "Lane configuration directory could not be read; removal was not applied"
   else
     let matches = List.filter (fun (d : Lane_addon_config.declaration) -> d.id = owner.id) snapshot.declarations in
@@ -3929,8 +3929,8 @@ let removable_declaration ~packages ~access ~directory (owner : configuration_ow
     | [], [] -> Ok None
     | _ -> Error "Lane configuration identity is ambiguous; remove its duplicate declarations"
 
-let check_configuration_removable ~packages ~access ~directory owner =
-  Result.map (fun (_ : string option) -> ()) (removable_declaration ~packages ~access ~directory owner)
+let check_configuration_removable ~packages ~access ~workspace ~directory owner =
+  Result.map (fun (_ : string option) -> ()) (removable_declaration ~packages ~access ~workspace ~directory owner)
 
 (* What one Detach did to the declaration that wanted its worker. Deleting the
    file edits the operator's configuration, so the answer names the file. *)
@@ -3954,8 +3954,8 @@ let declaration_outcome_json outcome =
     | Declaration_kept Applied_by_another_instance ->
         ["outcome", `String "kept"; "reason", `String "applied_by_another_instance"])
 
-let remove_configuration_file ~packages ~access ~directory (owner : configuration_owner) =
-    let* path = removable_declaration ~packages ~access ~directory owner in
+let remove_configuration_file ~packages ~access ~workspace ~directory (owner : configuration_owner) =
+    let* path = removable_declaration ~packages ~access ~workspace ~directory owner in
     match path with
     | None -> Ok Declaration_absent
     | Some path ->
@@ -3975,7 +3975,7 @@ let remove_configuration_file ~packages ~access ~directory (owner : configuratio
               ^ call ^ ": " ^ Unix.error_message error) in
         (try
            Unix.rename path staged;
-           match Lane_addon_config.load_file ~packages ~path:staged with
+           match Lane_addon_config.load_file ~packages ~workspace ~path:staged with
            | Ok current when current.id = owner.id && current.revision = owner.revision ->
                (* The line is outside the revision, so it is read again here. *)
                (match change_declaration_file ~access current.authority with
@@ -4523,8 +4523,8 @@ let dispatch ?caller ?(access = Lane_addon_sources.Unauthenticated) ~config ~ope
            the worker still running, and it is removed only after the cleanup is
            confirmed. A cleanup that fails leaves the declaration in place and
            returns the failure. *)
-        let check owner = runtime_result (offload (fun () -> check_configuration_removable ~packages:(carried_packages m) ~access ~directory owner)) in
-        let remove owner = runtime_result (offload (fun () -> remove_configuration_file ~packages:(carried_packages m) ~access ~directory owner)) in
+        let check owner = runtime_result (offload (fun () -> check_configuration_removable ~packages:(carried_packages m) ~access ~workspace:m.base_path ~directory owner)) in
+        let remove owner = runtime_result (offload (fun () -> remove_configuration_file ~packages:(carried_packages m) ~access ~workspace:m.base_path ~directory owner)) in
         (* The reply carries what happened to the declaration; the server log
            repeats a deletion for whoever looks for the file later. *)
         let answer ~instance_id fields outcome =
@@ -4576,7 +4576,7 @@ let retain_configured_document_owner m (d : Lane_addon_config.declaration) visib
       Lane_addon_document_owner.revoke ~root:(Lane_addon_store.root m.store) ~source_path:d.source_path)
   | Keeper_only keeper -> offload (fun () ->
       let root = Lane_addon_store.root m.store in
-      let read () = Lane_addon_declaration.read ~packages:(carried_packages m) ~directory:(Filename.dirname d.source_path)
+      let read () = Lane_addon_declaration.read ~packages:(carried_packages m) ~workspace:m.base_path ~directory:(Filename.dirname d.source_path)
         ~source_path:d.source_path |> Result.map_error (fun error -> error.Lane_addon_declaration.message) in
       let* document = read () in
       if document.desired_revision <> Some d.revision
@@ -4605,7 +4605,7 @@ let configuration_event_packages m previous (current : configuration_reading) =
 let reconcile_configuration ~config ~directory = Eio_context.run_on_owner_domain (fun () ->
   let m = manager config in
   let* (result,changed),removal=Eio.Mutex.use_ro m.configuration_mutex (fun () ->
-    let snapshot = offload (fun () -> Lane_addon_config.load ~packages:(carried_packages m) ~directory) in
+    let snapshot = offload (fun () -> Lane_addon_config.load ~packages:(carried_packages m) ~workspace:m.base_path ~directory) in
     let rec desired_visibility visiting (d : Lane_addon_config.declaration) =
       if List.mem d.id visiting then Error "Lane output connection cycle"
       else binding_visibility m ~access:Lane_addon_sources.Operator_configuration

@@ -121,7 +121,7 @@ let created (one : S.installed) =
 let test_shipped_ego_binding_schema_accepts_all_targets () =
   with_workspace (fun base ->
     let one = installed_one base B.Ego in
-    let declared = match Config.load_file ~packages:(Config_dir_resolver.packages_dir ~base_path:base) ~path:(created one) with
+    let declared = match Config.load_file ~packages:(Config_dir_resolver.packages_dir ~base_path:base) ~workspace:base ~path:(created one) with
       | Ok declared -> declared
       | Error detail -> fail detail in
     let schema = match declared.package.binding_schema with
@@ -180,7 +180,7 @@ let test_each_requested_source_gets_its_package_and_declaration () =
          check int (name ^ ": every file written") (List.length files) one.files_written;
          let path = created one in
          check string (name ^ ": its declaration file") (declaration_path base backend) path;
-         match Config.load_file ~packages:(Config_dir_resolver.packages_dir ~base_path:base) ~path with
+         match Config.load_file ~packages:(Config_dir_resolver.packages_dir ~base_path:base) ~workspace:base ~path with
          | Error message -> failf "%s: the server's reader refuses the declaration: %s" name message
          | Ok declared ->
            check string (name ^ ": the declaration id") (S.package_name backend) declared.id;

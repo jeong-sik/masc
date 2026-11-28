@@ -78,8 +78,8 @@ let read_bytes path = protect (fun () ->
             then Ok (Some bytes) else reject Io_error "declaration changed while reading"
           with End_of_file -> reject Io_error "declaration changed while reading"))
 
-let describe ~packages ~snapshot ~path source_text =
-  let parsed = Lane_addon_config.load_source ~packages ~manifest_scope:Lane_addon_config.Operator_declared ~source_path:path ~source_text in
+let describe ~packages ~workspace ~snapshot ~path source_text =
+  let parsed = Lane_addon_config.load_source ~packages ~manifest_scope:(Lane_addon_config.Declared_authority workspace) ~source_path:path ~source_text in
   let desired_revision, messages = match parsed with
     | Error message -> None,[message]
     | Ok declaration ->
@@ -96,7 +96,7 @@ let describe ~packages ~snapshot ~path source_text =
   {file_name=Filename.basename path;source_path=path;source_text;source_revision=digest source_text;
    desired_revision;messages}
 
-let read ~packages ~directory ~source_path =
+let read ~packages ~workspace ~directory ~source_path =
   let* name = file_name (Filename.basename source_path) in
   if source_path <> Filename.concat directory name
   then reject Invalid_request "source_path must identify a direct declaration in the resolved Lane directory"
@@ -105,8 +105,8 @@ let read ~packages ~directory ~source_path =
     match bytes with
     | None -> reject Not_found "declaration file is absent"
     | Some bytes -> protect (fun () ->
-        let snapshot = Lane_addon_config.load ~packages ~directory in
-        Ok (describe ~packages ~snapshot ~path:source_path bytes))
+        let snapshot = Lane_addon_config.load ~packages ~workspace ~directory in
+        Ok (describe ~packages ~workspace ~snapshot ~path:source_path bytes))
 
 let replacement_result ~document ~state = function
   | Ok () -> Ok {document;state;durability=Durable}
@@ -147,19 +147,19 @@ let create ~replace_file ~directory ~(document : document) =
            with Unix.Unix_error (error,call,path) ->
              Ok {document;state=Created;durability=Unconfirmed (call ^ " " ^ path ^ ": " ^ Unix.error_message error)})
 
-let write_with ~replace_file ~packages ~directory request = protect (fun () ->
+let write_with ~replace_file ~packages ~workspace ~directory request = protect (fun () ->
   Fs_compat.mkdir_p directory;
   let path = Filename.concat directory request.file_name in
   let* bytes = read_bytes path in
-  let snapshot = Lane_addon_config.load ~packages ~directory in
-  let current = Option.map (describe ~packages ~snapshot ~path) bytes in
+  let snapshot = Lane_addon_config.load ~packages ~workspace ~directory in
+  let current = Option.map (describe ~packages ~workspace ~snapshot ~path) bytes in
   let* () = match request.expected,current with
     | Create,None -> Ok ()
     | Save revision,Some observed when revision=observed.source_revision -> Ok ()
     | Create,Some _ | Save _,(None | Some _) -> reject ?current Revision_conflict "declaration source changed; read the current document before saving" in
   if not snapshot.complete then reject ?current Io_error "configuration inventory is unreadable; no declaration was written"
   else
-    let document = describe ~packages ~snapshot ~path request.source_text in
+    let document = describe ~packages ~workspace ~snapshot ~path request.source_text in
     if document.messages <> [] then reject ?current Invalid_declaration (String.concat "; " document.messages)
     else
       (* Recheck after manifest/inventory I/O. This detects an external editor's
@@ -167,7 +167,7 @@ let write_with ~replace_file ~packages ~directory request = protect (fun () ->
          compare-and-swap participant with this process's serializer. *)
       let* latest = read_bytes path in
       if latest <> bytes then
-        let current = Option.map (describe ~packages ~snapshot ~path) latest in
+        let current = Option.map (describe ~packages ~workspace ~snapshot ~path) latest in
         reject ?current Revision_conflict "declaration changed while its candidate was validated"
       else match current,request.expected with
       | Some observed,Save _ when observed.source_text=request.source_text ->
@@ -181,6 +181,6 @@ let write_with ~replace_file ~packages ~directory request = protect (fun () ->
       | _,Create -> create ~replace_file ~directory ~document
       | _,Save _ -> replacement_result ~document ~state:Saved (replace_file path request.source_text))
 
-let write ~packages ~directory request =
-  write_with ~replace_file:Fs_compat.save_file_atomic_strict_staged ~packages ~directory request
+let write ~packages ~workspace ~directory request =
+  write_with ~replace_file:Fs_compat.save_file_atomic_strict_staged ~packages ~workspace ~directory request
 module For_testing = struct let write = write_with end

@@ -296,17 +296,12 @@ val validate_turn :
     for a bad configuration, then {!Message_over_client_limit} for a [prompt]
     longer than {!Runtime_acp_client.antigravity_message_max_bytes}. *)
 
-val context_submission_to_json : Runtime_official_client_write.t -> Yojson.Safe.t
-(** Content-free proof that the prompt was written to the client's stdin and
-    EOF delivered. Not the client's acceptance. *)
-
 val run_turn :
   ?conversation_mode:conversation_mode ->
   ?home_dir:string ->
   ?before_spawn:(unit -> (unit, string) result) ->
   ?on_spawned:(pid:int -> unit) ->
   ?on_prompt_sent:(unit -> unit) ->
-  ?on_context_submission:(Runtime_official_client_write.t -> unit) ->
   ?on_terminal_received:(unit -> unit) ->
     (** Pure observer after the matching result is decoded, before stream or
         usage callbacks and process draining; not successful completion or a
@@ -334,10 +329,6 @@ val run_turn :
     the spawned client's stdin and EOF has been delivered. It does not claim
     provider acceptance or successful execution. Spawn, validation, and partial
     write failures do not call it. Callback failures fail the runtime turn.
-
-    [on_context_submission] receives the receipt of those stdin bytes (one
-    [Whole_write] slot) just before [on_prompt_sent]. Its non-reserved
-    exceptions are logged as unavailable measurement and the turn continues.
 
     [home_dir], when present, replaces inherited [HOME] and removes inherited
     XDG directory overrides before spawning the official client. *)

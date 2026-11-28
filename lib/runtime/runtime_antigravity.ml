@@ -927,21 +927,11 @@ let status_to_string = function
   | `Signaled signal -> Printf.sprintf "signal %d" signal
 ;;
 
-let context_submission_to_json write =
-  `Assoc
-    [ "schema", `String "masc.antigravity-context-submission.v1"
-    ; "phase", `String "stdin_write_completed"
-    ; "frame", `String "stdin_prompt"
-    ; "write", Runtime_official_client_write.to_json write
-    ; "client_acceptance", `String "not_observed_by_this_event"
-    ]
-;;
-
 let child_fd_sampler_key : (unit -> Runtime_cli_spawn_gate.child_fds) Eio.Fiber.key =
   Eio.Fiber.create_key ()
 ;;
 
-let run_spawned ?home_dir ?before_spawn ?on_spawned ?on_prompt_sent ?on_context_submission ~mgr ~clock ~cwd config ~conversation_mode
+let run_spawned ?home_dir ?before_spawn ?on_spawned ?on_prompt_sent ~mgr ~clock ~cwd config ~conversation_mode
     ~prompt ~on_conversation_ready ~on_stream_event ~on_terminal_received =
   Eio.Switch.run (fun sw ->
     let stderr_tail = Stderr.create ~limit:stderr_tail_bytes in
@@ -984,13 +974,6 @@ let run_spawned ?home_dir ?before_spawn ?on_spawned ?on_prompt_sent ?on_context_
          raises, the failed fiber cancels [sw] and the pipe's switch-owned
          release handler closes [stdin_w]. *)
       Eio.Flow.close stdin_w;
-      (* The receipt is of the bytes just written; hashing a long prompt runs
-         off the scheduler domain. *)
-      Option.iter (fun observer ->
-        Runtime_official_client_write.report ~label:"Antigravity stdin prompt" observer
-          (Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
-             Runtime_official_client_write.raw prompt)))
-        on_context_submission;
       Option.iter (fun callback -> callback ()) on_prompt_sent);
     (* Diagnostics only, so a daemon: the switch cancels it once the body
        returns. A grandchild the CLI leaves behind (an MCP server orphaned
@@ -1153,7 +1136,7 @@ let run_spawned ?home_dir ?before_spawn ?on_spawned ?on_prompt_sent ?on_context_
     status, !state, String.trim (Stderr.contents stderr_tail))
 ;;
 
-let run_turn ?(conversation_mode = Start) ?home_dir ?before_spawn ?on_spawned ?on_prompt_sent ?on_context_submission
+let run_turn ?(conversation_mode = Start) ?home_dir ?before_spawn ?on_spawned ?on_prompt_sent
     ?(on_terminal_received = fun () -> ()) ~host:(_ : Runtime_account_access.host_account)
     ~mgr ~clock ~cwd
     ?(on_conversation_ready = fun ~conversation_id:_ -> Ok ()) ?on_stream_event
@@ -1176,7 +1159,6 @@ let run_turn ?(conversation_mode = Start) ?home_dir ?before_spawn ?on_spawned ?o
              ?before_spawn
              ?on_spawned
              ?on_prompt_sent
-             ?on_context_submission
              ~mgr
              ~clock
              ~cwd

@@ -1840,8 +1840,8 @@ let run_without_lifecycle ~on_guidance_prepared ~input_source ~result_scope ~med
                ~expected
                ~session_id:thread_id
                ~updated_at:(Time_compat.now ())))
-         ~on_context_submission:(fun observation ->
-           match observation.Runtime_codex_app_server.method_ with
+         ~on_context_submission:(fun (method_ : Runtime_codex_app_server.context_submission_method) ->
+           match method_ with
            | Thread_start | Thread_resume -> thread_request_transmitted := true
            | Thread_inject_items | Turn_start | Dynamic_tool_response -> ())
          ~on_prompt_sent:report_transmitted_input

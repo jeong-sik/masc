@@ -14,7 +14,6 @@ type unavailable_reason =
   | Context_review_disabled
   | Skill_applicability_disabled
   | Workspace_memory_selection_disabled
-  | Memory_recall_disabled
   | Keeper_excluded
   | Access_unpublished
   | Host_account_not_shared
@@ -26,7 +25,6 @@ let unavailable_reason_to_string = function
   | Context_review_disabled -> "context_review_disabled"
   | Skill_applicability_disabled -> "skill_applicability_disabled"
   | Workspace_memory_selection_disabled -> "workspace_memory_selection_disabled"
-  | Memory_recall_disabled -> "memory_recall_disabled"
   | Keeper_excluded -> "keeper_excluded"
   | Access_unpublished -> "access_unpublished"
   | Host_account_not_shared -> "host_account_not_shared"
@@ -94,10 +92,9 @@ let board_attention_confidence_floor () =
 (* One switch per gate on top of the lane's, then the exclusion. A key turns
    the lane on; each gate can still be turned off by name, so adding a gate
    does not switch on another one that nobody reviewed with it. The Board
-   gate defaults to on, which is what the lane alone meant before the second
-   gate existed. The absorb gate defaults to off: it sends the librarian's
-   memories to the vendor, which a deployment that set its key for the Board
-   gate did not choose. *)
+   gate defaults to on. Every other gate defaults to off: each sends content
+   to the vendor that a deployment which set its key for the Board gate did
+   not choose. *)
 (* The declared reasons come first: a gate the operator switched off, or a
    Keeper the operator excluded, is unavailable by declaration whatever the
    lane's state. Only a gate that is declared on reports the lane's own
@@ -139,43 +136,11 @@ let workspace_memory_selection_destinations ~keeper_id =
     ~off:Workspace_memory_selection_disabled
 ;;
 
-(* The switch and the scope are one value, so a keeper outside the scope is
-   told apart from nothing else: both are a gate the operator did not turn on
-   for it. *)
-let memory_recall_covers ~keeper_id = function
-  | Runtime_schema.Memory_recall_off -> false
-  | Runtime_schema.Memory_recall_on Runtime_schema.All_keepers -> true
-  | Runtime_schema.Memory_recall_on (Runtime_schema.Listed_keepers (first, rest)) ->
-    List.mem keeper_id (first :: rest)
-;;
-
-let memory_recall_destinations ~keeper_id =
-  gate_destinations ~keeper_id
-    ~switched_on:(memory_recall_covers ~keeper_id (policy ()).Runtime_schema.memory_recall)
-    ~off:Memory_recall_disabled
-;;
-
 (* The names that exclude nobody: a keeper is excluded by its name, so a
    misspelt name silently excludes nothing. Boot asks this with the keepers
    it found and reports each. *)
 let unknown_excluded_keepers ~known =
   List.filter (fun name -> not (List.mem name known)) (policy ()).Runtime_schema.excluded_keepers
-;;
-
-(* The same for the keepers memory recall is limited to: a misspelt name
-   limits recall to nobody by that name. Switched off, or for every keeper,
-   there is no name to check. A name written twice is reported once. *)
-let unknown_memory_recall_keepers ~known =
-  match (policy ()).Runtime_schema.memory_recall with
-  | Runtime_schema.Memory_recall_off
-  | Runtime_schema.Memory_recall_on Runtime_schema.All_keepers -> []
-  | Runtime_schema.Memory_recall_on (Runtime_schema.Listed_keepers (first, rest)) ->
-    List.fold_left
-      (fun unknown name ->
-         if List.mem name known || List.mem name unknown then unknown else name :: unknown)
-      []
-      (first :: rest)
-    |> List.rev
 ;;
 
 type readiness =
@@ -192,7 +157,7 @@ let readiness () =
     | Error
         ( Board_attention_disabled | Context_review_disabled
         | Skill_applicability_disabled | Workspace_memory_selection_disabled
-        | Memory_recall_disabled | Keeper_excluded ) ->
+        | Keeper_excluded ) ->
       (* [lane_destinations] answers only about the lane and its keys. *)
       Off
     | Ok (first, rest) ->

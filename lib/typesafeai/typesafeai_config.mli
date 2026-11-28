@@ -19,9 +19,6 @@ type unavailable_reason =
   | Context_review_disabled
   | Skill_applicability_disabled
   | Workspace_memory_selection_disabled
-  | Memory_recall_disabled
-      (** [\[typesafeai\] memory_recall = false], the default, or the keeper is
-          outside the scope the switch names *)
   | Keeper_excluded
       (** the keeper is named in [\[typesafeai\] excluded_keepers]: nothing of
           it reaches the vendor, whichever gate asks *)
@@ -59,14 +56,7 @@ val workspace_memory_selection_destinations :
 (** Independent opt-in for host selection of shared memory. Disabled by default;
     may send current input, task context, shared interpretations and source
     details to the configured destinations. Lane, keys and Keeper exclusions
-    still apply. Board or absorption opt-in does not enable this gate. *)
-
-val memory_recall_destinations : keeper_id:string -> (destinations, unavailable_reason) result
-(** Opt-in recall judgment of a keeper's stored facts against the turn's
-    input. Disabled by default. The switch comes with its scope, [All_keepers]
-    or the keepers listed, so a keeper outside the scope gets
-    [Error Memory_recall_disabled] like a switch that is off. Lane, keys and
-    keeper exclusions still apply. *)
+    still apply. The Board opt-in does not enable this gate. *)
 
 val board_attention_destinations : keeper_id:string -> (destinations, unavailable_reason) result
 (** The same for the Board attention judgment
@@ -100,12 +90,6 @@ val unknown_excluded_keepers : known:string list -> string list
 (** The names in [\[typesafeai\].excluded_keepers] that are not in [known],
     the keepers of the base path: each excludes nobody and is reported at
     boot. *)
-
-val unknown_memory_recall_keepers : known:string list -> string list
-(** The names in [\[typesafeai\] memory_recall_keepers] that are not in
-    [known], in the order written and each once: each limits recall to nobody
-    by that name and is reported at boot. Empty when recall is off or covers
-    every keeper. *)
 
 type readiness =
   | Off

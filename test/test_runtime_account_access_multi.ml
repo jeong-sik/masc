@@ -861,7 +861,6 @@ let test_multi_account () =
                       }
                     , [] )
                 ; context_review = true
-                ; memory_recall = Runtime_schema.Memory_recall_on Runtime_schema.All_keepers
                 };
               Fun.protect
                 ~finally:(fun () -> Runtime_typesafeai_policy.publish found_policy)
@@ -871,8 +870,6 @@ let test_multi_account () =
                       , Masc.Typesafeai_config.board_attention_destinations ~keeper_id:"reader" )
                     ; ( "context review"
                       , Masc.Typesafeai_config.context_review_destinations ~keeper_id:"reader" )
-                    ; ( "memory recall"
-                      , Masc.Typesafeai_config.memory_recall_destinations ~keeper_id:"reader" )
                     ]
                   , Server_typesafeai_health.health_json () )))
           in

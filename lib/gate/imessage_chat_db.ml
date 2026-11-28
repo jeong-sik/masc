@@ -127,13 +127,15 @@ let check_access ~db_path =
   else Ok ()
 ;;
 
+(* HIGH-RISK-UNREVIEWED: Messages owns chat.db; it opens through
+   Sqlite_file.open_reader as External (#36195). *)
 let with_db ~db_path f =
   match check_access ~db_path with
   | Error denial -> Error denial
   | Ok () -> (
-    match Sqlite3.db_open ~mode:`READONLY db_path with
-    | exception Sqlite3.Error detail -> Error (Query_failed ("open: " ^ detail))
-    | db ->
+    match Sqlite_file.open_reader Sqlite_file.External db_path with
+    | Error detail -> Error (Query_failed ("open: " ^ detail))
+    | Ok db ->
       let close_db () =
         (* The statement is finalized inside [f]; if it were not, this returns
            false and the handle leaks rather than the error being hidden. *)

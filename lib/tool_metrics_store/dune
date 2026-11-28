@@ -11,6 +11,7 @@
   masc.tool_types
   masc_core
   sqlite3
+  masc.sqlite_file
   threads
   unix
   yojson))

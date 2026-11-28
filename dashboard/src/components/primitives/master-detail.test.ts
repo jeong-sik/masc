@@ -27,7 +27,8 @@ interface ScreenProps {
 /**
  * A list of two rows under a filter, a view switch and a "new" button, as a
  * workspace builds one. Its detail has a control that selects another item, one
- * that goes back to the list, and one that drops the selection.
+ * that does so and is drawn anew for each item, one that goes back to the list,
+ * and one that drops the selection.
  */
 function Screen(props: ScreenProps) {
   const [selected, setSelected] = useState<string | null>(props.initial !== undefined ? props.initial : props.linked ?? null)
@@ -61,6 +62,12 @@ function Screen(props: ScreenProps) {
       detail=${html`
         <p data-test="detail">Detail of ${selected}</p>
         <button type="button" data-test="related" onClick=${() => setSelected('a')}>Related: a</button>
+        <button
+          type="button"
+          key=${`link-${selected}`}
+          data-test="link"
+          onClick=${() => setSelected(selected === 'a' ? 'b' : 'a')}
+        >Link drawn for ${selected}</button>
         <button type="button" data-test="close" data-opens-master onClick=${() => setSelected('a')}>Close</button>
         <button type="button" data-test="discard" onClick=${() => setSelected(null)}>Discard</button>
       `}
@@ -491,6 +498,58 @@ describe('MasterDetail pane switch', () => {
     row.focus()
     await click('row-a')
     expect(document.activeElement).toBe(row)
+  })
+
+  it('keeps the focus in the detail when the control that had it went away with its item', async () => {
+    await mount({ initial: 'a' })
+    const link = button('link')
+
+    link.focus()
+    await click('link')
+
+    expect(link.isConnected).toBe(false)
+    expect(container.querySelector('[data-test="detail"]')!.textContent).toBe('Detail of b')
+    expect(document.activeElement).toBe(container.querySelector('.md-detail'))
+  })
+
+  it('keeps the focus in the list when the control that had it went away from it', async () => {
+    await mount()
+    const once = button('new-once')
+
+    once.focus()
+    await click('new-once')
+
+    expect(once.isConnected).toBe(false)
+    expect(document.activeElement).toBe(container.querySelector('.md-master'))
+  })
+
+  it('leaves the focus the reader put elsewhere when a control goes away', async () => {
+    const handle: { current: ScreenHandle | null } = { current: null }
+    await mount({ initial: 'a', handle })
+    const link = button('link')
+    const filter = button('filter')
+
+    link.focus()
+    filter.focus()
+    await Promise.resolve()
+    await act(() => { handle.current!.select('b') })
+
+    expect(link.isConnected).toBe(false)
+    expect(document.activeElement).toBe(filter)
+  })
+
+  it('does not put the focus on a pane for a control the reader had left before it went away', async () => {
+    const handle: { current: ScreenHandle | null } = { current: null }
+    await mount({ initial: 'a', handle })
+    const link = button('link')
+
+    link.focus()
+    link.blur()
+    await Promise.resolve()
+    await act(() => { handle.current!.select('b') })
+
+    expect(link.isConnected).toBe(false)
+    expect(document.activeElement).toBe(document.body)
   })
 
   // A browser runs a pending render between the handlers of one click: after

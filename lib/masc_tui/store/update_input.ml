@@ -3739,9 +3739,7 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                                         Nav.Knowledge_artifacts ->
                                 Some Keymap.Copy_public_url
                             | Some "N"
-                              when Option.is_none
-                                     (Model.fast_approval_strip_item m)
-                                   && Model.is_artifact_dive_search_active m ->
+                              when Model.is_artifact_dive_search_active m ->
                                 Some Keymap.Search_prev_match
                             | Some "p"
                               when Option.is_none (Model.active_inspector m)

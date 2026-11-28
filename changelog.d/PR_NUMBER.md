@@ -1,0 +1,8 @@
+### Fixed
+
+- The TUI test store is green again: switching Work sub-tabs selects the first
+  Harness verdict again, so Harness `[n]`/`[y]` overrule opens on entry instead
+  of warning that no verdict is linked; `[N]` in a zoomed Artifact with an
+  active search steps to the previous match even while the approval strip is
+  showing (Alt+N and an empty search still fast-deny); and an HTTP error body
+  whose Bearer token is wrapped in ANSI escapes is redacted in the error detail.

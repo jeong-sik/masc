@@ -155,7 +155,11 @@ let http_error_detail = function
             (Wire_common.api_error_code_to_string err.code)
             (Chat_transcript.scrub_secrets_in_text err.message)
       | None ->
-          let scrubbed = Chat_transcript.scrub_secrets_in_text body in
+          let scrubbed =
+            Chat_transcript.scrub_secrets_in_text body
+            |> Text_util.sanitize_single_line
+            |> Chat_transcript.scrub_secrets_in_text
+          in
           let snippet =
             Masc_tui_term.Grapheme.truncate_to_width ~max_width:200
               ~ellipsis:"..." scrubbed

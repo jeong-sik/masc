@@ -243,7 +243,7 @@ let set_tab active_tab t =
     task_dive_desc_scroll = 0;
     task_dive_verif_scroll = 0;
     schedules_scroll_offset = 0;
-    harness_selected_index = None;
+    harness_selected_index = Some 0;
     harness_scroll_offset = 0;
   }
 

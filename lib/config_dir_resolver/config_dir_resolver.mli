@@ -59,8 +59,8 @@ val current_working_dir : unit -> string
 
 val pin_working_dir : string -> unit
 (** Pin the process working directory after server startup [chdir] so hot
-    request-path callers avoid repeated [getcwd(3)] syscalls. Cleared by
-    {!reset}. *)
+    request-path callers avoid repeated [getcwd(3)] syscalls. {!reset} keeps
+    the pin; an empty [path] clears it. *)
 
 val base_path_or_cwd : unit -> string
 (** [MASC_BASE_PATH] from host config, or {!current_working_dir} when unset. *)
@@ -77,7 +77,8 @@ val resolve_with : inputs -> resolution
 (** Uncached resolution from explicit inputs. *)
 
 val reset : unit -> unit
-(** Clear cached resolution, forcing re-evaluation on next [resolve] call. *)
+(** Clear cached resolution, forcing re-evaluation on next [resolve] call.
+    The {!pin_working_dir} pin stays. *)
 
 (** {1 Path accessors}
 

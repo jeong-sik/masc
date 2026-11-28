@@ -357,9 +357,10 @@ let rec resolve () =
       then r
       else resolve ()
 
-let reset () =
-  Atomic.set cached_resolution None;
-  Atomic.set pinned_working_dir None
+(* The pinned working directory is a fact about the process (the server's
+   chdir), not a cached reading of the environment, so it survives [reset].
+   Server startup pins before its config bootstrap resets the resolution. *)
+let reset () = Atomic.set cached_resolution None
 
 let prompts_dir () =
   (resolve ()).prompts.path

@@ -149,7 +149,7 @@ RFC-0422 의 주제는 judge 를 건너뛸 관측 증명이었다. Effect 를 �
 
 ### D5. 상자를 못 만들면 Effect 를 거절한다
 
-- shim 은 Landlock ABI 가 1 미만이면 Effect 요청을 거절한다. 오류 코드는 `effect_box_unsupported` 다.
+- shim 은 Landlock ABI 가 3 미만이면 Effect 요청을 거절한다. 오류 코드는 `effect_box_unsupported` 다. ABI 1·2 에서는 truncate 를 막지 못해 Keeper A 가 Keeper B 의 토큰 파일을 비울 수 있고, ABI 1 에서는 자기 root 안에서도 디렉터리를 넘는 rename 이 실패한다.
 - 지금 규칙과 같다. `plan_for_mode` 는 「a box the kernel cannot build is a refusal, never a quiet fall back to running unboxed」 다(`exec_shim.ml:602`). Observe·Guest_local 은 `observe_unsupported`, Docker Effect 는 `docker_observe_mode_required` 로 거절한다. runbook 머리말도 「The lane is fail-closed」다.
 - 상자 없이 돌리면 운영자가 거절한 (3)과 같아진다.
 - probe 는 새 capability `effect_box` 를 광고한다. Observe 의 `observe` 와 따로 둔다. Effect 상자는 seccomp 가 없어도 된다.
@@ -215,7 +215,7 @@ RFC-0422 의 주제는 judge 를 건너뛸 관측 증명이었다. Effect 를 �
   - 각 endpoint 의 probe `capabilities` 를 읽어 Landlock 을 확인한다.
   - 두 컨테이너의 shim 설정에 D2 의 `read_roots`·`write_roots` 를 적는다.
   - 컨테이너 B 에서 이웃 root 를 쓰던 toolchain 과 데이터를 Keeper root 밖으로 옮긴다.
-- 배포 순서: 운영자 준비 → endpoint 의 shim 교체(2층) → 서버(3층). 서버가 먼저 가면 옛 shim 의 endpoint 에서 Effect 가 모두 거절된다.
+- 배포 순서: 1층 shim 상태 유지 → shim 설정의 `read_roots=`·`write_roots=` 키 추가와 2층 shim 교체를 같은 배포 창에 묶는다 → 서버(3층). 키만 먼저 쓰면 1층 shim 이 모르는 키라서 모든 요청을 거절하고, 2층 shim 만 먼저 깔면 키가 없어 `path=` 의 opam 경로가 허용 목록 밖이라 역시 거절되므로 둘을 같은 창에 묶어야 한다. 서버가 먼저 가면 옛 shim 의 endpoint 에서 Effect 가 모두 거절된다.
 - 2층 shim 만 깔려도 보호는 시작된다. shim 은 서버 버전과 상관없이 Effect 를 상자에 넣는다.
 
 ## 7. 열린 질문
@@ -254,6 +254,7 @@ RFC-0422 의 주제는 judge 를 건너뛸 관측 증명이었다. Effect 를 �
   - 요청 root `a` 의 Effect 로 `cat <root>/b/.config/gh/hosts.yml` 을 돌린다. exit 가 0 이 아니고, stderr 에 `Permission denied` 가 있고, stdout 에 표식이 없다.
   - 같은 요청의 `ls <root>/b` 와 `sh -c 'echo x > <root>/b/x'` 도 실패한다. `b/x` 는 생기지 않는다.
   - 같은 요청의 `cat <root>/a/.config/gh/hosts.yml`, `a` 와 `/tmp` 쓰기, `sh -c 'echo ok'` 는 성공한다.
+  - 같은 요청의 `sh -c ': > <root>/b/.config/gh/hosts.yml'` (기존 파일 truncate) 도 실패해야 한다. ABI 3 미만에서는 성공해 버린다.
   - B 의 cwd 를 가진 프로세스를 띄우고 A 의 Effect 로 `cat /proc/<pid>/cwd/.config/gh/hosts.yml` 을 돌린다. 실패해야 한다. 이 결과는 시험이 정한다. 문서로 확인하지 못했다.
   - `HOME` 과 `TMPDIR` 이 D4 대로 오는지 본다.
 - shim 설정 시험(`test/test_exec_shim.ml`): `read_roots` 가 `remote_root` 와 겹치면 거절, `path=` 가 목록 밖이면 거절.

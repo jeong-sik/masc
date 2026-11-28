@@ -30,6 +30,8 @@ let request
       ?(prefix_digest = prefix)
       ?(tail_bytes = 100)
       ?(turn_context = false)
+      ?turn_boundary
+      ?(finished_turn = Ledger.Carried_whole)
       ?(demote_before = 0)
       ?digest_at
       ~first_atom
@@ -44,6 +46,8 @@ let request
   ; ends = ends_in digest_at ~first_atom ~atom_count
   ; tail_bytes
   ; turn_context
+  ; turn_boundary
+  ; finished_turn
   ; demote_before
   ; working_state = None
   }
@@ -641,12 +645,13 @@ let test_a_provider_observed_front_is_checked_at_its_own_position () =
 (* The pair table sits behind an Eio mutex, so the table tests need a
    running scheduler. *)
 (* [steps] are (turn context, first atom, atom count, input tokens) per request; a
-   [None] count is a request the provider did not count. *)
-let observe_all steps =
+   [None] count is a request the provider did not count. Every request does
+   the same with the turn before it ([finished_turn]). *)
+let observe_all ?finished_turn steps =
   List.fold_left
     (fun (_, ledger) (turn_context, first_atom, atom_count, input) ->
        let o =
-         step ledger (request ~turn_context ~first_atom ~atom_count ())
+         step ledger (request ~turn_context ?finished_turn ~first_atom ~atom_count ())
            (Option.map (fun n -> usage n) input)
        in
        Some o, Some o.ledger)
@@ -656,6 +661,11 @@ let observe_all steps =
   | None, (Some _ | None) | Some _, None -> Alcotest.fail "no request was observed"
 ;;
 
+(* The peak when the next turn's first request carries the turn before it
+   whole, and when it leaves that turn's results as markers. *)
+let peak_carried_whole = Ledger.next_turn_peak ~finished_turn:Ledger.Carried_whole
+let peak_left_as_markers = Ledger.next_turn_peak ~finished_turn:Ledger.Left_as_markers
+
 let test_a_turn_grows_from_the_last_request_before_it_to_its_largest () =
   let _, ledger =
     observe_all
@@ -663,10 +673,59 @@ let test_a_turn_grows_from_the_last_request_before_it_to_its_largest () =
       ; true, 0, 14, Some 1_600; false, 0, 16, Some 2_400; false, 0, 18, Some 2_200 ]
   in
   check (option int) "the last count plus the second turn's 2,400 - 1,500"
-    (Some (2_200 + 900)) (Ledger.next_turn_peak ledger);
+    (Some (2_200 + 900)) (peak_carried_whole ledger);
   let json = Ledger.to_json ledger in
-  check int "the JSON says the same" 3_100
-    Yojson.Safe.Util.(json |> member "next_turn_peak" |> to_int)
+  check int "the JSON says how much the turn grew" 900
+    Yojson.Safe.Util.(json |> member "largest_turn_growth" |> to_int);
+  check int "and where the turn in hand opened" 1_600
+    Yojson.Safe.Util.(json |> member "turn_opened_at" |> to_int)
+;;
+
+(* Every request carries two more atoms than the one before it. *)
+let growing counts =
+  List.mapi (fun i (turn_context, input) -> turn_context, 0, 10 + (2 * i), Some input) counts
+;;
+
+(* A first request that leaves the turn before it as markers builds on that
+   turn's first count: what the turn added left with its results. Read from
+   the turn's last count instead, the turn after a quiet one would seem to
+   grow by a whole turn of results on top of results that are about to
+   leave. *)
+let test_a_turn_left_as_markers_grows_from_the_first_request_before_it () =
+  let _, ledger =
+    observe_all ~finished_turn:Ledger.Left_as_markers
+      (growing [ true, 1_000; true, 1_100; false, 61_100 ])
+  in
+  check (option int) "the next turn opens near 1,100 and grows the 60,100 this one did"
+    (Some (1_100 + 60_100)) (peak_left_as_markers ledger);
+  let _, whole = observe_all (growing [ true, 1_000; true, 1_100; false, 61_100 ]) in
+  check (option int) "carried whole, it starts from the 61,100 the turn ended at"
+    (Some (61_100 + 60_100)) (peak_carried_whole whole)
+;;
+
+(* A quiet turn after large ones does not hide how much a turn grows: the
+   large turns' results were already markers when the quiet turn opened. *)
+let test_a_quiet_turn_keeps_the_growth_of_the_turns_left_as_markers () =
+  let counts =
+    [ true, 1_000; false, 61_000; true, 1_100; false, 61_100; true, 1_200 ]
+  in
+  let _, ledger = observe_all ~finished_turn:Ledger.Left_as_markers (growing counts) in
+  check (option int) "the quiet turn's 1,200 plus the 60,100 a large turn grew"
+    (Some (1_200 + 60_100)) (peak_left_as_markers ledger)
+;;
+
+(* A window that opened later in a turn has no first count for that turn, so
+   the turn after it has nothing to build on and adds no growth. *)
+let test_a_turn_left_as_markers_needs_the_first_count_before_it () =
+  let opened_late = [ false, 1_000; true, 1_100; false, 5_000 ] in
+  let _, ledger = observe_all ~finished_turn:Ledger.Left_as_markers (growing opened_late) in
+  check (option int) "no growth is known after one turn" None (peak_left_as_markers ledger);
+  let _, ledger =
+    observe_all ~finished_turn:Ledger.Left_as_markers
+      (growing (opened_late @ [ true, 1_200; false, 9_200 ]))
+  in
+  check (option int) "the next turn builds on the 1,100 the one before it opened at"
+    (Some (1_200 + 8_100)) (peak_left_as_markers ledger)
 ;;
 
 let test_a_turn_that_calls_no_tool_counts_its_first_request () =
@@ -674,14 +733,14 @@ let test_a_turn_that_calls_no_tool_counts_its_first_request () =
     observe_all [ true, 0, 10, Some 1_000; false, 0, 12, Some 1_200; true, 0, 14, Some 2_000 ]
   in
   check (option int) "the turn context's request is the turn's largest"
-    (Some (2_000 + 800)) (Ledger.next_turn_peak ledger);
+    (Some (2_000 + 800)) (peak_carried_whole ledger);
   check (option int) "it is still not a sample" (Some 1_200) ledger.total_tokens
 ;;
 
 let test_no_growth_before_a_turn_opened_under_the_window () =
   let _, ledger = observe_all [ true, 0, 10, Some 1_000; false, 0, 12, Some 2_900 ] in
   check (option int) "the turn the window opened in has no count before it" None
-    (Ledger.next_turn_peak ledger);
+    (peak_carried_whole ledger);
   check (option int) "last_input_tokens still exposes the provider count" (Some 2_900)
     (Ledger.last_input_tokens ledger);
   let _, uncounted = observe_all [ true, 0, 10, Some 1_000; false, 0, 12, None ] in
@@ -697,13 +756,21 @@ let test_a_moved_front_keeps_how_much_a_turn_grew () =
     ; true, 0, 14, Some 1_600; false, 0, 16, Some 2_400 ]
   in
   let _, ledger = observe_all grown in
-  check (option int) "grown under the first window" (Some 3_300) (Ledger.next_turn_peak ledger);
+  check (option int) "grown under the first window" (Some 3_300) (peak_carried_whole ledger);
   let moved, ledger = observe_all (grown @ [ true, 10, 18, Some 900 ]) in
   check string "the front moved" "front_moved_unmeasured" (Ledger.event_to_string moved.event);
   check (option int) "the new window's count plus the 900 the ended turn grew"
-    (Some (900 + 900)) (Ledger.next_turn_peak ledger);
+    (Some (900 + 900)) (peak_carried_whole ledger);
+  check (option int) "left as markers, the turn the window opened in starts from the same 900"
+    (Some (900 + 900)) (peak_left_as_markers ledger);
   let _, ledger = observe_all (grown @ [ false, 10, 18, Some 900 ]) in
-  check (option int) "a move inside a turn ends no turn" None (Ledger.next_turn_peak ledger)
+  check (option int) "a move inside a turn ends no turn" None (peak_carried_whole ledger);
+  let _, ledger =
+    observe_all ~finished_turn:Ledger.Left_as_markers
+      (grown @ [ false, 10, 18, Some 900; true, 10, 20, Some 1_000; false, 10, 22, Some 5_000 ])
+  in
+  check (option int) "nor gives the turn a first count for the next one to build on" None
+    (peak_left_as_markers ledger)
 ;;
 
 let test_an_uncounted_request_leaves_its_turn_out () =
@@ -715,7 +782,80 @@ let test_an_uncounted_request_leaves_its_turn_out () =
       ; true, 0, 22, Some 2_600 ]
   in
   check (option int) "the uncounted turn adds nothing; the 600 before it stands"
-    (Some (2_600 + 600)) (Ledger.next_turn_peak ledger)
+    (Some (2_600 + 600)) (peak_carried_whole ledger)
+;;
+
+(* A turn whose first request went uncounted has no first count, so the turn
+   after it has nothing to build on when it leaves that turn as markers. *)
+let test_an_uncounted_first_request_gives_its_turn_no_first_count () =
+  let _, ledger =
+    observe_all ~finished_turn:Ledger.Left_as_markers
+      [ true, 0, 10, Some 1_000; false, 0, 12, Some 31_000
+      ; true, 0, 14, None; false, 0, 16, Some 41_000
+      ; true, 0, 18, Some 1_200; false, 0, 20, Some 9_200 ]
+  in
+  check (option int) "the turn after the uncounted opening builds on no count" None
+    (peak_left_as_markers ledger)
+;;
+
+(* [steps] are (turn context, turn boundary, finished turn, input tokens) per
+   request. The window stays at atom 0 and every request carries two more
+   atoms than the one before it. *)
+let observe_turns steps =
+  List.fold_left
+    (fun (i, ledger) (turn_context, turn_boundary, finished_turn, input) ->
+       let o =
+         step ledger
+           (request ~turn_context ?turn_boundary ~finished_turn ~first_atom:0
+              ~atom_count:(10 + (2 * i)) ())
+           (Some (usage input))
+       in
+       i + 1, Some o.Ledger.ledger)
+    (0, None) steps
+  |> function
+  | _, Some ledger -> ledger
+  | _, None -> Alcotest.fail "no request was observed"
+;;
+
+(* A dispatch that takes up the open turn again sends the turn context a
+   second time under the same turn boundary. No turn ended, so none opens:
+   the turn grows from the count it built on to the largest count of either
+   dispatch, and the next turn builds on the count the turn first opened
+   at. *)
+let test_a_dispatch_that_resumes_the_open_turn_opens_no_turn () =
+  let markers = Ledger.Left_as_markers in
+  let ledger =
+    observe_turns
+      [ true, Some 4, markers, 1_000; false, Some 4, markers, 31_000
+      ; true, Some 10, markers, 1_100; false, Some 10, markers, 31_100
+      ; true, Some 10, markers, 33_100; false, Some 10, markers, 61_100 ]
+  in
+  check (option int) "the next turn opens near 1,100 and grows the 60,100 both dispatches did"
+    (Some (1_100 + 60_100)) (peak_left_as_markers ledger);
+  check int "the turn in hand still opened at 1,100" 1_100
+    Yojson.Safe.Util.(Ledger.to_json ledger |> member "turn_opened_at" |> to_int);
+  check int "under the boundary its requests ran under" 10
+    Yojson.Safe.Util.(Ledger.to_json ledger |> member "turn_boundary" |> to_int);
+  let unnamed =
+    observe_turns
+      [ true, None, markers, 1_000; false, None, markers, 31_000
+      ; true, None, markers, 1_100; false, None, markers, 31_100 ]
+  in
+  check (option int) "a boundary the dispatch cannot name opens a turn at every context request"
+    (Some (1_100 + 30_100)) (peak_left_as_markers unnamed)
+;;
+
+(* What a turn builds on is what the request that opens it did with the turn
+   before, not what that turn's own requests did. *)
+let test_the_request_that_opens_a_turn_says_what_it_builds_on () =
+  let ledger =
+    observe_turns
+      [ true, Some 4, Ledger.Carried_whole, 1_000; false, Some 4, Ledger.Carried_whole, 31_000
+      ; true, Some 10, Ledger.Left_as_markers, 1_100
+      ; false, Some 10, Ledger.Left_as_markers, 41_100 ]
+  in
+  check (option int) "the second turn built on the 1,000 the first opened at, and grew 40,100"
+    (Some (1_100 + 40_100)) (peak_left_as_markers ledger)
 ;;
 
 (* Regression for #54350 live bug: ephemeral [Outside_context] appended at the
@@ -752,6 +892,8 @@ let test_ephemeral_outside_context_does_not_drop_working_ledger () =
       ; ends = ends_in digest_at ~first_atom:0 ~atom_count
       ; tail_bytes = 256
       ; turn_context
+      ; turn_boundary = None
+      ; finished_turn = Ledger.Carried_whole
       ; demote_before = 0
       ; working_state = None
       } )
@@ -856,6 +998,18 @@ let () =
             test_a_moved_front_keeps_how_much_a_turn_grew
         ; test_case "an uncounted request leaves its turn out" `Quick
             test_an_uncounted_request_leaves_its_turn_out
+        ; test_case "an uncounted first request gives its turn no first count" `Quick
+            test_an_uncounted_first_request_gives_its_turn_no_first_count
+        ; test_case "a dispatch that resumes the open turn opens no turn" `Quick
+            test_a_dispatch_that_resumes_the_open_turn_opens_no_turn
+        ; test_case "the request that opens a turn says what it builds on" `Quick
+            test_the_request_that_opens_a_turn_says_what_it_builds_on
+        ; test_case "a turn left as markers grows from the first request before it" `Quick
+            test_a_turn_left_as_markers_grows_from_the_first_request_before_it
+        ; test_case "a quiet turn keeps the growth of turns left as markers" `Quick
+            test_a_quiet_turn_keeps_the_growth_of_the_turns_left_as_markers
+        ; test_case "a turn left as markers needs the first count before it" `Quick
+            test_a_turn_left_as_markers_needs_the_first_count_before_it
         ] )
     ; "json", [ test_case "counts only" `Quick test_json_reports_counts_not_the_block_list ]
     ; ( "inputs"

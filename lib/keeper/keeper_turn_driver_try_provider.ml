@@ -846,12 +846,12 @@ let declared_request_reserve_bytes ~system_prompt ~tools =
    (RFC-0363 §3.4.1), with one exception: a tool result of
    [aged_result_min_bytes] or more that belongs to a turn that ended leaves
    as its marker ([finished_turn_results], RFC-tool-results-age-out-of-context).
-   Each such result changes once, on the first request whose window moved
-   after its turn ended, and goes as the same marker on every later request.
-   Verified arguments of closed calls in ended turns also go as stored
-   references below the same boundary, unless signed reasoning requires
-   their original prefix. A window that stays keeps both where it last sent
-   them, so its prefix holds across turns.
+   Each such result changes once, on the first request after its turn ended,
+   and goes as the same marker on every later request, whether the window
+   stayed or moved. Verified arguments of closed calls in ended turns also go
+   as stored references below the same boundary, unless signed reasoning
+   requires their original prefix. A window that stays therefore changes
+   its prefix once a turn, from the first result of the turn that just ended.
    Other bodies stay as the range first sent them. The range shrinks
    only where its front moves, or as the answer to a size refusal.
 
@@ -897,6 +897,28 @@ let finished_turn_results_for ~reader_available =
   if reader_available then Finished_turns_as_markers else Finished_turns_verbatim
 ;;
 
+(* What a turn's first request does with the turn before it, as the ledger
+   reads it ({!Keeper_model_input_ledger.finished_turn}). The results leave as
+   markers when the caller asks for markers, the dispatch names the turn
+   boundary, and there is a store to write them to ([base_path]). *)
+let finished_turn_for_ledger ~finished_turn_results ~base_path ~turn_boundary =
+  match finished_turn_results, turn_boundary with
+  | Finished_turns_as_markers, Keeper_carried_front.Turn_boundary _
+    when not (String.equal base_path "") -> Keeper_model_input_ledger.Left_as_markers
+  | ( Finished_turns_as_markers
+    , (Keeper_carried_front.Turn_boundary _ | Keeper_carried_front.Turn_boundary_unknown _) )
+  | ( Finished_turns_verbatim
+    , (Keeper_carried_front.Turn_boundary _ | Keeper_carried_front.Turn_boundary_unknown _) ) ->
+    Keeper_model_input_ledger.Carried_whole
+;;
+
+(* The turn boundary as the ledger records it with a request: the atom the
+   dispatch names, [None] when it names none. *)
+let turn_boundary_for_ledger = function
+  | Keeper_carried_front.Turn_boundary { end_atom } -> Some end_atom
+  | Keeper_carried_front.Turn_boundary_unknown _ -> None
+;;
+
 (* The least body, in bytes, of a result of an ended turn that goes as its
    marker. Smaller results stay readable in the prompt. The number is the
    threshold the replay of stored requests priced in
@@ -907,8 +929,8 @@ let aged_result_min_bytes = 2_048
 (* The atoms of turns that ended: the ones before the turn boundary, never
    the newest atom, which the request always carries as it is
    ([Keeper_carried_front.clamp]). An unknown boundary names no turn that
-   ended: every result goes as the range first sent it, and goes as its
-   marker again at the next dispatch that reads a boundary. *)
+   ended; what a window that stays already sent as markers still goes as
+   markers ([finished_boundary]). *)
 let finished_turn_atoms ~atom_count = function
   | Keeper_carried_front.Turn_boundary { end_atom } ->
     Keeper_carried_front.clamp ~atom_count end_atom
@@ -1356,18 +1378,21 @@ let input_limit_of_runtime (runtime : Runtime_instance.t option) =
 
 let past_max_context
       ~(input_limit : Llm_provider.Input_budget.t option)
-      ~continuity ~history_digest_at ~turn_boundary
+      ~finished_turn ~continuity ~history_digest_at ~turn_boundary
       (ledger : Keeper_model_input_ledger.t option) =
   let ( let* ) = Option.bind in
   let* ledger = ledger in
   let* input_limit = input_limit in
-  (* When turn growth has not been measured yet (right after a ledger start or
-     prefix change), a provider-counted [last_input_tokens] that already exceeds
-     [input_limit] is an exact lower bound (zero-growth) proving the window is
-     already past budget. Keep {!Keeper_model_input_ledger.next_turn_peak}
-     unchanged so [held_window] still requires a measured turn growth. *)
+  (* While the ledger cannot say the next turn's peak (no turn's growth
+     measured yet, or no first count for a turn left as markers), the last
+     request's own provider count stands in for it: a window whose last
+     request already passed [input_limit] moves. Carried whole, that count is
+     the least the next request can be. Left as markers, the next request can
+     come out smaller, by an amount the ledger has not measured; the window
+     moves all the same. {!Keeper_model_input_ledger.next_turn_peak} is left
+     as it is, so [held_window] still requires a peak the ledger can say. *)
   let* next_turn_peak =
-    match Keeper_model_input_ledger.next_turn_peak ledger with
+    match Keeper_model_input_ledger.next_turn_peak ~finished_turn ledger with
     | Some _ as peak -> peak
     | None -> Keeper_model_input_ledger.last_input_tokens ledger
   in
@@ -1412,19 +1437,19 @@ type held_window =
   }
 
 (* At a turn's first request a window holds only while the size signal
-   watches it. Without the signal, a window that keeps its results whole
-   grows until the provider refuses it. Later in the turn it holds where the
+   watches it. Without the signal, a window whose start never moves grows
+   until the provider refuses it. Later in the turn it holds where the
    turn's first request opened it, which the ledger's last request
    records. *)
-let held_window ~opens_turn ~(input_limit : Llm_provider.Input_budget.t option) ~history_digest_at
-      (ledger : Keeper_model_input_ledger.t option) =
+let held_window ~opens_turn ~(input_limit : Llm_provider.Input_budget.t option) ~finished_turn
+      ~history_digest_at (ledger : Keeper_model_input_ledger.t option) =
   match ledger with
   | None -> None
   | Some ledger ->
     let watched =
       (not opens_turn)
       || (Option.is_some input_limit
-          && Option.is_some (Keeper_model_input_ledger.next_turn_peak ledger))
+          && Option.is_some (Keeper_model_input_ledger.next_turn_peak ~finished_turn ledger))
     in
     if watched && Keeper_model_input_ledger.holds ~digest_at:history_digest_at ledger
     then
@@ -1642,20 +1667,22 @@ let drop_atoms_from_projection
       { projection with messages }, Some bytes))
 ;;
 
-(* Where the results and arguments of turns that ended go as markers. A window
-   that stays keeps them below the boundary it last sent, and the arguments
-   the attempt bound at the turn boundary narrow to it. A window that moved
-   demotes every turn that ended. *)
-let finished_boundary ~held_window ~start ~atom_count ~turn_boundary completed_arguments
-      messages =
+(* Where the results and arguments of turns that ended go as markers: below
+   the turn boundary, and below the boundary of the ledger's last request
+   when the range opens where that request opened it and that boundary lies
+   further. It lies further in two cases: the dispatch cannot name the turn
+   boundary, or a size refusal earlier in the open turn moved it into the
+   turn. Only the boundary is kept. Below it the plan still leaves results
+   under [aged_result_min_bytes] whole, which a refusal's resend had sent as
+   markers, and an unknown turn boundary binds no arguments. A range that
+   opens elsewhere, or a dispatch with no ledger to read, has the turn
+   boundary alone. *)
+let finished_boundary ~held_window ~start ~atom_count ~turn_boundary =
+  let finished = finished_turn_atoms ~atom_count turn_boundary in
   match held_window with
   | Some { window_opened_at; markers_before; _ } when stays_at ~opened_at:window_opened_at start ->
-    let before = Keeper_carried_front.clamp ~atom_count markers_before in
-    ( before
-    , Option.map
-        (Keeper_model_input_demotion.arguments_before ~atom:before messages)
-        completed_arguments )
-  | Some _ | None -> finished_turn_atoms ~atom_count turn_boundary, completed_arguments
+    Int.max finished (Keeper_carried_front.clamp ~atom_count markers_before)
+  | Some _ | None -> finished
 ;;
 
 let compose_carried_model_input_internal
@@ -1713,8 +1740,8 @@ let compose_carried_model_input_internal
      smallest this range can carry, and the attempt's later requests keep the
      same markers. Any other request carries what the range already sent,
      unchanged (RFC-0363 §3.4.1), but for the results and arguments of turns
-     that ended when the caller asks for them as markers: they change only
-     when the window moves ([finished_boundary]). *)
+     that ended when the caller asks for them as markers: they change on the
+     first request after their turn ended ([finished_boundary]). *)
   let planned, demote_before =
     match in_turn_demotion with
     | Demote_closed_current_turn_tools { refused_atom_count }
@@ -1758,9 +1785,8 @@ let compose_carried_model_input_internal
          (match finished_turn_results with
           | Finished_turns_verbatim -> { Keeper_model_input_demotion.messages; pending = [] }, 0
           | Finished_turns_as_markers ->
-            let finished, completed_arguments =
+            let finished =
               finished_boundary ~held_window ~start ~atom_count:history_atom_count ~turn_boundary
-                completed_arguments messages
             in
             ( demotion_plan ?completed_arguments ~min_result_bytes:aged_result_min_bytes ~measure_message_bytes
                 ~measure_wire_bytes
@@ -2455,24 +2481,36 @@ let bounded_model_input_projection
          | None -> (Lazy.force cold_seed).Keeper_carried_front.seed)
       | None | Some No_read_end -> None
     in
-    (* Read at the turn's first request only, the one that carries the turn
-       context. The ledger's count at a later request already holds part of
-       this turn's growth, and the turn keeps the front the signal moved,
-       held below. *)
-    let opens_turn = List.exists Runtime_model_input_tail_window.is_extra_context messages in
+    (* Read at the turn's first request only: the one that carries the turn
+       context under a turn boundary the ledger's last request did not run
+       under. A dispatch that takes up the open turn again carries the
+       context a second time and opens no turn. The ledger's count at a later
+       request already holds part of this turn's growth, and the turn keeps
+       the front the signal moved, held below. *)
+    let opens_turn =
+      Keeper_model_input_ledger.opens_turn
+        !(state.ledger)
+        ~turn_context:(List.exists Runtime_model_input_tail_window.is_extra_context messages)
+        ~turn_boundary:(turn_boundary_for_ledger ctx.turn_boundary)
+    in
+    let finished_turn =
+      finished_turn_for_ledger ~finished_turn_results ~base_path:demotion_base_path
+        ~turn_boundary:ctx.turn_boundary
+    in
     let past_max_context =
       if opens_turn
       then
-        past_max_context ~input_limit:(Lazy.force input_limit)
+        past_max_context ~input_limit:(Lazy.force input_limit) ~finished_turn
           ~continuity:(input_continuity ctx.request_input) ~history_digest_at
           ~turn_boundary:ctx.turn_boundary !(state.ledger)
       else None
     in
     (* Read before this request moves the ledger: where a window that stays
-       last sent its markers and what working state it carried. *)
+       opened, where it last sent its markers and what working state it
+       carried. *)
     let held_window =
-      held_window ~opens_turn ~input_limit:(Lazy.force input_limit) ~history_digest_at
-        !(state.ledger)
+      held_window ~opens_turn ~input_limit:(Lazy.force input_limit) ~finished_turn
+        ~history_digest_at !(state.ledger)
     in
     let current_turn_results = !(state.current_turn_results) in
     state.last_history_messages := Some messages;
@@ -2825,6 +2863,8 @@ let bounded_model_input_projection
               ; ends
               ; tail_bytes
               ; turn_context
+              ; turn_boundary = turn_boundary_for_ledger ctx.turn_boundary
+              ; finished_turn
               ; demote_before = view.composed.demote_before
               ; working_state = view.composed.working_state
               }

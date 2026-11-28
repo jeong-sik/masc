@@ -226,29 +226,43 @@ val input_limit_of_runtime :
     ({!Llm_provider.Input_budget.of_agent_window}); [None] when absent, for
     the other official clients, or when the budget does not resolve. Pure. *)
 
+val turn_boundary_for_ledger : Keeper_carried_front.turn_start -> int option
+(** The turn boundary as the ledger records it with a request
+    ({!Keeper_model_input_ledger.request}): the atom the dispatch names,
+    [None] when it names none. *)
+
 val past_max_context :
   input_limit:Llm_provider.Input_budget.t option ->
+  finished_turn:Keeper_model_input_ledger.finished_turn ->
   continuity:continuity option ->
   history_digest_at:(int -> string option) ->
   turn_boundary:Keeper_carried_front.turn_start ->
   Keeper_model_input_ledger.t option ->
   past_max_context option
-(** [Some] when the ledger's next-turn peak — or, while turn growth has not yet
-    been measured after a ledger start or prefix change, the provider-counted
+(** [Some] when the ledger's next-turn peak — or, while the ledger cannot say
+    one (no turn's growth measured yet, or no first count for a turn left as
+    markers), the provider-counted
     {!Keeper_model_input_ledger.last_input_tokens} itself — passes
     [input_limit], the ledger still holds its positions in this history, and a
     known [turn_boundary] lies past the window's first atom at an atom this
     history has. [None] for no ledger, an unknown count, no [input_limit], an
     unknown boundary, or a boundary at or before the window: the signal moves a
     window early, and never moves it back or by a guess. [continuity] names the
-    Librarian point the move may go to. Pure. *)
+    Librarian point the move may go to. [finished_turn] says what this turn's
+    first request does with the turn before it; the ledger reads its peak
+    under it. Pure. *)
 
 (** What a window that stays keeps where it last sent it. *)
 type held_window =
   { window_opened_at : int
         (** Where the ledger's last request opened its range. *)
   ; markers_before : int
-        (** The boundary that request demoted below. *)
+        (** The atom below which that request sent finished results as
+            markers. While the range opens where that request opened it, the
+            next request sends markers below the same atom, and below the
+            turn boundary when that lies past it. The boundary is all that is
+            kept: results under the marker threshold go whole below it, and
+            a range that opens elsewhere reads the turn boundary alone. *)
   ; working_state : string option
         (** The working state that request carried; [None] when it carried
             none. *)
@@ -257,17 +271,20 @@ type held_window =
 val held_window :
   opens_turn:bool ->
   input_limit:Llm_provider.Input_budget.t option ->
+  finished_turn:Keeper_model_input_ledger.finished_turn ->
   history_digest_at:(int -> string option) ->
   Keeper_model_input_ledger.t option ->
   held_window option
 (** [Some] when the ledger still holds its positions in this history and,
-    at a turn's first request ([opens_turn]), the size signal watches the
-    window: [input_limit] is resolved and the ledger knows how much one turn
-    grows ({!Keeper_model_input_ledger.next_turn_peak}). Without the signal,
-    a window that keeps its results whole grows until the provider refuses
-    it, so that request demotes the turns that ended. Later in the turn the
-    window holds where its first request opened it, which the ledger's last
-    request records. Pure. *)
+    at a turn's first request ([opens_turn],
+    {!Keeper_model_input_ledger.opens_turn}), the size signal watches the
+    window: [input_limit] is resolved and the ledger can say the next turn's
+    peak ({!Keeper_model_input_ledger.next_turn_peak}, read under
+    [finished_turn]): it has measured one turn's growth and, when the turn in
+    hand is left as markers, that turn's first count. Without the signal,
+    a window whose start never moves grows until the provider refuses it.
+    Later in the turn the window holds where its first request opened it,
+    which the ledger's last request records. Pure. *)
 
 val choose_range_start :
   past_max_context:past_max_context option ->
@@ -756,17 +773,27 @@ type finished_turn_results =
       (** A result of turns that ended, in an atom before the boundary and
           never the newest atom, goes as its externalized marker when its
           body is at least {!aged_result_min_bytes} bytes. The boundary is
-          the one the window last sent while the window stays
-          ({!held_window}), and the turn boundary once it moves.
+          the turn boundary, whether the window stayed or moved.
           The same result is the same marker on every later request, so it
-          changes once, on the first request whose window moved after its
-          turn ended (RFC-tool-results-age-out-of-context). With an unknown
-          turn boundary a window that moves demotes nothing. *)
+          changes once, on the first request after its turn ended
+          (RFC-tool-results-age-out-of-context). An unknown turn boundary
+          demotes nothing more: a window that stays keeps what its last
+          request sent as markers, and nothing else is demoted. *)
 
 val finished_turn_results_for : reader_available:bool -> finished_turn_results
 (** {!Finished_turns_as_markers} for a Keeper that can read markers back
     ([reader_available]); {!Finished_turns_verbatim} for a Keeper without the
     reader. *)
+
+val finished_turn_for_ledger :
+  finished_turn_results:finished_turn_results ->
+  base_path:string ->
+  turn_boundary:Keeper_carried_front.turn_start ->
+  Keeper_model_input_ledger.finished_turn
+(** What a turn's first request does with the turn before it, as the ledger
+    reads it. [Left_as_markers] when the caller asks for markers, the dispatch
+    names the turn boundary and [base_path] is a store the markers are
+    written to; [Carried_whole] otherwise. *)
 
 val aged_result_min_bytes : int
 (** The least text, in bytes, of a result of an ended turn that goes as its
@@ -884,9 +911,8 @@ type composed =
   ; demote_before : int
         (** The boundary the demotion applied: 0 under {!Current_turn_verbatim}
             with {!Finished_turns_verbatim} or with no store; under
-            {!Finished_turns_as_markers} the held boundary while the window
-            stays, else the last ended turn's end; the refused request's atom
-            count under {!Current_turn_demoted}. *)
+            {!Finished_turns_as_markers} the last ended turn's end; the
+            refused request's atom count under {!Current_turn_demoted}. *)
   ; working_state : string option
         (** The working state the range carried ahead of its atoms
             ({!carried_working_state}). *)
@@ -1014,10 +1040,11 @@ module For_testing : sig
       demotion plan, on the range the checkpoint history chose.
       [past_max_context] goes to {!choose_range_start}; omitted, no window
       moves for size. The turn driver passes it at a turn's first request.
-      [held_window] keeps the markers, arguments and working state of a
-      window that stays where they were last sent; omitted, the markers and
-      arguments follow the turn boundary and the working state is the
-      snapshot's. *)
+      [held_window] keeps the working state of a window that stays as it
+      was last sent, and keeps as markers what its last request sent as
+      markers; omitted, the working state is the snapshot's and the markers
+      follow the turn boundary alone. The arguments follow the turn
+      boundary either way. *)
 
   type in_turn_overflow_demotion =
     | No_in_turn_demotion

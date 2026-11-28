@@ -21,8 +21,19 @@ let with_directory f =
 (* [with_directory] keeps the package folders beside the declarations, so a
    declaration that names a carried package finds it there too. *)
 let packages_beside directory = Filename.concat (Filename.dirname directory) "packages"
-let load_declaration ~path = Config.load_file ~packages:(packages_beside (Filename.dirname path)) ~path
-let load_declarations ~directory = Config.load ~packages:(packages_beside directory) ~directory
+let load_declaration ~path = Config.load_file ~packages:(packages_beside (Filename.dirname path))
+  ~workspace:(Filename.dirname (Filename.dirname path)) ~path
+let load_declarations ~directory = Config.load ~packages:(packages_beside directory) ~workspace:(Filename.dirname directory) ~directory
+let repo_file relative = match Sys.getenv_opt "DUNE_SOURCEROOT" with
+  | Some root -> Filename.concat root relative
+  | None -> Filename.concat (Filename.dirname Sys.executable_name) (Filename.concat ".." relative)
+(* A shipped declaration names its package under the repository's addons/,
+   as an installed copy names it under its base path, so the repository is
+   the workspace its manifest must stay inside. *)
+let load_in_repository ~path = Config.load_file ~packages:(packages_beside (Filename.dirname path))
+  ~workspace:(repo_file ".") ~path
+let rejected_in_repository label path =
+  check bool label true (Result.is_error (load_in_repository ~path))
 let package ?(title = "Example observer") () =
   Printf.sprintf {|id = "example"
 revision = "1"
@@ -62,7 +73,7 @@ let contains text needle =
   at 0
 (* For a refusal a guide quotes to operators. The row fails when the wording
    changes, so the guide is changed with it. *)
-let check_refusal label path quoted = match load_declaration ~path with
+let check_refusal ?(load = load_declaration) label path quoted = match load ~path with
   | Ok _ -> failf "%s: the declaration loaded" label
   | Error message ->
       check bool (Printf.sprintf "%s: refused with %S, and the guide quotes %S" label message quoted) true
@@ -320,9 +331,6 @@ sources = [{source_id = "page", kind = "browser_document",%s lane = "live", clie
    `load_file` enforces, and the checked-in declarations satisfy it. Without
    a contract a wrong binding only failed inside the worker, after the
    container had started, and the guided installer had nothing to offer. *)
-let repo_file relative = match Sys.getenv_opt "DUNE_SOURCEROOT" with
-  | Some root -> Filename.concat root relative
-  | None -> Filename.concat (Filename.dirname Sys.executable_name) (Filename.concat ".." relative)
 let shipped_dos_chain_declares_binding_contracts () =
   let shipped = [
     "addons/dos-world/install.toml", "dos-world", "dos-demo";
@@ -331,7 +339,7 @@ let shipped_dos_chain_declares_binding_contracts () =
     "docs/examples/lane-addons/dos-statistics.toml", "output-statistics", "dos-statistics";
     "docs/examples/lane-addons/output-statistics.toml", "output-statistics", "output-statistics"] in
   List.iter (fun (relative, addon_id, id) ->
-    let loaded = unwrap (load_declaration ~path:(repo_file relative)) in
+    let loaded = unwrap (load_in_repository ~path:(repo_file relative)) in
     check string ("declaration " ^ relative ^ " names its package") addon_id loaded.package.id;
     check string ("declaration " ^ relative ^ " keeps its id") id loaded.id;
     check bool (addon_id ^ " declares a binding contract") true (Option.is_some loaded.package.binding_schema))
@@ -351,19 +359,19 @@ output_id = "guest"
 selection = "latest_completed"
 |} in
     candidate ~package:"value-difference" ("[binding]\nfield = \"counter\"\nunit = \"count\"\n" ^ source);
-    ignore (unwrap (load_declaration ~path));
+    ignore (unwrap (load_in_repository ~path));
     candidate ~package:"value-difference" ("[binding]\nunit = \"count\"\n" ^ source);
-    check_error "value-difference without the compared field is rejected before install" path;
+    rejected_in_repository "value-difference without the compared field is rejected before install" path;
     candidate ~package:"value-difference" ("[binding]\nfield = \"counter\"\nunit = \"count\"\nwindow = 3\n" ^ source);
-    check_error "value-difference rejects a binding key the package does not read" path;
+    rejected_in_repository "value-difference rejects a binding key the package does not read" path;
     candidate ~package:"output-statistics" ("[binding]\n" ^ source);
-    ignore (unwrap (load_declaration ~path));
+    ignore (unwrap (load_in_repository ~path));
     candidate ~package:"output-statistics" "[binding]\nsources = [{source_id = \"game\", kind = \"msx_capture\"}]\n";
-    check_error "output-statistics accepts lane_output inputs only" path;
+    rejected_in_repository "output-statistics accepts lane_output inputs only" path;
     candidate ~package:"dos-world" "[binding]\nsources = []\n";
-    ignore (unwrap (load_declaration ~path));
+    ignore (unwrap (load_in_repository ~path));
     candidate ~package:"dos-world" ("[binding]\n" ^ source);
-    check_error "dos-world takes no external source" path)
+    rejected_in_repository "dos-world takes no external source" path)
 
 (* lane.host.toml runs the same output-statistics worker as a host process.
    Both manifests must declare one package: a revision, port or binding change
@@ -389,7 +397,7 @@ let output_statistics_host_manifest_differs_only_in_execution () =
    own manifest, its record grants parse as operator-owned grants, and the
    binding contract refuses a binding without the time zone R is counted in. *)
 let shipped_operator_quiz_declaration_loads () =
-  let loaded = unwrap (load_declaration ~path:(repo_file "docs/examples/lane-addons/operator-quiz.toml")) in
+  let loaded = unwrap (load_in_repository ~path:(repo_file "docs/examples/lane-addons/operator-quiz.toml")) in
   let package = loaded.package in
   check string "the declaration names the package" "operator-quiz" package.id;
   check (list string) "the package declares the author and grade outputs"
@@ -418,32 +426,32 @@ kind = "board"
 visibilities = ["public"]
 |} manifest binding) in
     declaration "timezone = \"Asia/Seoul\"\n";
-    ignore (unwrap (load_declaration ~path));
+    ignore (unwrap (load_in_repository ~path));
     declaration "timezone = \"Asia/Seoul\"\n\n[[binding.records]]\nsource_id = \"wiki\"\nkind = \"wiki\"\n\n\
                  [[binding.records]]\nsource_id = \"prs\"\nkind = \"github_pulls\"\nrepository_id = \"masc\"\n";
     check int "the binding also takes wiki and github_pulls grants" 3
-      (List.length (unwrap (Lane_addon_records.grants ~operator_owned:true (unwrap (load_declaration ~path)).binding)));
+      (List.length (unwrap (Lane_addon_records.grants ~operator_owned:true (unwrap (load_in_repository ~path)).binding)));
     (* The binding schema is two alternatives, and the host's validator names
        no member of an alternative: a binding that fits neither is refused
        with this one message, whichever member is wrong (#52319).
        docs/guides/operator-quiz.md quotes it and the other messages below. *)
     let unmatched = "lane binding must match exactly one schema alternative" in
     declaration "";
-    check_refusal "a binding without a time zone is refused before install" path unmatched;
+    check_refusal ~load:load_in_repository "a binding without a time zone is refused before install" path unmatched;
     declaration "timezone = \"Asia/Seoul\"\nwindow = 3\n";
-    check_refusal "a binding key the package does not read is refused" path unmatched;
+    check_refusal ~load:load_in_repository "a binding key the package does not read is refused" path unmatched;
     (* since says where a quiz that follows a lesson reads a record source
        from until a session that asked has left a cursor on that source (RFC
        operator-quiz-follows-lesson §3.8). *)
     declaration "timezone = \"Asia/Seoul\"\nsince = 1794441600\n";
-    check_refusal "a quiz on its own refuses since" path unmatched;
+    check_refusal ~load:load_in_repository "a quiz on its own refuses since" path unmatched;
     (* Before the schema the host reads the TOML, turns the binding into JSON
        and checks the shape of each source: a declaration wrong there is
        refused with that check's message. *)
     declaration "timezone = \"Asia/Seoul\"\nsince = 1794441600\n\n[[binding.sources]]\nsource_id = \"lesson\"\n\
                  kind = \"lane_output\"\ninstallation_id = \"operator-lesson\"\noutput_id = \"scenes\"\n\
                  selection = \"latest_completed\"\n";
-    check_refusal "sources = [] left beside [[binding.sources]] does not read as TOML" path
+    check_refusal ~load:load_in_repository "sources = [] left beside [[binding.sources]] does not read as TOML" path
       "table [binding.sources] is duplicated by an array of tables [[binding.sources]]";
     write path (Printf.sprintf {|id = "quiz"
 run_id = "quiz"
@@ -459,7 +467,7 @@ source_id = "board"
 kind = "board"
 visibilities = ["public"]
 |} manifest);
-    check_refusal "sources that is not an array is refused" path
+    check_refusal ~load:load_in_repository "sources that is not an array is refused" path
       "binding.sources requires an array of observation sources";
     write path (Printf.sprintf {|id = "quiz"
 run_id = "quiz"
@@ -475,7 +483,7 @@ source_id = "board"
 kind = "board"
 visibilities = ["public"]
 |} manifest);
-    check_refusal "a binding whose sources = [] was deleted with no source in its place is refused" path
+    check_refusal ~load:load_in_repository "a binding whose sources = [] was deleted with no source in its place is refused" path
       "binding.sources requires an array of observation sources";
     (* The TOML reader words the same mistake by where the lines are: with
        the lesson source after two record grants it raises an internal error
@@ -506,7 +514,7 @@ installation_id = "operator-lesson"
 output_id = "scenes"
 selection = "latest_completed"
 |} manifest);
-    check_refusal "sources = [] left with the lesson source after two record grants is the reader's own error" path
+    check_refusal ~load:load_in_repository "sources = [] left with the lesson source after two record grants is the reader's own error" path
       "otoml internal error";
     let following ?(since = "since = 1794441600\n") ?(selection = "selection = \"latest_completed\"\n") ?(more = "")
         output = write path (Printf.sprintf {|id = "quiz"
@@ -529,31 +537,31 @@ kind = "board"
 visibilities = ["public"]
 |} manifest since output selection more) in
     following "scenes";
-    ignore (unwrap (load_declaration ~path));
+    ignore (unwrap (load_in_repository ~path));
     (* The worker takes zero and a fraction of a second, so the host does. *)
     following ~since:"since = 0\n" "scenes";
-    ignore (unwrap (load_declaration ~path));
+    ignore (unwrap (load_in_repository ~path));
     following ~since:"since = 1794441600.5\n" "scenes";
-    ignore (unwrap (load_declaration ~path));
+    ignore (unwrap (load_in_repository ~path));
     following ~since:"" "scenes";
-    check_refusal "a quiz that follows a lesson without since is refused" path unmatched;
+    check_refusal ~load:load_in_repository "a quiz that follows a lesson without since is refused" path unmatched;
     following ~since:"since = \"yesterday\"\n" "scenes";
-    check_refusal "a since that is not a number is refused" path unmatched;
+    check_refusal ~load:load_in_repository "a since that is not a number is refused" path unmatched;
     following ~since:"since = -1\n" "scenes";
-    check_refusal "a since before 1970 is refused" path unmatched;
+    check_refusal ~load:load_in_repository "a since before 1970 is refused" path unmatched;
     following ~since:"since = 2026-11-12\n" "scenes";
-    check_refusal "a since written as a TOML date is refused before the schema" path
+    check_refusal ~load:load_in_repository "a since written as a TOML date is refused before the schema" path
       "binding.since: TOML date/time values are unsupported; use an explicit string";
     following ~since:"since = nan\n" "scenes";
-    check_refusal "a since that is not finite is refused before the schema" path
+    check_refusal ~load:load_in_repository "a since that is not finite is refused before the schema" path
       "binding.since: non-finite numbers are not supported";
     following "lesson";
-    check_refusal "a source that is not a lesson's scenes output is refused" path unmatched;
+    check_refusal ~load:load_in_repository "a source that is not a lesson's scenes output is refused" path unmatched;
     following ~more:"language = \"ko\"\n" "scenes";
-    check_refusal "a binding key written under the lesson source is refused as a field of that source" path
+    check_refusal ~load:load_in_repository "a binding key written under the lesson source is refused as a field of that source" path
       "lane_output contains duplicate or unknown fields";
     following ~selection:"" "scenes";
-    check_refusal "a lesson source without its selection is refused" path
+    check_refusal ~load:load_in_repository "a lesson source without its selection is refused" path
       "lane_output selection must be latest_completed";
     (* Then each record grant (#52373). The schema asks a grant for source_id
        and kind only, so before the host read grants here a Board grant
@@ -561,18 +569,18 @@ visibilities = ["public"]
        attached. *)
     let grant fields = declaration ("timezone = \"Asia/Seoul\"\n\n[[binding.records]]\n" ^ fields) in
     grant "source_id = \"notes\"\nkind = \"board\"\n";
-    check_refusal "a Board grant without visibilities is refused" path
+    check_refusal ~load:load_in_repository "a Board grant without visibilities is refused" path
       "binding.records: visibilities requires a non-empty array";
     grant "source_id = \"wiki\"\nkind = \"wiki\"\npaths = [\"docs/\"]\n";
-    check_refusal "a wiki grant with paths is refused" path
+    check_refusal ~load:load_in_repository "a wiki grant with paths is refused" path
       "binding.records: a record grant has no key paths";
     grant "source_id = \"board\"\nkind = \"wiki\"\n";
-    check_refusal "a second grant under a granted source_id is refused" path
+    check_refusal ~load:load_in_repository "a second grant under a granted source_id is refused" path
       "binding.records: records names the same source_id twice";
     following ~more:"\n[[binding.sources]]\nsource_id = \"lesson-2\"\nkind = \"lane_output\"\n\
                      installation_id = \"operator-lesson-2\"\noutput_id = \"scenes\"\n\
                      selection = \"latest_completed\"\n" "scenes";
-    check_error "a second lesson source is refused" path;
+    rejected_in_repository "a second lesson source is refused" path;
     (* The example, changed as its comment says: without sources = [], and with
        since and the lesson source uncommented. Every uncommented key has to
        land in [binding] or in the source, not in a table after it. *)
@@ -589,7 +597,7 @@ visibilities = ["public"]
         (inside && not (starts "# selection = "), kept))
         (false, []) (String.split_on_char '\n' example) in
     write path (String.concat "\n" (List.rev lines));
-    let binding = (unwrap (load_declaration ~path)).binding in
+    let binding = (unwrap (load_in_repository ~path)).binding in
     check bool "the example bound to a lesson keeps its time zone and since" true
       Yojson.Safe.Util.(member "timezone" binding = `String "Asia/Seoul" && member "since" binding <> `Null);
     check int "and reads the lesson's scenes output" 1
@@ -599,7 +607,7 @@ visibilities = ["public"]
    package's own manifest, and the binding contract refuses a binding without
    the time the first lesson reads from. *)
 let shipped_operator_lesson_declaration_loads () =
-  let loaded = unwrap (load_declaration ~path:(repo_file "docs/examples/lane-addons/operator-lesson.toml")) in
+  let loaded = unwrap (load_in_repository ~path:(repo_file "docs/examples/lane-addons/operator-lesson.toml")) in
   let package = loaded.package in
   check string "the declaration names the package" "operator-lesson" package.id;
   check (list string) "the package declares the outline and scene outputs"
@@ -630,13 +638,13 @@ kind = "board"
 visibilities = ["public"]
 |} manifest binding) in
     declaration "since = 1794441600\n";
-    ignore (unwrap (load_declaration ~path));
+    ignore (unwrap (load_in_repository ~path));
     declaration "";
-    check_error "a binding without since is refused before install" path;
+    rejected_in_repository "a binding without since is refused before install" path;
     declaration "since = \"yesterday\"\n";
-    check_error "a since that is not a number is refused" path;
+    rejected_in_repository "a since that is not a number is refused" path;
     declaration "since = 1794441600\ntimezone = \"Asia/Seoul\"\n";
-    check_error "a binding key the package does not read is refused" path)
+    rejected_in_repository "a binding key the package does not read is refused" path)
 
 (* The operator quiz worker itself, read with the host's own decoders: the
    action schema the worker start checks, the observation packet, and the
@@ -1053,7 +1061,7 @@ request_schema = true
 
 let assembled_fusion_declarations () =
   List.iter (fun name ->
-    let loaded = unwrap (load_declaration ~path:(repo_file
+    let loaded = unwrap (load_in_repository ~path:(repo_file
       ("docs/examples/lane-addons/fusion-compute/" ^ name ^ ".toml"))) in
     check string "assembled workers belong to one host run" "assembled-fusion" loaded.run_id;
     let expected = if name="report" then Lane_addon_types.Model_disabled
@@ -1133,7 +1141,7 @@ let alternative_probes_do_not_observe_tool_calls () =
           | _ -> None)))
 
 let judge_source_schema_is_enforced () =
-  let loaded = unwrap (load_declaration ~path:(repo_file
+  let loaded = unwrap (load_in_repository ~path:(repo_file
     "docs/examples/lane-addons/fusion-compute/judge.toml")) in
   let schema = Option.get loaded.package.binding_schema in
   let validate value = Lane_addon_action.validate_value ~schema ~name:"binding" value in
@@ -1150,9 +1158,9 @@ let judge_source_schema_is_enforced () =
     let path = Filename.concat declarations "role.toml" in
     let declaration role = Printf.sprintf "id = \"role-check\"\nrun_id = \"role-check\"\nmanifest_path = %S\n[binding]\nanalysis_id = \"a\"\nrole = %S\nprompt = \"compare\"\ninstructions = \"judge evidence\"\nmax_tokens = 8\nmodel_route = \"declared\"\n[[binding.sources]]\nsource_id = \"input\"\nkind = \"snapshot_file\"\npath = \"snapshot.json\"\n" loaded.manifest_path role in
     write path (declaration "judge");
-    check bool "load_declaration rejects unusable judge snapshot declaration" true (Result.is_error (load_declaration ~path));
+    check bool "load_declaration rejects unusable judge snapshot declaration" true (Result.is_error (load_in_repository ~path));
     write path (declaration "panel");
-    check bool "load_declaration accepts panel snapshot declaration" true (Result.is_ok (load_declaration ~path)));
+    check bool "load_declaration accepts panel snapshot declaration" true (Result.is_ok (load_in_repository ~path)));
   let branch = `Assoc ["type",`String "string"] in
   let union branches = `Assoc ["type",`String "string";"oneOf",`List branches] in
   check bool "oneOf rejects overlapping alternatives" true
@@ -1462,7 +1470,7 @@ contributions=["observe"]
 max_reply_bytes=4096
 |};
   let path=Filename.concat directory "ego.toml" in
-  let load space=Config.load_source ~packages:(packages_beside (Filename.dirname path)) ~manifest_scope:Config.Operator_declared ~source_path:path ~source_text:(declaration ("[binding]\nsources=[]\n" ^ space)) in
+  let load space=Config.load_source ~packages:(packages_beside (Filename.dirname path)) ~manifest_scope:(Config.Declared_authority (Filename.dirname directory)) ~source_path:path ~source_text:(declaration ("[binding]\nsources=[]\n" ^ space)) in
   let workspace=unwrap (load "") and first=unwrap (load "space=\"first Goal\"\n")
   and second=unwrap (load "space=52\n") in
   check bool "Space is retained in declaration binding" true (Yojson.Safe.Util.member "space" second.binding=`Int 52);

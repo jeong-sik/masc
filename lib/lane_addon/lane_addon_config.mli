@@ -77,19 +77,23 @@ type snapshot = {
     ({!Lane_addon_carried}); it resolves to [<packages>/<name>-<revision>]
     only when that folder holds exactly the carried files, and the declaration
     is refused otherwise. [packages] is [Config_dir_resolver.packages_dir] for
-    the server's base path. *)
-val load_file : packages:string -> path:string -> (declaration, string) result
+    the server's base path, and [workspace] is that base path: it reads the
+    file as {!Declared_authority} [workspace]. *)
+val load_file : packages:string -> workspace:string -> path:string -> (declaration, string) result
 
-(** Who wrote the source bytes [load_source] reads. *)
+(** Where [manifest_path] may resolve before it is opened. *)
 type manifest_scope =
-  | Operator_declared
-  (** Operator configuration, or a declaration file already on disk:
-      [manifest_path] is read where it points. [load] and [load_file] read
-      this way. *)
   | Within_workspace of string
   (** A save from a Keeper or an unauthenticated caller: the resolved
       [manifest_path] has to stay inside this workspace
-      ([Lane_addon_manifest.resolve_in_workspace]) before it is opened. *)
+      ([Lane_addon_manifest.resolve_in_workspace]), whatever the bytes say
+      about their authority. *)
+  | Declared_authority of string
+  (** A declaration file, or bytes the operator saves (RFC
+      lane-declaration-operator-authority 6.3): [operator_authority = true]
+      reads [manifest_path] where it points; without it the path has to stay
+      inside this workspace, as for {!Within_workspace}. [load] and
+      [load_file] read this way. *)
 
 (** Validate edited source bytes using the same contract as [load_file].
     Relative paths resolve from the final declaration path; no declaration is
@@ -102,8 +106,9 @@ val load_source :
     Missing directories are an empty complete configuration. Read failures make
     [complete] false; callers must not infer deletions from that snapshot.
     Malformed files remain in [paths]. Duplicate declared IDs are all excluded
-    from [declarations] and reported, without selecting an arbitrary winner. *)
-val load : packages:string -> directory:string -> snapshot
+    from [declarations] and reported, without selecting an arbitrary winner.
+    Each file is read as {!Declared_authority} [workspace]. *)
+val load : packages:string -> workspace:string -> directory:string -> snapshot
 
 val source_authority : string -> (authority, string) result
 (** The [operator_authority] line of declaration text, read by the same rule

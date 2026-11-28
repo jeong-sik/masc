@@ -1152,10 +1152,10 @@ let test_disable_keeps_configuration_evidence_and_manual_workers () =
     let path = Filename.concat directory "observer.toml" in
     let source = declaration ~id:"observer" ~manifest () in
     write path source;
-    let initial = Lane_addon_config.load_file ~packages:(Config_dir_resolver.packages_dir ~base_path:config.Workspace.base_path) ~path |> unwrap in
+    let initial = Lane_addon_config.load_file ~packages:(Config_dir_resolver.packages_dir ~base_path:config.Workspace.base_path) ~workspace:config.Workspace.base_path ~path |> unwrap in
     check bool "accepting deployment keeps omitted enabled on" true initial.enabled;
     check bool "nonboolean activity is rejected" true
-      (Result.is_error (Lane_addon_config.load_source ~packages:(Config_dir_resolver.packages_dir ~base_path:config.Workspace.base_path) ~manifest_scope:Lane_addon_config.Operator_declared ~source_path:path
+      (Result.is_error (Lane_addon_config.load_source ~packages:(Config_dir_resolver.packages_dir ~base_path:config.Workspace.base_path) ~manifest_scope:(Lane_addon_config.Declared_authority config.Workspace.base_path) ~source_path:path
         ~source_text:("enabled = \"false\"\n" ^ source)));
     ignore (reconcile config directory);
     let id = declared_instance config "observer" |> text "instance_id" in
@@ -1171,7 +1171,7 @@ let test_disable_keeps_configuration_evidence_and_manual_workers () =
     state.image_available := false;
     let off = declaration ~enabled:false ~id:"observer" ~manifest () in
     write path off;
-    let disabled = Lane_addon_config.load_file ~packages:(Config_dir_resolver.packages_dir ~base_path:config.Workspace.base_path) ~path |> unwrap in
+    let disabled = Lane_addon_config.load_file ~packages:(Config_dir_resolver.packages_dir ~base_path:config.Workspace.base_path) ~workspace:config.Workspace.base_path ~path |> unwrap in
     check string "activity flag does not invalidate worker inputs" initial.revision disabled.revision;
     check bool "activity changes exact source identity" true (initial.source_revision <> disabled.source_revision);
     ignore (reconcile config directory);
@@ -1502,7 +1502,7 @@ let test_detached_unreadable_record_keeps_the_document_owner () =
     (* The hold is for records that name this declaration: same id, source
        file and revision. The fixture's own owner names a file elsewhere, so
        seeded as it is the records would belong to no declaration here. *)
-    let declared = Lane_addon_config.load_file ~packages:(Config_dir_resolver.packages_dir ~base_path:config.Workspace.base_path) ~path |> unwrap in
+    let declared = Lane_addon_config.load_file ~packages:(Config_dir_resolver.packages_dir ~base_path:config.Workspace.base_path) ~workspace:config.Workspace.base_path ~path |> unwrap in
     let owned_by_declaration = replace_field "configuration"
       (`Assoc [ "id", `String declared.id; "source_path", `String declared.source_path;
                 "revision", `String declared.revision ]) in

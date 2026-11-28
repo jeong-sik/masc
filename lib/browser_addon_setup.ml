@@ -216,7 +216,7 @@ let declaration_text ~backend ~(package : Lane_addon_types.package) ~manifest_pa
        ; ""
        ])
 
-let declare ~backend ~package ~packages ~directory ~manifest_path ~package_directory =
+let declare ~backend ~package ~packages ~workspace ~directory ~manifest_path ~package_directory =
   let request =
     `Assoc
       [ "mode", `String "create"
@@ -227,7 +227,7 @@ let declare ~backend ~package ~packages ~directory ~manifest_path ~package_direc
   let refused (error : Lane_addon_declaration.error) = Declaration_refused error.message in
   let* request = Lane_addon_declaration.write_request request |> Result.map_error refused in
   let* (receipt : Lane_addon_declaration.receipt) =
-    Lane_addon_declaration.write ~packages ~directory request |> Result.map_error refused
+    Lane_addon_declaration.write ~packages ~workspace ~directory request |> Result.map_error refused
   in
   Ok (Created { path = receipt.document.source_path })
 
@@ -239,8 +239,8 @@ let lane_directory ~base_path =
   | Missing_status -> Error (Config_root_missing resolution.config_root.path)
   | Ready | Warn -> Ok (Lane_addon_config.directory ~config_root:resolution.config_root.path)
 
-let read_inventory ~packages ~lane_directory =
-  let snapshot = Lane_addon_config.load ~packages ~directory:lane_directory in
+let read_inventory ~packages ~workspace ~lane_directory =
+  let snapshot = Lane_addon_config.load ~packages ~workspace ~directory:lane_directory in
   if snapshot.Lane_addon_config.complete
   then Ok snapshot
   else Error (Inventory_unreadable { directory = lane_directory })
@@ -280,7 +280,7 @@ let plan ~base_path ~sources =
   then Error (Base_path_not_absolute base_path)
   else
     let* lane_directory = lane_directory ~base_path in
-    let* snapshot = read_inventory ~packages:(Config_dir_resolver.packages_dir ~base_path) ~lane_directory in
+    let* snapshot = read_inventory ~packages:(Config_dir_resolver.packages_dir ~base_path) ~workspace:base_path ~lane_directory in
     let* packages =
       List.fold_right
         (fun backend collected ->
@@ -316,7 +316,7 @@ let apply_package plan (backend, files) =
      load because its package was missing loads now, and one written since
      [plan] is seen. *)
   let packages = Config_dir_resolver.packages_dir ~base_path:plan.base_path in
-  let* snapshot = read_inventory ~packages ~lane_directory:plan.lane_directory in
+  let* snapshot = read_inventory ~packages ~workspace:plan.base_path ~lane_directory:plan.lane_directory in
   let* existing = browser_declaration backend snapshot in
   let* declaration =
     match existing with
@@ -342,7 +342,7 @@ let apply_package plan (backend, files) =
        with
        | Some issue ->
          Error (Declaration_unloadable { path = issue.source_path; reason = issue.message })
-       | None -> declare ~backend ~package ~packages ~directory:plan.lane_directory ~manifest_path ~package_directory:directory)
+       | None -> declare ~backend ~package ~packages ~workspace:plan.base_path ~directory:plan.lane_directory ~manifest_path ~package_directory:directory)
   in
   Ok
     { backend

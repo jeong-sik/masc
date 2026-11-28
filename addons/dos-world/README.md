@@ -34,11 +34,14 @@ NASM. The `docker run` command runs the actual scenario inside the image and
 writes its evidence to `proof/`.
 
 Load the built image into the Docker engine used by MASC. Place this package
-directory where MASC can read its manifest and Skill, then copy
+directory inside the MASC workspace (`<base-path>`), then copy
 [install.toml](install.toml) into the active config root's `lane-addons/` directory.
 Set `manifest_path` relative to the declaration's new location, or use its actual
-absolute path. Choose a distinct installation ID and run ID. Image build/load is
-explicit: the installation loader does not install npm packages or build images.
+absolute path. If the manifest's real path is outside the workspace, the
+operator must verify the target and add `operator_authority = true` at the top
+level of the declaration. Choose a distinct installation ID and run ID. Build
+and load the image before installing the declaration. The installation loader
+does not install npm packages or build images.
 
 The declaration has `sources=[]` because this worker owns its environment; the
 manifest's `[interface] binding_schema` allows no other binding, so a declaration

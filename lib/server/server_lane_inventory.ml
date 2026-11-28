@@ -143,7 +143,8 @@ let read_declarations ~config =
          issues=[{source_path=directory;id=None;message=String.concat "; " resolution.warnings}]}
     | Ready | Warn | Missing_status ->
         Eio_unix.run_in_systhread (fun () -> Config.load
-          ~packages:(Config_dir_resolver.packages_dir ~base_path:config.Workspace.base_path) ~directory) in
+          ~packages:(Config_dir_resolver.packages_dir ~base_path:config.Workspace.base_path)
+          ~workspace:config.Workspace.base_path ~directory) in
   directory, declarations
 
 let project ~config ~exact ~machine_configuration ~directory ~declarations

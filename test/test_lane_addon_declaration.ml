@@ -356,7 +356,7 @@ sources=[{kind="fusion_run",source_id="fusion",run_id=%S}]
     let shared = declaration ~id:"private-save" () in
     let replace_file path source = Fs_compat.Atomic_replace_for_testing.save_file_atomic_strict_staged
       ~sync_parent:(fun _ -> raise (Unix.Unix_error (Unix.EIO,"fsync",directory))) path source in
-    let writer ~packages ~directory request = Editor.For_testing.write ~replace_file ~packages ~directory request in
+    let writer ~packages ~workspace ~directory request = Editor.For_testing.write ~replace_file ~packages ~workspace ~directory request in
     let saved = Runtime.For_testing.with_declaration_writer writer (fun () ->
       Runtime.save_declaration ~caller:"editor-keeper" ~config
         (request ~revision ~mode:"save" ~file_name:"private.toml" shared)) |> unwrap in
@@ -463,7 +463,7 @@ let test_invalid_existing_source_can_be_repaired () = with_fixture (fun _clock c
   let missing = read config directory "broken.toml" in
   check string "missing package still permits reading declaration bytes" (declaration ()) (text "source_text" missing);
   check bool "a missing dependency does not hide the declaration inventory" true
-    (Lane_addon_config.load ~packages:(packages config) ~directory).complete;
+    (Lane_addon_config.load ~packages:(packages config) ~workspace:config.Workspace.base_path ~directory).complete;
   write (Filename.concat root ".masc/replacement-package.toml") manifest;
   let repaired_source = declaration ~manifest_path:"../../replacement-package.toml" () in
   let repaired = save config (request ~revision:(text "source_revision" missing) ~mode:"save"
@@ -479,7 +479,7 @@ let test_invalid_existing_source_can_be_repaired () = with_fixture (fun _clock c
   Unix.mkdir unreadable 0o700;
   Fun.protect ~finally:(fun () -> Unix.rmdir unreadable) (fun () ->
     check bool "an unreadable declaration makes inventory incomplete" false
-      (Lane_addon_config.load ~packages:(packages config) ~directory).complete;
+      (Lane_addon_config.load ~packages:(packages config) ~workspace:config.Workspace.base_path ~directory).complete;
     match Runtime.save_declaration ~access:Lane_addon_sources.Operator_configuration ~config (request ~revision:(text "source_revision" repaired)
       ~mode:"save" ~file_name:"broken.toml" ("# cannot inventory peers\n" ^ repaired_source)) with
     | Error error -> check bool "unreadable inventory still blocks publication" true (error.code=Editor.Io_error)
@@ -521,7 +521,7 @@ let test_two_writers_and_post_rename_failure () = with_fixture (fun _clock confi
   let replace_file path source = Fs_compat.Atomic_replace_for_testing.save_file_atomic_strict_staged
     ~sync_parent:(fun _ -> raise (Unix.Unix_error (Unix.EIO,"fsync",directory)))
     path source in
-  let receipt = Eio_unix.run_in_systhread (fun () -> Editor.For_testing.write ~replace_file ~packages:(packages config) ~directory request) |> unwrap in
+  let receipt = Eio_unix.run_in_systhread (fun () -> Editor.For_testing.write ~replace_file ~packages:(packages config) ~workspace:config.Workspace.base_path ~directory request) |> unwrap in
   let json = Editor.receipt_to_json receipt in
   check string "post-rename result records visible save" "saved" (member "write" json |> text "state");
   check string "failed parent fsync is not claimed durable" "unconfirmed" (member "write" json |> text "durability");
@@ -537,7 +537,7 @@ let test_create_publication_collision_preserves_competing_bytes () = with_fixtur
     | Error error -> Error error
     | Ok () -> write path competing; Ok () in
   let request = Editor.write_request (request ~mode:"create" ~file_name:"contested.toml" (declaration ())) |> unwrap in
-  (match Eio_unix.run_in_systhread (fun () -> Editor.For_testing.write ~replace_file ~packages:(packages config) ~directory request) with
+  (match Eio_unix.run_in_systhread (fun () -> Editor.For_testing.write ~replace_file ~packages:(packages config) ~workspace:config.Workspace.base_path ~directory request) with
    | Error error -> check bool "publication refuses a concurrently created file" true (error.code=Editor.Revision_conflict)
    | Ok _ -> fail "create overwrote the competing publication");
   check string "competing source bytes survive" competing (read config directory "contested.toml" |> text "source_text");
@@ -914,7 +914,26 @@ let test_only_the_operator_removes_a_marked_declaration () =
     (match detach () with Ok _ -> () | Error message -> fail message);
     check bool "the operator's Detach removes it" false (Sys.file_exists path))
 
+let test_unmarked_manifest_outside_the_workspace_is_not_opened () =
+  with_fixture (fun _clock config directory root started ->
+    ignore (unwrap (Runtime.save_declaration ~caller:"keeper-a" ~config
+      (request ~mode:"create" ~file_name:"observer.toml" (declaration ()))));
+    ignore (reconcile config directory);
+    let outside = Filename.temp_file "lane-outside-manifest-" ".toml" in
+    (* Not a manifest: a parse of it would put its error text in the issue. *)
+    write outside "id = [\n";
+    Fun.protect ~finally:(fun () -> if Sys.file_exists outside then Sys.remove outside) (fun () ->
+      let manifest = Filename.concat root ".masc/package.toml" in
+      Unix.unlink manifest;
+      Unix.symlink outside manifest;
+      let messages = issue_for (reconcile config directory) (Filename.concat directory "observer.toml") in
+      check bool "the outside file is refused before it is opened" true
+        (messages <> [] && List.for_all (String.equal "manifest_path must name a file inside the workspace") messages);
+      check int "no second worker started" 1 (List.length !started)))
+
 let () = run "Lane declaration editing" ["shared TOML owner",[
+  test_case "unmarked manifest outside the workspace is not opened" `Quick
+      test_unmarked_manifest_outside_the_workspace_is_not_opened;
   test_case "Keeper declaration cannot reach host_process after its save" `Quick
       test_keeper_declaration_cannot_reach_host_process_after_save;
   test_case "operator edit keeps a Keeper declaration unprivileged" `Quick

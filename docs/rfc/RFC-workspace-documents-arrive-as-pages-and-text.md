@@ -81,7 +81,7 @@ ZIP 의 목차는 파일 끝에 있으므로, TUI 는 최대 크기 안에서 �
 | DOCX | ZIP | `_rels/.rels` 의 officeDocument 관계가 가리키는 part 의 형식이 `[Content_Types].xml` 에서 `…wordprocessingml.document.main+xml` |
 | XLSX | ZIP | 같은 자리가 `…spreadsheetml.sheet.main+xml` |
 | PPTX | ZIP | 같은 자리가 `…presentationml.presentation.main+xml` |
-| HWPX | ZIP | 첫 항목 `mimetype` 이 압축 없이 저장되어 있고 내용이 `application/hwp+zip` |
+| HWPX | ZIP | `mimetype` 항목의 내용이 정확히 `application/hwp+zip`. 항목의 위치와 압축 방식은 보지 않는다 |
 | DOC | CFB (`D0 CF 11 E0 A1 B1 1A E1`) | `WordDocument` stream |
 | XLS | CFB | `Workbook` 또는 `Book` stream |
 | PPT | CFB | `PowerPoint Document` stream |
@@ -89,10 +89,11 @@ ZIP 의 목차는 파일 끝에 있으므로, TUI 는 최대 크기 안에서 �
 
 - ZIP 안에서 위 기준이 정확히 하나만 맞아야 한다. 하나도 없거나 둘 이상이면 `Unsupported_or_unknown_format` 이다.
   `mimetype` 과 `[Content_Types].xml` 이 함께 있거나 main part 가 둘이면 여기에 걸린다.
+- 공개 HWPX 표본 521개 중 61개는 `mimetype` 이 첫 항목이 아니거나 압축되어 있었다. 그래서 HWPX 는 위치와 압축을 보지 않는다.
 - 매크로가 든 OOXML(`…macroEnabled.main+xml`)은 닫힌 집합 밖이라 `Unsupported_or_unknown_format` 이다.
 - XML 은 이미 쓰는 `markup` 으로 읽는다. 부분 문자열로 찾지 않는다.
-- ZIP 은 `zipc`(ISC, 순수 OCaml)로 읽는다. 펼치는 항목은 `_rels/.rels`·`[Content_Types].xml`·`mimetype` 셋뿐이다.
-  안전 경계로 앞의 둘은 적힌 크기가 `package_part_max_bytes`(1 MiB)를 넘으면 펼치지 않고 깨진 컨테이너로 본다.
+- ZIP 은 `zipc`(ISC, 순수 OCaml)로 읽는다. 펼치는 항목은 `_rels/.rels`·`[Content_Types].xml`·`mimetype`·`META-INF/manifest.xml` 넷뿐이다.
+  넷 모두 적힌 크기가 `part_max_bytes`(1 MiB)를 넘으면 펼치지 않고 깨진 컨테이너로 본다.
   펼친 크기가 central directory 에 적힌 크기와 달라도 깨진 컨테이너다.
 - CFB 를 읽는 OCaml 라이브러리는 찾지 못했다. 그래서 작은 reader 를 둔다.
   이 reader 는 header·FAT·miniFAT·디렉터리를 읽고, 이름이 정해진 stream 의 앞부분을 읽는다.
@@ -105,12 +106,14 @@ ZIP 의 목차는 파일 끝에 있으므로, TUI 는 최대 크기 안에서 �
 |---|---|---|
 | OOXML(DOCX·XLSX·PPTX) | ZIP 이 아니라 CFB 이고 `EncryptionInfo`·`EncryptedPackage` stream 이 있다 | [MS-OFFCRYPTO] |
 | DOC | `WordDocument` FibBase 의 `fEncrypted` bit | [MS-DOC] FibBase |
-| XLS | `Workbook` globals 의 BOF 다음에 `FilePass`(0x002F) 레코드가 있다 | [MS-XLS] FilePass |
-| PPT | `Current User` stream 의 `headerToken` 이 `0xF3D1C4DF` | [MS-PPT] CurrentUserAtom |
-| HWP | `FileHeader` 속성의 암호 bit | 한글 문서 파일 형식 5.0 |
-| HWPX | 확인 필요. 공개 표본으로 manifest 의 암호 표시를 확인한 뒤 L2 에서 정한다 | — |
+| XLS | `Workbook` globals 의 BOF 다음에 `FilePass`(0x002F) 레코드가 있다. 그 사이에는 `WriteProtect`(0x0086) 하나만 올 수 있다 | [MS-XLS] Globals Substream, FilePass |
+| PPT | `Current User` stream 의 `headerToken` 이 `0xF3D1C4DF`. 암호가 없으면 `0xE391C05F` 이고, 다른 값은 깨진 파일이다 | [MS-PPT] CurrentUserAtom |
+| HWP | `FileHeader` 의 속성(36 바이트 위치, u32)에서 0x02 bit. 배포용 문서 bit(0x04)는 암호가 아니다. rhwp 가 배포용 문서를 연다 | 한글 문서 파일 형식 5.0 |
+| HWPX | `META-INF/manifest.xml` 에 ODF manifest 이름공간(`urn:oasis:names:tc:opendocument:xmlns:manifest:1.0`)의 `encryption-data` 요소가 있다 | ODF manifest. 공개 표본의 암호 HWPX 1개로 확인 |
 
-bit 위치는 L2 가 명세와 생성 표본으로 시험 표에 고정한다. HWPX 의 판별을 정하지 못하면 이 RFC 를 고친다.
+L2 가 이 표를 명세와 표본으로 시험 표에 고정한다.
+- 실제 표본으로 확인한 것: 암호 DOC·DOCX·XLSX(LibreOffice 26.8 이 만듦), 암호 HWP(공개 표본 `hwp3-sample16-hwp5-2024-password-123456.hwp`), 암호 HWPX(공개 표본).
+- 암호 XLS·PPT 는 만들지 못했다. LibreOffice 를 스크립트로 부르면 SIGKILL(rc 137)로 끝났다. 이 둘은 명세대로 만든 합성 표본으로만 시험한다.
 
 wire MIME 은 IANA 등록 값을 쓴다. HWP 와 HWPX 는 IANA 에 등록된 값이 없다
 ([libmagic 논의](https://bugs.astron.com/view.php?id=467)).

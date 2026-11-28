@@ -31,6 +31,17 @@ test('--export-midi writes a Standard MIDI File without a terminal', () => {
   } finally { rmSync(directory, { recursive: true, force: true }) }
 })
 
+test('a score that does not parse exits 65 with its diagnostics', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'alphatex-export-'))
+  try {
+    const score = join(directory, 'bad.atex')
+    writeFileSync(score, '\\title "Bad"\n.\n:4 3.6 }}}\n')
+    const run = spawnSync(process.execPath, [viewer, score, '--export-midi', join(directory, 'bad.mid')], { encoding: 'utf8' })
+    assert.equal(run.status, 65, run.stderr)
+    assert.match(run.stderr, /AT202/)
+  } finally { rmSync(directory, { recursive: true, force: true }) }
+})
+
 test('--export-midi does not overwrite an existing file', () => {
   const { directory, run } = exportScore(directory => {
     writeFileSync(join(directory, 'taken.mid'), 'kept')

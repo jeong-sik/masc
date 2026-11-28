@@ -104,7 +104,14 @@ try {
   if (!Number.isInteger(index) || index < 0 || index >= sources.length) throw new Error('score index is outside the snapshot')
   if (values.check || values.render || values.audio || values['export-midi']) {
     const { readScore, renderScore, midiForScore, engineVersion } = await import('./engine.mjs')
-    const { score } = readScore(sources[index])
+    let score
+    try {
+      ({ score } = readScore(sources[index]))
+    } catch (error) {
+      // sysexits EX_DATAERR: the alphaTex itself does not parse, so a caller
+      // can tell a score to fix from a tool that failed.
+      throw Object.assign(error, { exitCode: 65 })
+    }
     if (values.render) writeFileSync(values.render, renderScore(sources[index]).pages[0].png, { flag: 'wx', mode: 0o600 })
     // smf1Mode makes the events ones a Standard MIDI File can hold: without it
     // alphaTab emits MIDI 2.0 per-note bends and toBinary refuses the score.
@@ -121,7 +128,7 @@ try {
   }
 } catch (error) {
   console.error(`alphaTex: ${errorDetail(error).split('\n').map(safeText).join('\n')}`)
-  process.exitCode = 1
+  process.exitCode = error?.exitCode ?? 1
 }
 
 async function viewScores(sources, initialIndex) {

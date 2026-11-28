@@ -24,10 +24,6 @@ type t =
       ; cause : cause
       }
 
-let user_id = function
-  | Granted { user_id } | Revoked { user_id; cause = _ } -> user_id
-;;
-
 let equal a b =
   match a, b with
   | Granted a, Granted b -> User_id.equal a.user_id b.user_id

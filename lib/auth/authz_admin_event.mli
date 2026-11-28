@@ -43,9 +43,6 @@ type t =
       ; cause : cause
       }
 
-(** The principal the event is about. *)
-val user_id : t -> Authz_types.User_id.t
-
 val equal : t -> t -> bool
 
 (** The body of the record. The error cannot come from a value of {!t}. It is

@@ -80,6 +80,12 @@ val is_admin : t -> Authz_types.User_id.t -> bool
     the role, where {!is_admin} is the role that acts. *)
 val has_admin_assignment : t -> Authz_types.User_id.t -> bool
 
+(** The Admin who wrote the grant ({!grant_admin}) of the assignment in force.
+    [None] for an assignment an Admin invitation made, and for no assignment.
+    The granter stands behind the principal as the approver of its join does
+    ({!Authz_state}, cancel of a block). *)
+val admin_granter : t -> Authz_types.User_id.t -> Authz_types.User_id.t option
+
 type refusal =
   | Author_is_not_the_person of
       { author : Authz_records.Author.t
@@ -174,9 +180,11 @@ val grant_refusal_to_string : grant_refusal -> string
 (** What one grant of an Admin assignment does: the principal, which joined as
     a Member, gets the assignment an Admin invitation gives at admission. The
     checks run in this order: the author, the principal, the hold, the status,
-    the assignment. Only an Admin that acts grants, as in {!revoke_admin}. A
-    grant lowers no epoch: like an enable, it gives and takes nothing away, so
-    a log restored from before it leaves the principal a Member. *)
+    the assignment. Only an Admin that acts grants, as in {!revoke_admin}. The
+    assignment raises the role epoch of the principal as an Admin invitation
+    does (design 8.1): {!Authz_state} gives the grant a [Grant] intent, so a log
+    restored from before it disagrees with the store. The author is kept as
+    the granter ({!admin_granter}). *)
 val grant_admin
   :  t
   -> author:Authz_records.Author.t

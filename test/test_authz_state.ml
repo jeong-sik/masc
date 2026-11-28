@@ -1215,6 +1215,59 @@ let test_an_admission_through_a_registration () =
     (cancel_word blocked (cancel_record ~author:(human bob) erin_held))
 ;;
 
+let grant_record ~by ~user_id =
+  match Admin.to_body (Admin.Granted { user_id }) with
+  | Error _ -> Alcotest.fail "fixture grant refused"
+  | Ok body ->
+    (match R.make ~head:R.genesis ~at_ms ~author:(human by) ~kind:K.Admin_assignment ~body with
+     | Ok record -> record
+     | Error _ -> Alcotest.fail "fixture grant record refused")
+;;
+
+(* bob makes erin, a Member through the entry user wrote, an Admin. The store
+   takes a [Grant] on her, as for an admission through an Admin invitation
+   (design 8.1). bob granted the role, so bob stands behind erin as user does,
+   and neither lifts a block of her; carol does. *)
+let test_a_grant_of_an_admin_assignment () =
+  let state = step_ok (three_admins ()) (registered_by ~by:user dana_identity) in
+  let state = step_ok state (registration_admission ~user_id:erin dana_identity) in
+  Alcotest.(check string)
+    "the grant"
+    "grant of principal:human:user-5"
+    (intent_word (S.apply state (grant_record ~by:bob ~user_id:erin)));
+  let state = step_ok state (grant_record ~by:bob ~user_id:erin) in
+  Alcotest.(check bool) "an Admin" true (People.is_admin state.S.principals erin);
+  Alcotest.(check (option string))
+    "the granter"
+    (Some "user-2")
+    (Option.map Authz_types.User_id.to_string (People.admin_granter state.S.principals erin));
+  Alcotest.(check string)
+    "a second grant"
+    (S.refusal_to_string (S.Admin_grant (People.Already_an_admin erin)))
+    (intent_word (S.apply state (grant_record ~by:bob ~user_id:erin)));
+  let erin_held = held ~aborted:(String.make 64 'f') (principal_subject erin) in
+  let blocked = S.hold_revocations state [ erin_held ] in
+  let owns = S.refusal_to_string (S.Canceller_owns_the_subject (principal_subject erin)) in
+  Alcotest.(check string)
+    "bob granted erin her assignment"
+    owns
+    (cancel_word blocked (cancel_record ~author:(human bob) erin_held));
+  Alcotest.(check string)
+    "user wrote the entry erin came through"
+    owns
+    (cancel_word blocked (cancel_record ~author:(human user) erin_held));
+  Alcotest.(check string)
+    "carol lifts it"
+    "lifted"
+    (cancel_word blocked (cancel_record ~author:(human carol) erin_held));
+  (* Once the assignment ends, the granter no longer stands behind erin. *)
+  let revoked = step_ok state (admin_record ~by:carol ~user_id:erin) in
+  Alcotest.(check (option string))
+    "no granter after the revocation"
+    None
+    (Option.map Authz_types.User_id.to_string (People.admin_granter revoked.S.principals erin))
+;;
+
 (* A removal whose intent the store gave up holds the entry, so no admission
    spends it (design 8.3). *)
 let test_a_held_removal_keeps_the_entry_out () =
@@ -2668,6 +2721,8 @@ let () =
             test_the_registrar_does_not_cancel_the_block_of_a_removal
         ; Alcotest.test_case "an admission through an entry" `Quick
             test_an_admission_through_a_registration
+        ; Alcotest.test_case "a grant of an Admin assignment" `Quick
+            test_a_grant_of_an_admin_assignment
         ; Alcotest.test_case "a held removal" `Quick test_a_held_removal_keeps_the_entry_out
         ; Alcotest.test_case "an invitation spends the entry" `Quick
             test_an_invitation_admission_spends_the_entry

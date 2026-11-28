@@ -421,6 +421,10 @@ let an_admin_makes_a_member_an_admin () =
   | Ok after ->
     Alcotest.(check bool) "bob is an Admin" true (P.is_admin after bob);
     Alcotest.(check bool) "the assignment is the role" true (P.has_admin_assignment after bob);
+    Alcotest.(check (option string))
+      "alice granted it"
+      (Some "alice")
+      (Option.map User_id.to_string (P.admin_granter after bob));
     Alcotest.(check bool) "the state before is as it was" false (P.is_admin t bob);
     check_grant_refused "twice" "bob has an Admin assignment already" (grant after ~by:alice bob);
     (* The granted Admin acts as one: alice is no longer the last. *)

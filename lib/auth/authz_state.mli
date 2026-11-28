@@ -158,6 +158,8 @@ type refusal =
   | Admin_assignment_unreadable of Authz_admin_event.error
   | Admin_assignment of Authz_principal_state.revocation_refusal
   | Admin_grant of Authz_principal_state.grant_refusal
+      (** A grant of an Admin assignment that {!Authz_principal_state.grant_admin}
+          refuses. *)
   | Principal_unreadable of Authz_principal_event.error
   | Principal_event of Authz_principal_state.principal_refusal
   | Author_inactive of Authz_types.User_id.t
@@ -200,7 +202,8 @@ type refusal =
       (** The canceller issued the invitation or wrote the registration that is
           the subject, which makes them its owner, or issued the invitation the
           principal that is the subject joined through, which makes them its
-          original approver (design 4.1). *)
+          original approver (design 4.1), or granted that principal its Admin
+          assignment ({!Authz_principal_state.admin_granter}). *)
   | Cancel_owner_unknown of Authz_records.Subject.t
       (** No invitation or registration stands behind the subject, so this
           layer cannot tell its owner or its approver, and no Admin is known to
@@ -238,8 +241,9 @@ val refusal_to_string : refusal -> string
     so a log restored from before the revocation does not open the invitation
     again (design 5.1-4). An admission has one, a [Grant] on the principal it
     makes: it spends a token that opens once (design 5.1-3), and an Admin
-    invitation also raises the role epoch of that principal. The revocation
-    of an Admin assignment is a [Revoke] on its principal, a disable a
+    invitation also raises the role epoch of that principal. The grant of an
+    Admin assignment is a [Grant] on its principal for the same epoch, and
+    the revocation of an Admin assignment is a [Revoke] on its principal, a disable a
     [Disable], and a deletion a [Delete]. An enable has none: a log restored
     from before it leaves the principal disabled. A cancel has none either: a
     log restored from before it brings the block back. A registration has

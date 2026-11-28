@@ -25,13 +25,16 @@ type membership =
    [admit]. A deletion takes the principal, its identity, its membership, and
    its assignment out, and puts its id in [deleted] and its identity in
    [deleted_identities]; its namespace stays given.
-   [admins] holds the assignments in force; an Admin acts only while Active. *)
+   [admins] holds the assignments in force; an Admin acts only while Active.
+   [granters] names, for an assignment that a grant made, the Admin who wrote
+   the grant; it leaves with the assignment. *)
 type t =
   { by_id : principal User_map.t
   ; by_identity : User_id.t Identity.Map.t
   ; memberships : membership User_map.t
   ; by_namespace : User_id.t Namespace_map.t
   ; admins : User_id.Set.t
+  ; granters : User_id.t User_map.t
   ; deleted : User_id.Set.t
   ; deleted_identities : unit Identity.Map.t
   }
@@ -42,10 +45,13 @@ let empty =
   ; memberships = User_map.empty
   ; by_namespace = Namespace_map.empty
   ; admins = User_id.Set.empty
+  ; granters = User_map.empty
   ; deleted = User_id.Set.empty
   ; deleted_identities = Identity.Map.empty
   }
 ;;
+
+let admin_granter t user_id = User_map.find_opt user_id t.granters
 
 let find t user_id = User_map.find_opt user_id t.by_id
 let bindings t = User_map.bindings t.by_id
@@ -189,6 +195,7 @@ let admit
                  t.memberships
            ; by_namespace = Namespace_map.add namespace user_id t.by_namespace
            ; admins
+           ; granters = t.granters
            ; deleted = t.deleted
            ; deleted_identities = t.deleted_identities
            }
@@ -225,7 +232,9 @@ let revoke_admin t ~author ~held ~user_id =
   else if not (User_id.Set.mem user_id t.admins)
   then Error (Not_an_admin user_id)
   else (
-    let after = { t with admins = User_id.Set.remove user_id t.admins } in
+    let after =
+      { t with admins = User_id.Set.remove user_id t.admins; granters = User_map.remove user_id t.granters }
+    in
     if an_admin_remains ~held after then Ok after else Error (Last_admin user_id))
 ;;
 
@@ -250,21 +259,29 @@ let grant_refusal_to_string = function
 ;;
 
 let grant_admin t ~author ~held ~user_id =
-  if not (author_is_an_admin ~held t author)
-  then Error (Granter_is_not_an_admin author)
-  else (
-    match find t user_id with
-    | None -> Error (No_principal_to_grant user_id)
-    | Some { status; identity = _ } ->
-      if held user_id
-      then Error (Grantee_held user_id)
-      else (
-        match status with
-        | Disabled -> Error (Grantee_disabled user_id)
-        | Active ->
-          if User_id.Set.mem user_id t.admins
-          then Error (Already_an_admin user_id)
-          else Ok { t with admins = User_id.Set.add user_id t.admins }))
+  match author with
+  | Author.Authenticated (Principal.Human granter) when author_is_an_admin ~held t author ->
+    (match find t user_id with
+     | None -> Error (No_principal_to_grant user_id)
+     | Some { status; identity = _ } ->
+       if held user_id
+       then Error (Grantee_held user_id)
+       else (
+         match status with
+         | Disabled -> Error (Grantee_disabled user_id)
+         | Active ->
+           if User_id.Set.mem user_id t.admins
+           then Error (Already_an_admin user_id)
+           else
+             Ok
+               { t with
+                 admins = User_id.Set.add user_id t.admins
+               ; granters = User_map.add user_id granter t.granters
+               }))
+  | Author.Authenticated (Principal.Human _ | Principal.Service _)
+  | Author.Local_operator
+  | Author.System_cron
+  | Author.System_maintenance -> Error (Granter_is_not_an_admin author)
 ;;
 
 type principal_refusal =
@@ -330,6 +347,7 @@ let apply_event t ~author ~held (event : Authz_principal_event.t) =
         ; by_identity = Identity.Map.remove identity t.by_identity
         ; memberships = User_map.remove user_id t.memberships
         ; admins = User_id.Set.remove user_id t.admins
+        ; granters = User_map.remove user_id t.granters
         ; deleted = User_id.Set.add user_id t.deleted
         ; deleted_identities = Identity.Map.add identity () t.deleted_identities
         })

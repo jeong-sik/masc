@@ -66,8 +66,7 @@ let a_grant_writes_and_reads_back () =
   Alcotest.(check bool)
     "a grant is not a revocation"
     false
-    (A.equal t (A.Revoked { user_id = alice; cause = A.Operational }));
-  Alcotest.(check string) "the principal" "alice" (User_id.to_string (A.user_id t))
+    (A.equal t (A.Revoked { user_id = alice; cause = A.Operational }))
 ;;
 
 let error_name : A.error -> string = function

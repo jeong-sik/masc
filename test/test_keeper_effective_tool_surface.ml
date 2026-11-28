@@ -340,10 +340,10 @@ let test_projection_names_equal_turn_surface_authority () =
          (Keeper_instruction_skill.instruction_skill_description
             instruction_entries)
          tool.schema.description;
-       (* The line carries what a call needs and stops there. The revision is
-          the larger half of a reference and is no longer asked for, so a line
-          still printing it would be spending the surface's bytes on a value
-          the tool ignores. *)
+       (* The line carries what a call needs and stops there: the name. The
+          source and package printed on every row were what a call got wrong --
+          48 of 56 refused calls wrote the right name beside another source or
+          package (2026-11-21..27) -- and a call no longer has to write them. *)
        let contains needle text =
          let needle_length = String.length needle in
          let rec search index =
@@ -353,7 +353,11 @@ let test_projection_names_equal_turn_surface_authority () =
          in
          search 0
        in
-       check bool "the Available line names the identity" true
+       check bool "the Available line starts with the name" true
+         (contains
+            ("\n" ^ task_reference.Skill_reference.identity.Skill_reference.name ^ ": ")
+            tool.schema.description);
+       check bool "the Available line drops the source and package" false
          (contains
             (Skill_reference.identity_to_yojson task_reference.Skill_reference.identity
              |> Yojson.Safe.to_string)
@@ -387,9 +391,9 @@ let test_projection_names_equal_turn_surface_authority () =
           |> Yojson.Safe.Util.member "properties"
           |> Yojson.Safe.Util.member "content_revision"
           <> `Null);
-       (* A bare name is still not the input shape: source and package stay
-          inside [identity], which is what keeps two sources' same-named Skills
-          separable at all. *)
+       (* A bare top-level name is still not the input shape: the name goes
+          inside [identity], beside the source and package that tell two
+          same-named Skills apart when one list holds both. *)
        check bool "name-only input is absent" true
          (input_schema
           |> Yojson.Safe.Util.member "properties"

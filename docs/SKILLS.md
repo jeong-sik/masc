@@ -77,8 +77,9 @@ description: Walk the release checklist before shipping.
   원문을 그대로 보여 주지만 정책 상태로 해석하지 않는다.
 - frontmatter가 잘못된 스킬은 snapshot에서 거부된다. Task가 해소할 수 없는 exact
   reference를 지명하면 admission이 typed 오류를 반환한다.
-- 본문은 frozen snapshot bytes로 보존된다. Keeper는 `keeper_skill`에 canonical exact
-  reference를 전달해 본문을 받는다.
+- 본문은 frozen snapshot bytes로 보존된다. Keeper는 `keeper_skill`에 Available 목록의
+  이름을 넘겨 본문을 받는다. `source_id`·`package_id`·`content_revision`을 함께 쓰면
+  그 값이 정확히 맞는 Skill만 읽고, 하나라도 다르면 거절한다.
 
 ## 2. Skill 로 둘 것과 Tool 로 둘 것
 

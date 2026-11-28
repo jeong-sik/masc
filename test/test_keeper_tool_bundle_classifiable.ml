@@ -1033,10 +1033,13 @@ let test_the_skill_tool_serves_the_body () =
             (Skill_reference.content_revision_of_source_text "stale body")
       in
       let missing = run_tool tool (Skill_reference.to_yojson stale) in
-      check bool "an exact reference the turn does not carry is refused" true
-        (contains ~needle:"no instruction Skill matches exact reference" missing);
-      check bool "and the refusal lists what it does carry" true
-        (contains ~needle:"gate-instruction" missing))
+      check bool "a revision the turn does not carry under that name is refused" true
+        (contains ~needle:"it does not have every field the call wrote" missing);
+      check bool "and the refusal prints the revision it does carry" true
+        (contains
+           ~needle:
+             (Skill_reference.content_revision_to_string reference.content_revision)
+           missing))
 ;;
 
 let test_a_revisionless_ask_is_taught_the_exact_reference () =
@@ -1065,9 +1068,9 @@ let test_a_revisionless_ask_is_taught_the_exact_reference () =
       in
       let taught = run_tool tool name_only in
       check bool "an empty revision is refused, not served" true
-        (contains ~needle:"requires one canonical exact Skill reference" taught);
-      check bool "the refusal carries the references this keeper holds" true
-        (contains ~needle:"this keeper carries:" taught);
+        (contains ~needle:"it does not have every field the call wrote" taught);
+      check bool "the refusal carries the references held under that name" true
+        (contains ~needle:"Carried under that name:" taught);
       check bool "the taught list includes the revision to copy verbatim" true
         (contains
            ~needle:

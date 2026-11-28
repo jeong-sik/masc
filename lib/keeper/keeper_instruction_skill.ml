@@ -48,30 +48,85 @@ let instruction_skills_of_catalog skill_catalog =
        | None -> None)
 ;;
 
+(* A row is one line. A description that spans lines would leave its later
+   lines under the row, and one of the shape "word: text" reads as a row of its
+   own now that a row starts with a name. *)
+let on_one_line text =
+  String.split_on_char '\n' text
+  |> List.map String.trim
+  |> List.filter (fun line -> not (String.equal line ""))
+  |> String.concat " "
+;;
+
 let instruction_skill_description (instruction_skills : instruction_skill list) =
   let listed =
     instruction_skills
     |> List.map (fun (skill : instruction_skill) ->
          Printf.sprintf
            "%s: %s"
-           (Skill_reference.identity_to_yojson skill.reference.identity
-            |> Yojson.Safe.to_string)
-           skill.description)
+           skill.reference.identity.name
+           (on_one_line skill.description))
     |> String.concat "\n"
   in
   skill_tool_schema.description ^ "\n\nAvailable:\n" ^ listed
 ;;
 
-let carried_references_text (instruction_skills : instruction_skill list) =
+(* A refusal names what the call could have meant and nothing else. The whole
+   list is already in the description. Of 56 refusals on 2026-11-21..27, 49
+   printed every reference the Keeper carried: 10,418 to 13,685 bytes each,
+   13,551 at the median. *)
+let carried_names_text (instruction_skills : instruction_skill list) =
   match instruction_skills with
   | [] -> "(none)"
   | skills ->
     String.concat
       ", "
-      (List.map
-         (fun (skill : instruction_skill) ->
-            Skill_reference.to_yojson skill.reference |> Yojson.Safe.to_string)
-         skills)
+      (List.map (fun (skill : instruction_skill) -> skill.reference.identity.name) skills)
+;;
+
+(* Each reference prints as the [identity] and [content_revision] a call
+   passes, so a refusal that shows one can be copied into the next call. *)
+(* The name as the caller wrote it. [%S] would print a name outside ASCII as
+   decimal byte escapes. *)
+let quoted_name name = Yojson.Safe.to_string (`String name)
+
+let references_text (skills : instruction_skill list) =
+  String.concat
+    ", "
+    (List.map
+       (fun (skill : instruction_skill) ->
+          Skill_reference.to_yojson skill.reference |> Yojson.Safe.to_string)
+       skills)
+;;
+
+(* What a call says about the Skill it reads. [name] is the row of the
+   Available list. The other fields narrow it: each one the call wrote is
+   compared with the carried Skill's own, and one left out is not compared.
+
+   The three parsers behind [Skill_reference.identity] and [content_revision]
+   accept or refuse a string and never change it, so comparing the written
+   string with the carried one is the same test as comparing parsed values; a
+   string no parser accepts equals no carried value. *)
+type skill_selector =
+  { name : string
+  ; source_id : string option
+  ; package_id : string option
+  ; content_revision : string option
+  }
+
+let selector_admits selector (skill : instruction_skill) =
+  let identity = skill.reference.identity in
+  let admits written carried =
+    match written with
+    | None -> true
+    | Some value -> String.equal value carried
+  in
+  String.equal selector.name identity.name
+  && admits selector.source_id (Skill_reference.identity_source_id_to_string identity)
+  && admits selector.package_id (Skill_reference.identity_package_id_to_string identity)
+  && admits
+       selector.content_revision
+       (Skill_reference.content_revision_to_string skill.reference.content_revision)
 ;;
 
 let instruction_skill_schema_tool ~(instruction_skills : instruction_skill list) =
@@ -83,33 +138,63 @@ let instruction_skill_schema_tool ~(instruction_skills : instruction_skill list)
 ;;
 
 type skill_input_error =
-  | Invalid_skill_reference
+  | Invalid_skill_selector
   | Duplicate_resource_path
   | Invalid_resource_path of Skill_resource_path.error
 
-let skill_reference_and_resource_path input =
+let values_of fields field =
+  List.filter_map
+    (fun (key, value) -> if String.equal key field then Some value else None)
+    fields
+;;
+
+let only_fields allowed fields =
+  List.for_all (fun (key, _) -> List.exists (String.equal key) allowed) fields
+;;
+
+(* An optional string field: absent, or written once as a string. *)
+let optional_string fields field =
+  match values_of fields field with
+  | [] -> Ok None
+  | [ `String value ] -> Ok (Some value)
+  | [ _ ] | _ :: _ :: _ -> Error Invalid_skill_selector
+;;
+
+let skill_selector_of_fields fields =
+  let open Result.Syntax in
+  match values_of fields "identity" with
+  | [ `Assoc identity ] ->
+    if
+      not
+        (only_fields [ "identity"; "content_revision"; "file" ] fields
+         && only_fields [ "source_id"; "package_id"; "name" ] identity)
+    then Error Invalid_skill_selector
+    else
+      let* name = optional_string identity "name" in
+      let* source_id = optional_string identity "source_id" in
+      let* package_id = optional_string identity "package_id" in
+      let* content_revision = optional_string fields "content_revision" in
+      (match name with
+       | Some name -> Ok { name; source_id; package_id; content_revision }
+       | None -> Error Invalid_skill_selector)
+  | [] | [ _ ] | _ :: _ :: _ -> Error Invalid_skill_selector
+;;
+
+let skill_selector_and_resource_path input =
   match input with
   | `Assoc fields ->
-    let reference_json =
-      `Assoc (List.filter (fun (field, _) -> not (String.equal field "file")) fields)
-    in
-    let resource_fields =
-      List.filter_map
-        (fun (field, value) -> if String.equal field "file" then Some value else None)
-        fields
-    in
-    (match Skill_reference.request_of_yojson reference_json with
-     | Error _ -> Error Invalid_skill_reference
-     | Ok reference ->
-       (match resource_fields with
-        | [] -> Ok (reference, None)
+    (match skill_selector_of_fields fields with
+     | Error error -> Error error
+     | Ok selector ->
+       (match values_of fields "file" with
+        | [] -> Ok (selector, None)
         | [ `String value ] ->
           Skill_resource_path.of_string value
-          |> Result.map (fun resource_path -> reference, Some resource_path)
+          |> Result.map (fun resource_path -> selector, Some resource_path)
           |> Result.map_error (fun error -> Invalid_resource_path error)
         | [ _ ] -> Error (Invalid_resource_path Skill_resource_path.Empty)
         | _ :: _ :: _ -> Error Duplicate_resource_path))
-  | _ -> Error Invalid_skill_reference
+  | _ -> Error Invalid_skill_selector
 ;;
 
 type instruction_resource =
@@ -194,16 +279,17 @@ let make_instruction_skill_tool
               ~start_time
               "keeper_skill execution requires Agent-Core invocation identity"
           | Some invocation ->
-            (match skill_reference_and_resource_path input with
-             | Error Invalid_skill_reference ->
+            (match skill_selector_and_resource_path input with
+             | Error Invalid_skill_selector ->
                Tool_result.make_err
                  ~tool_name:name
                  ~class_:Tool_result.Workflow_rejection
                  ~start_time
                  (Printf.sprintf
-                    "keeper_skill requires one canonical exact Skill reference; \
-                     this keeper carries: %s"
-                    (carried_references_text instruction_skills))
+                    "keeper_skill reads the Skill named by identity.name, one row of \
+                     the Available list. source_id, package_id and content_revision \
+                     are optional strings. This keeper carries: %s"
+                    (carried_names_text instruction_skills))
              | Error Duplicate_resource_path ->
                Tool_result.make_err
                  ~tool_name:name
@@ -216,30 +302,17 @@ let make_instruction_skill_tool
                  ~class_:Tool_result.Workflow_rejection
                  ~start_time
                  (Skill_resource_path.error_to_string error)
-             | Ok (asked, resource_path) ->
-               (match
-                  match asked with
-                  | Skill_reference.Pinned reference ->
-                    List.filter
-                      (fun (skill : instruction_skill) ->
-                         Skill_reference.equal skill.reference reference)
-                      instruction_skills
-                  | Skill_reference.By_identity identity ->
-                    List.filter
-                      (fun (skill : instruction_skill) ->
-                         Skill_reference.equal_identity skill.reference.identity identity)
-                      instruction_skills
-                with
-                | _ :: _ :: _ ->
+             | Ok (selector, resource_path) ->
+               (match List.filter (selector_admits selector) instruction_skills with
+                | _ :: _ :: _ as admitted ->
                   Tool_result.make_err
                     ~tool_name:name
                     ~class_:Tool_result.Workflow_rejection
                     ~start_time
                     (Printf.sprintf
-                       "this keeper carries more than one Skill under that name, so \
-                        the name alone cannot say which; call again with \
-                        content_revision. Carried: %s"
-                       (carried_references_text instruction_skills))
+                       "this keeper carries more than one Skill that call names; call \
+                        again with the identity and content_revision of one of: %s"
+                       (references_text admitted))
                 | [ skill ] ->
                   let reference = skill.reference in
                   let skill_tool_use_id =
@@ -390,17 +463,22 @@ let make_instruction_skill_tool
                     ~tool_name:name
                     ~class_:Tool_result.Workflow_rejection
                     ~start_time
-                    (Printf.sprintf
-                       "no instruction Skill matches %s; this keeper carries: %s"
-                       (match asked with
-                        | Skill_reference.Pinned reference ->
-                          Printf.sprintf
-                            "exact reference %s"
-                            (Skill_reference.to_yojson reference |> Yojson.Safe.to_string)
-                        | Skill_reference.By_identity identity ->
-                          Printf.sprintf
-                            "identity %s"
-                            (Skill_reference.identity_to_yojson identity
-                             |> Yojson.Safe.to_string))
-                       (carried_references_text instruction_skills)))))))
+                    (match
+                       List.filter
+                         (fun (skill : instruction_skill) ->
+                            String.equal skill.reference.identity.name selector.name)
+                         instruction_skills
+                     with
+                     | [] ->
+                       Printf.sprintf
+                         "no instruction Skill is named %s; this keeper carries: %s"
+                         (quoted_name selector.name)
+                         (carried_names_text instruction_skills)
+                     | _ :: _ as named ->
+                       Printf.sprintf
+                         "a Skill named %s is carried, and it does not have every \
+                          field the call wrote. A field left out is not compared. \
+                          Carried under that name: %s"
+                         (quoted_name selector.name)
+                         (references_text named)))))))
 ;;

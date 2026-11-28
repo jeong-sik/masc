@@ -35,8 +35,8 @@ val instruction_skills_of_catalog : Keeper_skill_catalog.t -> instruction_skill 
     resource roots from [skill_catalog]. *)
 
 val instruction_skill_description : instruction_skill list -> string
-(** Render the progressive-disclosure [keeper_skill] tool description listing
-    carried skill identities and one-line descriptions. *)
+(** Render the progressive-disclosure [keeper_skill] tool description: one row
+    per carried Skill, its name and its one-line description. *)
 
 val instruction_skill_schema_tool
   :  instruction_skills:instruction_skill list
@@ -54,7 +54,16 @@ val make_instruction_skill_tool
   -> unit
   -> (Agent_core.Tool.t, Tool_bridge.schema_error) result
 (** Executable [keeper_skill] tool. Concurrent, read-only, lightweight
-    telemetry only. A body, or a resource up to its location's
+    telemetry only.
+
+    A call names a Skill by [identity.name]. [identity.source_id],
+    [identity.package_id] and [content_revision] are optional, and each one the
+    call writes must equal the carried Skill's own. The call reads the one
+    carried Skill it admits. When it admits none or several it is refused, and
+    the refusal prints the references carried under that name, or the carried
+    names when no Skill has that name.
+
+    A body, or a resource up to its location's
     [resource_read_max_bytes] ({!Skill_source_config.skill_file_max_bytes}),
     is returned inline up to the provider wire boundary and projected to a
     structured blob handle with a preview above it. A resource over the read

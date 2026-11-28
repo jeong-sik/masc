@@ -656,6 +656,142 @@ let test_exact_reference_consumer_rejects_name_fallback () =
     (String_util.contains_substring legacy_output "EXACT_BODY")
 ;;
 
+(* A row of the Available list is a name and a call passes it. The other
+   fields narrow the name: one the call wrote must equal the Skill's own. The
+   checks read revisions, which are hex, so they hold whether a refusal reaches
+   the caller as text or inside a JSON string. *)
+let test_instruction_tool_reads_by_name_and_refuses_a_written_mismatch () =
+  let config =
+    config (source_row ~id:"first" ~path:"first" ^ source_row ~id:"second" ~path:"second")
+  in
+  let snapshot =
+    snapshot
+      config
+      [ [ "guide", document ~name:"guide" ~description:"first guide" "FIRST_BODY"
+        ; "solo", document ~name:"solo" ~description:"solo" "SOLO_BODY"
+        ]
+      ; [ "guide", document ~name:"guide" ~description:"second guide" "SECOND_BODY" ]
+      ]
+  in
+  let first_source, second_source =
+    match config.sources with
+    | [ first; second ] -> first.id, second.id
+    | _ -> fail "expected two sources"
+  in
+  let first_guide =
+    exact_reference snapshot ~source_id:first_source ~package_id:"guide" ~name:"guide"
+  in
+  let second_guide =
+    exact_reference snapshot ~source_id:second_source ~package_id:"guide" ~name:"guide"
+  in
+  let solo =
+    exact_reference snapshot ~source_id:first_source ~package_id:"solo" ~name:"solo"
+  in
+  let carried reference ~description ~body =
+    Masc.Keeper_instruction_skill.instruction_skill ~reference ~description ~body ()
+  in
+  let tool =
+    Masc.Keeper_instruction_skill.make_instruction_skill_tool
+      ~config:(Masc.Workspace.default_config (Sys.getcwd ()))
+      ~instruction_skills:
+        [ carried first_guide ~description:"first guide row" ~body:"FIRST_BODY"
+        ; carried
+            second_guide
+            ~description:"second guide row\n  later: line of it"
+            ~body:"SECOND_BODY"
+        ; carried solo ~description:"solo row" ~body:"SOLO_BODY"
+        ]
+      ()
+    |> Result.get_ok
+  in
+  let call identity = run_skill_tool tool (`Assoc [ "identity", `Assoc identity ]) in
+  let has = String_util.contains_substring in
+  let revision (reference : Reference.t) =
+    Reference.content_revision_to_string reference.Reference.content_revision
+  in
+  check bool "a row of the list is the name and the description" true
+    (has tool.schema.description "\nsolo: solo row");
+  check bool "a description that spans lines stays on its row" true
+    (has tool.schema.description "\nguide: second guide row later: line of it");
+  check bool "and leaves no line that reads as a row of its own" false
+    (has tool.schema.description "\nlater: ");
+  check bool "a row carries no source or package" false
+    (has
+       tool.schema.description
+       (Yojson.Safe.to_string (Reference.identity_to_yojson solo.Reference.identity)));
+  let identity_required =
+    match tool.schema.input_schema with
+    | None -> fail "keeper_skill omitted its input schema"
+    | Some input_schema ->
+      input_schema
+      |> Yojson.Safe.Util.member "properties"
+      |> Yojson.Safe.Util.member "identity"
+      |> Yojson.Safe.Util.member "required"
+      |> Yojson.Safe.Util.to_list
+      |> List.map Yojson.Safe.Util.to_string
+  in
+  check (list string) "inside identity only the name is required" [ "name" ] identity_required;
+  let by_name = call [ "name", `String "solo" ] in
+  check bool "a name the list holds once reads that Skill" true (has by_name "SOLO_BODY");
+  let exact = run_skill_tool tool (Reference.to_yojson solo) in
+  check bool "the whole reference still reads it" true (has exact "SOLO_BODY");
+  let wrong_source = call [ "source_id", `String "second"; "name", `String "solo" ] in
+  check bool "a written source the Skill does not have reads nothing" false
+    (has wrong_source "SOLO_BODY");
+  check bool "the refusal prints the Skill carried under that name" true
+    (has wrong_source (revision solo));
+  check bool "the refusal prints no Skill of another name" false
+    (has wrong_source (revision first_guide) || has wrong_source (revision second_guide));
+  let wrong_package = call [ "package_id", `String "first"; "name", `String "solo" ] in
+  check bool "a source id written as the package reads nothing" false
+    (has wrong_package "SOLO_BODY");
+  let twice = call [ "name", `String "guide" ] in
+  check bool "a name the list holds twice is not read by the name alone" false
+    (has twice "FIRST_BODY" || has twice "SECOND_BODY");
+  check bool "the refusal prints both Skills of that name" true
+    (has twice (revision first_guide) && has twice (revision second_guide));
+  check bool "the refusal leaves out the Skill of another name" false
+    (has twice (revision solo));
+  let narrowed = call [ "source_id", `String "second"; "name", `String "guide" ] in
+  check bool "the source tells the two apart" true
+    (has narrowed "SECOND_BODY" && not (has narrowed "FIRST_BODY"));
+  let pinned =
+    run_skill_tool
+      tool
+      (`Assoc
+         [ "identity", `Assoc [ "name", `String "guide" ]
+         ; "content_revision", `String (revision first_guide)
+         ])
+  in
+  check bool "the revision tells the two apart" true
+    (has pinned "FIRST_BODY" && not (has pinned "SECOND_BODY"));
+  let neither = call [ "source_id", `String "third"; "name", `String "guide" ] in
+  check bool "a source neither Skill of that name has reads nothing" false
+    (has neither "FIRST_BODY" || has neither "SECOND_BODY");
+  check bool "and the refusal prints both to choose from" true
+    (has neither (revision first_guide) && has neither (revision second_guide));
+  let unknown = call [ "name", `String "absent" ] in
+  check bool "a name the list does not hold names what is carried" true (has unknown "solo");
+  check bool "and prints no reference" false
+    (has unknown (revision solo) || has unknown (revision first_guide));
+  let unicode = call [ "name", `String "\xed\x95\x9c\xea\xb8\x80" ] in
+  check bool "a name outside ASCII comes back as it was written" true
+    (has unicode "\xed\x95\x9c\xea\xb8\x80");
+  (* The shared input validation answers some of these before the handler
+     does, in its own words, so the checks read only that no body came back. *)
+  let reads_no_body output =
+    not (has output "SOLO_BODY" || has output "FIRST_BODY" || has output "SECOND_BODY")
+  in
+  check bool "an identity without a name reads nothing" true
+    (reads_no_body (call [ "source_id", `String "first" ]));
+  check bool "a field identity does not have reads nothing" true
+    (reads_no_body (call [ "name", `String "solo"; "path", `String "guide" ]));
+  check bool "a source that is not a string reads nothing" true
+    (reads_no_body (call [ "name", `String "solo"; "source_id", `Null ]));
+  check bool "a name written twice reads nothing" true
+    (reads_no_body (call [ "name", `String "solo"; "name", `String "solo" ]))
+;;
+
 let test_resolved_body_stays_frozen_after_new_snapshot () =
   let config = config (source_row ~id:"only" ~path:"skills") in
   let original =
@@ -1889,6 +2025,8 @@ let () =
             test_preparation_manifest_retains_original_turn_and_private_boundaries
         ; test_case "exact ref consumer rejects name fallback" `Quick
             test_exact_reference_consumer_rejects_name_fallback
+        ; test_case "instruction tool reads by name and refuses a written mismatch" `Quick
+            test_instruction_tool_reads_by_name_and_refuses_a_written_mismatch
         ; test_case "resolved body remains frozen" `Quick
             test_resolved_body_stays_frozen_after_new_snapshot
         ; test_case "resource read is exact and deferred" `Quick

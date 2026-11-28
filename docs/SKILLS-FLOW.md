@@ -154,9 +154,11 @@ Task Skill도 실행 projection과 prompt에서 unavailable이며 admission 전�
   그 스킬이 current 블록에 안 실린다. 그래서 별도 블록으로 뽑는다.
 
 두 블록 모두 canonical exact reference와 그 turn의 typed surface를 싣는다(본문 X).
-Keeper는 그 객체를 그대로 `keeper_skill`에 전달한다. 실행 불가능한 reference는
-unavailable로 표시한다. 이름-only fallback은 없다. 본문은 매 턴 prompt에 넣지 않고
-필요할 때 읽는다.
+Keeper가 그 객체를 그대로 `keeper_skill`에 전달하면 Task가 고정한 그 revision을 읽는다.
+실행 불가능한 reference는 unavailable로 표시하고, MASC는 그것을 같은 이름의 다른
+Skill로 바꿔 싣지 않는다. `keeper_skill`에 이름만 넘기면 Task가 고정한 reference가
+아니라 그 turn의 Available 목록이 그 이름으로 가진 Skill을 읽는다. 본문은 매 턴
+prompt에 넣지 않고 필요할 때 읽는다.
 
 ### 2c. 대시보드 — GET /api/v1/skills
 
@@ -194,7 +196,8 @@ Keeper별 effective tool surface에는 전체 schema 바이트와 그중 Skill �
 
 ## 3. 실행과 관측
 
-모델이 `keeper_skill`에 exact reference를 넘기면 `Keeper_instruction_skill`
+모델이 `keeper_skill`에 Available 목록의 이름(`identity.name`)이나 exact reference를
+넘기면 `Keeper_instruction_skill`
 (`lib/keeper/keeper_instruction_skill.ml`)이 frozen snapshot의 지시 본문을 돌려준다.
 선택 인자 `file`을 함께 넘기면 그 Skill의 리소스 파일 원문을 돌려준다. 읽을 때마다
 `masc_keeper_skill_reads_total` 계수와 Keeper 로그 한 줄이 남는다. 호출은 다른 도구와

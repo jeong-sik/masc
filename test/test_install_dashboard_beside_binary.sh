@@ -134,6 +134,15 @@ if [ "$(id -u)" != 0 ]; then
     grep -q 'could not be made' "$ERR" || fail "case 8: no warning naming the directory"
 fi
 
+# A failed copy leaves no fresh assets directory to hide a workspace bundle.
+checkout="$FIXTURE_DIR/copy-failure/assets/dashboard"
+prefix="$FIXTURE_DIR/copy-failure-prefix"
+make_bundle "$checkout" new 202611071722
+mkdir -p "$prefix"
+(cp() { return 1; }; run_step "$checkout" "$prefix")
+[ ! -e "$prefix/assets" ] || fail "copy failure hid the original workspace assets"
+grep -q 'could not be copied' "$ERR" || fail "copy failure produced no warning"
+
 # The call site: the real installer, run from a fixture checkout whose helper
 # approves everything, reaches the step after the binaries are installed.
 # run_installer DIR: DIR/repo is the checkout, DIR/runtime the workspace.

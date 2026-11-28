@@ -3,8 +3,8 @@
 #
 # Puts the dashboard bundle this checkout built beside the installed binaries,
 # in <prefix>/assets/dashboard. The release install keeps its bundle beside its
-# binary too, in <prefix>/.masc-releases/<identity>/assets/dashboard, which
-# <prefix>/masc links to (scripts/release-dashboard-bundle.py).
+# binary too, in <prefix>/.masc-releases/<identity>/assets/dashboard.
+# <prefix>/masc links to that release binary (scripts/release-dashboard-bundle.py).
 #
 # A server started from <prefix>/masc reads the assets beside its binary
 # before the assets of its working directory, which masc start makes the base
@@ -61,11 +61,12 @@ install_dashboard_beside_binary() {
   fi
 
   if [ ! -d "$dest_root" ]; then
-    if ! mkdir -p "$dest_root" 2>/dev/null; then
+    if mkdir "$dest_root" 2>/dev/null; then
+      made_root=true
+    elif [ ! -d "$dest_root" ]; then
       echo "$tag: WARN no dashboard bundle installed into $dest: $dest_root could not be made" >&2
       return 0
     fi
-    made_root=true
   fi
   if [ -e "$dest" ]; then
     stamp=$(date -u +%Y%m%dT%H%M%SZ)

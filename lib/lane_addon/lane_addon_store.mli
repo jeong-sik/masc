@@ -269,6 +269,18 @@ val tool_request_owner_inventory : t -> scope:string -> ((string * Yojson.Safe.t
     original-scope serializer as publication and known-ID reads. This is not an
     atomic multi-record transaction; callers retain their process lease and
     serialization and revalidate the original record before effects. *)
+val tool_request_scope_with_bodies : t -> scope:string ->
+  request_digest_of:(Yojson.Safe.t -> (string, string) result) ->
+  ((string * Yojson.Safe.t * string option) list option, string) result
+(** Every record of a scope with the body it names, in directory order. Each
+    file is read with the same owned-descriptor checks as
+    {!load_tool_request}. The records and the bodies are read under one hold of
+    the original-scope serializer, and each directory is inventoried once for
+    the whole scope. [None] means the scope has no directory. A record whose
+    body is not there comes back with [None]. An unreadable record, an unknown
+    entry, a directory that changes during the read, or a digest the callback
+    refuses rejects the whole scope. This is not an atomic multi-record
+    transaction; callers revalidate the original record before effects. *)
 type owner_metadata_observation =
   | Published_owner_metadata of string * Yojson.Safe.t
   | Malformed_owner_json

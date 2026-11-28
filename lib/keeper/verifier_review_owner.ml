@@ -504,13 +504,38 @@ let next_attempt ~store ~verification_id ~installation_id ~package_id ~lookup =
   | first::rest when V.attempt first.original=0 -> walk first rest
   | _::_ -> Error (corrupt "verifier inventory is missing its original first attempt")
 
+(* The checks [load_retained] makes of a record, made of a record the caller
+   has just read whole with its body under the scope serializer. There is
+   nothing to read again: the record is the one at its key, and a caller that
+   acts on it reads it again first. *)
+let retained_of_record ~installation_id ~package_id (record : Owner.retained) =
+  let* original =
+    V.of_json record.request |> Result.map_error (fun d -> Corrupt_original d) in
+  let* request_id =
+    attempt_request_id ~verification_id:(V.verification_id original) ~attempt:(V.attempt original)
+    |> Result.map_error (fun detail -> Corrupt_original detail)
+  in
+  let* () =
+    if String.equal record.Owner.request_id request_id
+    then Ok ()
+    else
+      Error
+        (Corrupt_original
+           (Printf.sprintf "stored original %s:%d is not the record at key %s"
+              (V.verification_id original) (V.attempt original) record.Owner.request_id))
+  in
+  let* bound =
+    bound_to record original |> Result.map_error (fun detail -> Corrupt_original detail) in
+  if String.equal record.installation_id installation_id
+    && String.equal record.package_id package_id && bound
+  then Ok {record; original}
+  else Error (Corrupt_original "retained verifier destination or summary does not match")
+
 let retained_commits ~store ~selection ~installation_id ~package_id =
   let* records = selected_records ~store ~selection in
   List.fold_left (fun acc (record:Owner.retained) ->
     let* acc=acc in
-    let* original=V.of_json record.request |> Result.map_error (fun d -> Corrupt_original d) in
-    let* retained=load_retained ~store ~verification_id:(V.verification_id original)
-      ~attempt:(V.attempt original) ~installation_id ~package_id in
+    let* retained=retained_of_record ~installation_id ~package_id record in
     match Progress.phase (progress retained) with
     | Judged _ | Committing _ | Commit_unknown _ | Finished _ | Conflicted _ -> Ok (retained::acc)
     | Captured | Admission_wait _ | Dispatch_pending _ | Rejected _

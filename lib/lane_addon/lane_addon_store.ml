@@ -1010,6 +1010,65 @@ let tool_request_owner_inventory_with ~after_listing ~sync_file ~sync_parent t ~
 let tool_request_owner_inventory = tool_request_owner_inventory_with
   ~after_listing:(fun _ -> ()) ~sync_file:Unix.fsync ~sync_parent:Unix.fsync
 
+(* Every record of a scope with the body it names, under one hold of the
+   scope's serializer: a settle moves a record and its body under that hold,
+   so an original is read whole or found gone. Each file is read as
+   [load_tool_request] reads it. Each directory is inventoried once for the
+   whole scope; [load_tool_request] inventories both again for every record it
+   reads, which is what a whole scope cost one record at a time. A record whose
+   body is not there comes back with [None]; what that means is the reader's
+   to decide. *)
+let tool_request_scope_with_bodies t ~scope ~request_digest_of =
+  let read_records ~owner_uid held names =
+    let rec read acc = function
+      | [] -> Ok (List.rev acc)
+      | name :: rest -> (
+          match tool_request_owner_entry name with
+          | Staged_entry -> read acc rest
+          | Unknown_entry -> Error "unknown entry in original request namespace"
+          | Record_entry ->
+            let* json =
+              read_owned_tool_request ~sync_file:Unix.fsync ~sync_parent:Unix.fsync ~owner_uid held name
+            in
+            let* request_digest = request_digest_of json in
+            read ((name, json, request_digest) :: acc) rest)
+    in
+    read [] names
+  in
+  let read_bodies ~owner_uid held names records =
+    let rec read acc = function
+      | [] -> Ok (List.rev acc)
+      | (_, _, request_digest) :: rest ->
+        let name = request_digest ^ ".json" in
+        if not (List.mem name names) then read (None :: acc) rest
+        else
+          let* body =
+            read_owned_tool_request_bytes ~sync_file:Unix.fsync ~sync_parent:Unix.fsync ~owner_uid held name
+          in
+          read (Some body :: acc) rest
+    in
+    read [] records
+  in
+  serialized_tool_request_read t ~scope (fun () ->
+    let* records =
+      read_tool_request_scope ~namespace:tool_request_owners_directory ~sync_parent:Unix.fsync t ~scope
+        read_records
+    in
+    match records with
+    | None -> Ok None
+    | Some [] -> Ok (Some [])
+    | Some records ->
+      let* bodies =
+        match
+          read_tool_request_scope ~namespace:tool_request_bodies_directory ~sync_parent:Unix.fsync t ~scope
+            (fun ~owner_uid held names -> read_bodies ~owner_uid held names records)
+        with
+        | Ok (Some bodies) -> Ok bodies
+        | Ok None -> Ok (List.map (fun _ -> None) records)
+        | (Error _ as error) -> error
+      in
+      Ok (Some (List.map2 (fun (name, json, _) body -> name, json, body) records bodies)))
+
 type owner_metadata_observation =
   | Published_owner_metadata of string * Yojson.Safe.t
   | Malformed_owner_json

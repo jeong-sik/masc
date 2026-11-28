@@ -413,6 +413,73 @@ let test_intended_successor_is_restored_without_preparing_authority () =
   let restored = loaded_or_fail (O.load ~store ~verification_id:"vrf-cut" ~attempt:1) in
   assert (Yojson.Safe.equal (V.to_json restored) (V.to_json child))
 
+(* An attempt that stopped right after its judgment was retained. *)
+let judged_record ~store ~verification_id =
+  let original = make_original ~verification_id ~attempt:0 in
+  (match O.retain ~store ~verification_id ~attempt:0 ~installation_id:"i" ~package_id:"p" original with
+   | Ok () -> ()
+   | Error err -> failwith ("retain failed: " ^ string_of_retain_error err));
+  let retained =
+    match O.load_retained ~store ~verification_id ~attempt:0 ~installation_id:"i" ~package_id:"p" with
+    | Ok retained -> retained
+    | Error err -> failwith (string_of_load_error err) in
+  let result : AR.review_result =
+    { AR.verdict = Some (AR.Reject "the contract is not met")
+    ; evaluator_runtime = "rt-a"
+    ; generator_runtime = None
+    ; evaluator_execution = None
+    ; gate = AR.Structured_tool
+    ; fallback_reason = None
+    ; retryable_runtimes = []
+    ; model_absent_runtimes = []
+    } in
+  let judgment =
+    match O.judgment_to_json ~original ~notes:"notes" result with
+    | Ok judgment -> judgment
+    | Error detail -> failwith ("judgment fixture failed: " ^ detail) in
+  (match O.advance_events ~store retained
+    [ Progress.Dispatch_intended; Progress.Judgment_retained judgment ] with
+   | Ok _ -> ()
+   | Error err -> failwith (string_of_load_error err))
+
+(* The retained commits of a scope are decided from each record as it was
+   read, with the checks a read of that record makes: the destination must be
+   the caller's, and the record must still hold the original its key names. *)
+let test_retained_commits_check_each_record_they_read () =
+  with_workspace @@ fun base_path ->
+  let store = tmp_store base_path in
+  judged_record ~store ~verification_id:"vrf-read";
+  (match O.retained_commits ~store ~selection:O.All_verifications ~installation_id:"i" ~package_id:"p" with
+   | Ok [retained] -> assert (V.verification_id (O.original retained) = "vrf-read")
+   | Ok _ -> failwith "one judged attempt must be one retained commit"
+   | Error err -> failwith ("the destination's own record was refused: " ^ string_of_load_error err));
+  (match O.retained_commits ~store ~selection:(O.Verification "vrf-read")
+    ~installation_id:"other" ~package_id:"p" with
+   | Error (O.Corrupt_original _) -> ()
+   | Ok _ -> failwith "a record of another destination was kept as a commit"
+   | Error (O.Not_found | O.Load_store_unavailable _) ->
+       failwith "another destination is a wrong record, not a store failure");
+  (* The record at attempt 0 now names the body of another attempt. *)
+  let request_id = fixture_get (O.attempt_request_id ~verification_id:"vrf-read" ~attempt:0) in
+  let record =
+    match Store.load_tool_request_owner store ~scope:O.scope ~request_id with
+    | Ok (Some record) -> record
+    | Ok None | Error _ -> failwith "the judged record is not there" in
+  let body =
+    fixture_get (Masc.Lane_addon_action.canonical (V.to_json (make_original ~verification_id:"vrf-read" ~attempt:1)))
+    |> Yojson.Safe.to_string in
+  let request_digest = Store.digest body in
+  ignore (fixture_get (Store.save_tool_request_body store ~scope:O.scope ~request_digest body));
+  (match Store.save_tool_request_owner store ~scope:O.scope ~request_id
+    (replace_field "request_digest" (`String request_digest) record) with
+   | Ok () -> ()
+   | Error detail -> failwith ("record edit failed: " ^ detail));
+  (match O.retained_commits ~store ~selection:O.All_verifications ~installation_id:"i" ~package_id:"p" with
+   | Error (O.Corrupt_original _) -> ()
+   | Ok _ -> failwith "a record whose body is another attempt's original was kept as a commit"
+   | Error (O.Not_found | O.Load_store_unavailable _) ->
+       failwith "a record that holds another attempt is a wrong record, not a missing one")
+
 module Change = Masc.Verifier_review_authority_change
 
 (* The worker recorded a before-dispatch refusal and the process stopped before
@@ -633,6 +700,33 @@ let test_named_commits_name_an_unreadable_record_and_answer_the_others () =
          ^ string_of_int (List.length unreadable) ^ " unreadable"));
   expect_named store ["other"] ["target"] ["target"; "other"]
 
+(* The attempts of a verification are read by name until a name holds nothing.
+   If the first attempt's record ever went away while the child stayed, the
+   named lookup would answer nothing for that verification: the child would
+   wait for a whole-scope read, which still lists it, and a fresh attempt
+   stays refused. Nothing in this tree moves a live attempt today. The test
+   pins what a gap would cost. *)
+let test_named_commits_stop_at_a_gap_and_a_whole_scope_read_still_lists_the_child () =
+  with_workspace @@ fun base_path ->
+  let store = tmp_store base_path in
+  ignore (refused_first ~store ~verification_id:"vrf-gapped");
+  assert (next_with ~lookup:(fun () -> Ok current_lookup) store "vrf-gapped" = Ok 1);
+  let child = loaded_or_fail (O.load ~store ~verification_id:"vrf-gapped" ~attempt:1) in
+  judged ~store ~verification_id:"vrf-gapped" ~attempt:1 child;
+  expect_named store ["vrf-gapped"] [] ["vrf-gapped"];
+  let first = fixture_get (O.attempt_request_id ~verification_id:"vrf-gapped" ~attempt:0) in
+  let record_path =
+    Filename.concat (Store.root store)
+      (Filename.concat "tool-request-owners" (Filename.concat (Store.digest O.scope) (Store.digest first ^ ".json")))
+  in
+  Sys.remove record_path;
+  expect_named store [] [] ["vrf-gapped"];
+  (match O.retained_commits ~store ~selection:O.All_verifications ~installation_id:"i" ~package_id:"p" with
+   | Ok [retained] -> assert (V.attempt (O.original retained) = 1)
+   | Ok _ -> failwith "the whole-scope read must list the child and only the child"
+   | Error err -> failwith ("the whole-scope read did not list the child: " ^ string_of_load_error err));
+  expect_next_scope_error (selected_next store "vrf-gapped")
+
 let () =
   test_before_dispatch_refusal_opens_the_next_attempt_with_current_lookup ();
   test_unreadable_before_dispatch_refusal_opens_nothing ();
@@ -657,4 +751,6 @@ let () =
   test_named_commits_answer_beside_a_record_the_scope_cannot_verify ();
   test_named_commits_read_past_a_refused_attempt ();
   test_named_commits_name_an_unreadable_record_and_answer_the_others ();
+  test_named_commits_stop_at_a_gap_and_a_whole_scope_read_still_lists_the_child ();
+  test_retained_commits_check_each_record_they_read ();
   print_endline "test_verifier_review_owner: all tests passed"

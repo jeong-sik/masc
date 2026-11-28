@@ -777,16 +777,19 @@ let test_instruction_tool_reads_by_name_and_refuses_a_written_mismatch () =
   let unicode = call [ "name", `String "\xed\x95\x9c\xea\xb8\x80" ] in
   check bool "a name outside ASCII comes back as it was written" true
     (has unicode "\xed\x95\x9c\xea\xb8\x80");
-  let asks_for_the_name output = has output "identity.name" && has output "solo" in
-  let nameless = call [ "source_id", `String "first" ] in
-  check bool "an identity without a name is told to pass one" true
-    (asks_for_the_name nameless);
-  let stray = call [ "name", `String "solo"; "path", `String "guide" ] in
+  (* The shared input validation answers some of these before the handler
+     does, in its own words, so the checks read only that no body came back. *)
+  let reads_no_body output =
+    not (has output "SOLO_BODY" || has output "FIRST_BODY" || has output "SECOND_BODY")
+  in
+  check bool "an identity without a name reads nothing" true
+    (reads_no_body (call [ "source_id", `String "first" ]));
   check bool "a field identity does not have reads nothing" true
-    (asks_for_the_name stray && not (has stray "SOLO_BODY"));
-  let untyped = call [ "name", `String "solo"; "source_id", `Null ] in
+    (reads_no_body (call [ "name", `String "solo"; "path", `String "guide" ]));
   check bool "a source that is not a string reads nothing" true
-    (asks_for_the_name untyped && not (has untyped "SOLO_BODY"))
+    (reads_no_body (call [ "name", `String "solo"; "source_id", `Null ]));
+  check bool "a name written twice reads nothing" true
+    (reads_no_body (call [ "name", `String "solo"; "name", `String "solo" ]))
 ;;
 
 let test_resolved_body_stays_frozen_after_new_snapshot () =

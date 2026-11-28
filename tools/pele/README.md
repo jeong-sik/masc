@@ -34,8 +34,9 @@ stderr and the exit status is nonzero. The TUI requires the receipt before
 using a successful image, so an older helper cannot silently ignore SVG,
 layout, or raster fields. Requests without `protocol` keep the ordinary
 command-line interface; other protocol versions are rejected. Version 2 is the
-first one with `chart`. A version-1 helper rejects the TUI's request without a
-receipt, and the TUI answers with the reinstall hint.
+first protocol whose contract includes `chart`. A version-1 helper rejects the
+TUI's request without a receipt, so the TUI's render error names
+`scripts/install-pele.sh`.
 
 Optional `fontSize` is a positive safe integer (default `16`) describing the
 physical text density. Pele lays out at its logical default of 16 with available

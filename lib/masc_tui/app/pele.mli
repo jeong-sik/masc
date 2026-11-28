@@ -42,9 +42,10 @@ type ending =
 type runner = input:string -> output:string -> errors:string -> ending
 
 val protocol_version : int
-(** Supported helper protocol version ([2]). Version 2 is the first one whose
-    helper renders [Chart]. A helper that knows only version 1 rejects the
-    request without a receipt, so {!render} answers with the reinstall hint. *)
+(** Supported helper protocol version ([2]). Version 2 is the first protocol
+    whose contract includes [Chart]. A helper that knows only version 1 rejects
+    the request without a receipt, so {!render} answers with the reinstall
+    hint. *)
 
 val protocol_receipt : string
 (** Exact confirmation line prefix expected from [masc-pele]:

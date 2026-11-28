@@ -343,7 +343,6 @@ let prepare_agent_setup
            ~user_message
            ~dynamic_context)
   in
-  let agent_name = meta.name in
   let tool_descriptors =
     offered_descriptors
       ~task_skill_descriptors:(Keeper_task_skill_turn.descriptors task_skill_selection)
@@ -431,11 +430,6 @@ let prepare_agent_setup
          snapshot_rev
          (Keeper_skill_catalog.turn_unavailable_to_string unavailable))
     turn_skill_projection.unavailable;
-  let _executable_task_skill_selection =
-    Keeper_task_skill_turn.executable_selection
-      ~projection:turn_skill_projection
-      task_skill_selection
-  in
   let* load_receipts =
     Keeper_tool_load_receipts.restore
       ~source:(Keeper_context_core.agent_core_context_of_context ctx_work)
@@ -880,7 +874,6 @@ let prepare_agent_setup
         identity_allow.Keeper_identity_tool_allow.kept
     ; acc
     ; agent_cell
-    ; agent_name
     ; tool_reach =
         (* The hook hears the model-facing name, which is the one name the
            bundle gave the descriptor (Keeper_tool_descriptor.keeper_model_names). *)

@@ -443,16 +443,6 @@ let task_ids_for_reference selection reference =
   |> Option.value ~default:[]
 ;;
 
-let executable_selection ~projection selection =
-  let selected =
-    List.filter
-      (fun (selected : selected) ->
-         Keeper_skill_catalog.exact_is_executable projection selected.reference)
-      selection.selected
-  in
-  { selection with selected }
-;;
-
 module Task_surface_map = Map.Make (String)
 
 (* One computation feeds every surface that advertises a turn's per-task
@@ -464,8 +454,8 @@ module Task_surface_map = Map.Make (String)
    never re-resolves, so the turn-boundary freeze contract stays intact.
 
    The projection comes from [Keeper_capability_surface.create_with_descriptors],
-   over the Tool descriptors the selection is bound to, or every descriptor
-   for a selection bound to none. *)
+   over the Tool descriptors the selection is bound to, or
+   [Keeper_tool_descriptor.all_descriptors ()] for a selection bound to none. *)
 let exact_task_surfaces
       ~snapshot
       ~tool_deny

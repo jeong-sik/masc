@@ -78,7 +78,6 @@ type ctx =
   { workspace_root : string
   ; acc : hook_accumulator
   ; agent_cell : Agent_core.Agent.t option ref
-  ; agent_name : string
   ; tool_reach : string -> Keeper_tool_reach.t option
         (** Where a call of this model-facing tool name reaches, from the
             descriptor the turn offers under that name. [None] for a name no

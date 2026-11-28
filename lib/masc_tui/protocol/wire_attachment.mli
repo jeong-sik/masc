@@ -120,6 +120,9 @@ val encode_attachment_ref : t -> Yojson.Safe.t
 val encode_user_block : t -> Yojson.Safe.t
 (** Encode [{ "type": "attachment", "attachment_id": id }] for [user_blocks[]]. *)
 
+val format_bytes_short : int -> string
+(** [""] for a non-positive count, else [B], [KB] or [MB]. *)
+
 val format_chip : t -> string
 (** Compact chip label for composer tray and metadata captions, e.g.
     ["[img: screenshot.png 1280x720]"] or ["[pdf: report.pdf 42 KB]"]. *)

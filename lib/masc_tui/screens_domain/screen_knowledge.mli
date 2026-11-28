@@ -17,3 +17,9 @@ val board_attachment_chip :
   lang:Masc_tui_core.Say.lang -> Masc_tui_protocol.Wire_attachment.t -> string
 (** Board attachment line. Audio (MIDI included) carries a note that the Board
     cannot play it; other kinds are {!Masc_tui_protocol.Wire_attachment.format_chip}. *)
+
+val board_typed_media_chip :
+  lang:Masc_tui_core.Say.lang ->
+  Masc_tui_protocol.Wire_knowledge.board_typed_media ->
+  string
+(** The line for an audio or MIDI entry of a post's [meta.attachments]. *)

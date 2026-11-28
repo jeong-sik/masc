@@ -451,6 +451,7 @@ let populated_model ~cols ~rows ~lang =
             chain_depth = Some 22;
             is_signal = true;
             pinned = false;
+            typed_media = [];
             attachments = [];
           };
           {
@@ -470,6 +471,7 @@ let populated_model ~cols ~rows ~lang =
             chain_depth = None;
             is_signal = true;
             pinned = false;
+            typed_media = [];
             attachments = [];
           };
           {
@@ -489,6 +491,7 @@ let populated_model ~cols ~rows ~lang =
             chain_depth = None;
             is_signal = false;
             pinned = false;
+            typed_media = [];
             attachments = [];
           };
         ];

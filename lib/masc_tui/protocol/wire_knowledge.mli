@@ -65,6 +65,17 @@ type post_visibility =
   | Vis_internal
   | Vis_direct
 
+type board_media_kind =
+  | Media_audio
+  | Media_midi
+
+type board_typed_media = {
+  media_kind : board_media_kind;
+  label : string;  (** The entry's name, else its URL or short artifact hash. *)
+  bytes : int option;  (** Reported only for a stored artifact. *)
+}
+(** An audio or MIDI entry of [meta.attachments]. *)
+
 type board_post = {
   id : string;
   title : string;
@@ -83,6 +94,7 @@ type board_post = {
   is_signal : bool;
   pinned : bool;
   attachments : Wire_attachment.t list;
+  typed_media : board_typed_media list;
 }
 
 type board_comment = {

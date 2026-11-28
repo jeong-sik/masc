@@ -956,6 +956,7 @@ let make_populated_model ~cols ~rows ~lang =
                  chain_depth = None;
                  is_signal = true;
                  pinned = false;
+                 typed_media = [];
                  attachments = [];
                };
              ];

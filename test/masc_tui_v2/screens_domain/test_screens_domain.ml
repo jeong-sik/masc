@@ -245,6 +245,7 @@ let make_rich_model ~lang ~cols ~rows =
       chain_depth = Some 22;
       is_signal = true;
       pinned = false;
+      typed_media = [];
       attachments = [];
     }
   in
@@ -276,6 +277,7 @@ let make_rich_model ~lang ~cols ~rows =
       chain_depth = None;
       is_signal = true;
       pinned = false;
+      typed_media = [];
       attachments = [];
     }
   in
@@ -297,6 +299,7 @@ let make_rich_model ~lang ~cols ~rows =
       chain_depth = None;
       is_signal = false;
       pinned = false;
+      typed_media = [];
       attachments = [];
     }
   in
@@ -4956,6 +4959,27 @@ let test_board_audio_attachment_says_not_playable () =
   Alcotest.(check string) "pdf keeps the plain chip" "[pdf: a.pdf]"
     (chip ~lang:Say.Lang_ko "application/pdf" "a.pdf")
 
+let test_board_typed_media_from_post_meta () =
+  let json =
+    Yojson.Safe.from_string
+      {|{"id":"p-1","title":"t","body":"b","author":"a","created_at":1.0,
+         "meta":{"attachments":[
+           {"kind":"audio","url":"https://example.com/a.wav"},
+           {"kind":"midi","name":"a.mid","artifact":{"_blob":
+             {"sha256":"0123456789abcdef","bytes":2048,
+              "mime":"application/octet-stream","preview":""}}},
+           {"kind":"file","url":"https://example.com/a.pdf"}]}}|}
+  in
+  match Wire_knowledge.decode_board_post ~observed_at:0.0 json with
+  | Error detail -> Alcotest.fail detail
+  | Ok post ->
+      Alcotest.(check (list string)) "audio and midi only"
+        [ "[audio: https://example.com/a.wav] · No playback on Board";
+          "[midi: a.mid 2KB] · No playback on Board" ]
+        (List.map
+           (Screen_knowledge.board_typed_media_chip ~lang:Say.Lang_en)
+           post.typed_media)
+
 let () =
   Alcotest.run "masc_tui_screens_domain"
     [
@@ -5042,5 +5066,7 @@ let () =
           Alcotest.test_case
             "Board audio attachment line says it cannot be played" `Quick
             test_board_audio_attachment_says_not_playable;
+          Alcotest.test_case "Board typed audio and MIDI get a line" `Quick
+            test_board_typed_media_from_post_meta;
         ] );
     ]

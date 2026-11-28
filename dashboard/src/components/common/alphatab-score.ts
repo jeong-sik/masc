@@ -410,6 +410,13 @@ export function parseSmfBytes(
   const midiFile = new alphaTab.midi.MidiFile()
   midiFile.division = division
   const handler = new alphaTab.midi.AlphaSynthMidiFileHandler(midiFile)
+  // AlphaSynth has no default instrument: a channel that plays before any
+  // Program Change renders NaN samples, so nothing is heard. General MIDI starts
+  // every channel at program 0. These go in first, so a file's own Program
+  // Change at the same tick follows them and wins.
+  for (let channel = 0; channel < 16; channel += 1) {
+    handler.addProgramChange(0, 0, channel, 0)
+  }
 
   let pos = 8 + headerLen
   let parsedTrackCount = 0

@@ -3,7 +3,7 @@ rfc: "storage-cleanup-steps-come-from-one-list-and-leave-a-result"
 title: "저장 공간 정리는 한 목록의 단계가 돌고, 시도마다 결과를 남긴다"
 status: Draft
 created: 2026-11-11
-updated: 2026-11-11
+updated: 2026-11-28
 author: claude
 related: ["remote-keeper-workspace-entries-are-swept-on-their-endpoint", "idle-keeper-worktrees-are-swept-where-they-live", "keeper-build-output-returns-to-a-disposable-volume", "0122"]
 ---
@@ -167,7 +167,7 @@ val run :
 
 - helper 컨테이너를 만들지 않는다. #46713 이 멈춘 이유(이름만으로 helper 의 주인을 알 수 없다)에 걸리지 않는다.
 - discard 기본값은 켠 뒤에 지운 자리만 돌려준다. 이미 쌓인 자리는 어느 쪽을 고르든 trim 이 한 번은 필요하다.
-- 멈춰 있는 helper 를 다시 켤지 지울지는 여기서 정하지 않는다. 볼륨의 주인 식별(Goal `goal-microvm-multi-vmm-01a18182`, task-2863)과 `Guest_trim` 이 돈 뒤의 측정을 보고 정한다.
+- 멈춰 있던 helper 는 운영자가 2026-11-28 에 다시 켜지 않고 지우기로 정했다(#55535). discard 기본값을 켜는 길이 다시 필요하면 볼륨의 주인 식별(Goal `goal-microvm-multi-vmm-01a18182`, task-2863)과 `Guest_trim` 이 돈 뒤의 측정을 보고 새로 정한다.
 - 한 번에 게스트 하나씩 돈다. trim 은 호스트 디스크를 크게 쓴다(1.2 에서 이미지 하나가 28 GiB 를 돌려줬다). 급한 일이 아니니 나란히 돌리지 않는다.
 
 ### 2.3 시도마다 결과를 남긴다

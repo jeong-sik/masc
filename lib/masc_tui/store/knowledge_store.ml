@@ -2195,7 +2195,7 @@ let wiki_markdown_embeds ~lang t (detail : Wire_knowledge.wiki_page_detail) =
                  | Some true -> named ~ko:"아티팩트" ~en:"Artifact" name
                  | Some false -> named ~ko:"없는 아티팩트" ~en:"Missing artifact" name
                  | None -> named ~ko:"확인하지 못한 아티팩트" ~en:"Unchecked artifact" name))
-        | Wire_knowledge.Embed_media { sha256; exists = true } ->
+        | Wire_knowledge.Embed_media { sha256; exists = Some true } ->
             Some
               (Embed_image
                  {
@@ -2208,10 +2208,15 @@ let wiki_markdown_embeds ~lang t (detail : Wire_knowledge.wiki_page_detail) =
                      say ~ko:"그림을 불러오는 중이에요."
                        ~en:"Loading the image.";
                  })
-        | Wire_knowledge.Embed_media { sha256; exists = false } ->
+        | Wire_knowledge.Embed_media { sha256; exists = Some false } ->
             Some
               (Embed_note
                  (named ~ko:"없는 그림" ~en:"Missing image" (Option.value embed.label ~default:sha256)))
+        | Wire_knowledge.Embed_media { sha256; exists = None } ->
+            Some
+              (Embed_note
+                 (named ~ko:"확인하지 못한 그림" ~en:"Unchecked image"
+                    (Option.value embed.label ~default:sha256)))
         | Wire_knowledge.Embed_invalid | Wire_knowledge.Embed_unsupported -> None
       in
       Option.map (fun shown -> { Masc_tui_ui.Markdown.raw = embed.raw; shown }) shown)

@@ -815,7 +815,8 @@ let test_wiki_page_embeds_roundtrip () =
             let target =
               match embed.target with
               | Wire_knowledge.Embed_media { sha256; exists } ->
-                  Printf.sprintf "media %s %b" sha256 exists
+                  Printf.sprintf "media %s %s" sha256
+                    (Option.fold ~none:"unknown" ~some:Bool.to_string exists)
               | Wire_knowledge.Embed_wiki { slug; exists } ->
                   Printf.sprintf "wiki %s %b" slug exists
               | Wire_knowledge.Embed_artifact { id; _ } -> "artifact " ^ id

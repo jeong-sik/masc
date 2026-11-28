@@ -853,7 +853,7 @@ type wiki_outgoing_link = {
 }
 
 type wiki_embed_target =
-  | Embed_media of { sha256 : string; exists : bool }
+  | Embed_media of { sha256 : string; exists : bool option }
   | Embed_wiki of { slug : string; exists : bool }
   | Embed_artifact of { id : string; exists : bool option }
   | Embed_invalid
@@ -1284,7 +1284,7 @@ let decode_wiki_embed json =
     match kind with
     | "media" ->
         let* sha256 = required_nonblank_string json "target" in
-        let* exists = required_bool_field json "exists" in
+        let* exists = required_nullable_bool_field json "exists" in
         Ok (Embed_media { sha256; exists })
     | "wiki" ->
         let* slug = required_nonblank_string json "target" in

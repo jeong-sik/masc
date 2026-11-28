@@ -904,7 +904,8 @@ let test_wire_knowledge () =
           ],
           "embeds": [
             { "kind": "artifact", "target": "artifact-0123456789abcdef0123456789abcdef", "label": null, "syntax": "obsidian", "raw": "![[artifact:artifact-0123456789abcdef0123456789abcdef]]", "line": 6, "exists": null },
-            { "kind": "unsupported", "target": "x", "label": null, "syntax": "obsidian", "raw": "![[nope:x]]", "line": 7, "exists": null, "scheme": "nope" }
+            { "kind": "unsupported", "target": "x", "label": null, "syntax": "obsidian", "raw": "![[nope:x]]", "line": 7, "exists": null, "scheme": "nope" },
+            { "kind": "media", "target": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "label": null, "syntax": "obsidian", "raw": "![[media:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa]]", "line": 8, "exists": null }
           ],
           "backlinks": ["home"],
           "lint_findings": []
@@ -913,7 +914,7 @@ let test_wire_knowledge () =
   in
   let wp = expect_ok "wiki page" (Wire_knowledge.decode_wiki_page_detail wiki_page_json) in
   (match List.map (fun (e : Wire_knowledge.wiki_embed) -> e.target) wp.embeds with
-  | [ artifact; unsupported ] ->
+  | [ artifact; unsupported; media ] ->
       (match artifact with
       | Wire_knowledge.Embed_artifact { exists; _ } ->
           Alcotest.(check (option bool))
@@ -925,8 +926,15 @@ let test_wire_knowledge () =
       | Wire_knowledge.Embed_unsupported -> ()
       | Wire_knowledge.Embed_media _ | Wire_knowledge.Embed_wiki _
       | Wire_knowledge.Embed_artifact _ | Wire_knowledge.Embed_invalid ->
-          Alcotest.fail "an unknown scheme decodes as unsupported")
-  | targets -> Alcotest.failf "expected 2 embeds, got %d" (List.length targets));
+          Alcotest.fail "an unknown scheme decodes as unsupported");
+      (match media with
+      | Wire_knowledge.Embed_media { exists; _ } ->
+          Alcotest.(check (option bool))
+            "a media embed the server could not check keeps exists unknown" None exists
+      | Wire_knowledge.Embed_wiki _ | Wire_knowledge.Embed_artifact _
+      | Wire_knowledge.Embed_invalid | Wire_knowledge.Embed_unsupported ->
+          Alcotest.fail "the third embed decodes as media")
+  | targets -> Alcotest.failf "expected 3 embeds, got %d" (List.length targets));
   (match (List.hd wp.outgoing_links).target with
   | Wire_knowledge.Link_external url ->
       Alcotest.(check string) "external link keeps its url" "https://example.com" url

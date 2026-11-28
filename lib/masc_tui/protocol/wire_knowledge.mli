@@ -227,7 +227,9 @@ type wiki_outgoing_link = {
 }
 
 type wiki_embed_target =
-  | Embed_media of { sha256 : string; exists : bool }
+  | Embed_media of { sha256 : string; exists : bool option }
+      (** [exists] is [None] when the server could not read the attachment
+          metadata. *)
   | Embed_wiki of { slug : string; exists : bool }
   | Embed_artifact of { id : string; exists : bool option }
       (** [exists] is [None] when the server could not read the artifact

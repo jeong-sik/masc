@@ -151,6 +151,12 @@ let test_inspected_image_reads_absent_and_refuses_foreign_or_short () = with_fix
 let actual_run ~timeout_sec argv = Process_eio.run_argv_with_status_split ~timeout_sec argv
 
 let test_common_cleanup_uses_actual_complete_inventory () =
+  let padding = String.make (Common.max_process_capture_head_bytes + Common.max_process_capture_tail_bytes) 'x' in
+  (* Rows past the capture previews on both sides: the helper row sits where
+     neither the head nor the tail preview reaches. *)
+  let padded rows = Yojson.Safe.to_string (`List
+    ([`Assoc ["id", `String "first"; "padding", `String padding]] @ rows
+     @ [`Assoc ["id", `String "last"; "padding", `String padding]])) in
   List.iter (fun (remove, name) ->
     List.iter (fun (listing, absent) -> with_fixture (fun f ->
       write f.pre_listing listing;
@@ -170,7 +176,9 @@ let test_common_cleanup_uses_actual_complete_inventory () =
        {|[{"id":""}]|}, false; {|[{"configuration":{"id":"   "}}}]|}, false;
        Yojson.Safe.to_string (`List [`Assoc ["configuration", `Assoc ["id", `String (name ~keeper_name:keeper)]]]), false;
        {|[{"id":"a","configuration":{"id":"b"}}]|}, false;
-       {|[{"id":"a","id":"b"}]|}, false])
+       {|[{"id":"a","id":"b"}]|}, false;
+       padded [], true;
+       padded [`Assoc ["id", `String (name ~keeper_name:keeper)]], false])
     [M.remove_apple_volume_repair, M.volume_repair_name]
 
 let test_repair_uses_common_complete_cleanup_and_retains_effect_result () =

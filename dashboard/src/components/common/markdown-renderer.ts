@@ -1,20 +1,116 @@
-// Markdown renderer core — uses `marked` + `dompurify` (GFM tables, code fences, <think> blocks).
+// Markdown renderer core — uses `marked` + `dompurify` (GFM tables, code fences,
+// <think> blocks, authenticated lazy workspace media hydration, and typed Obsidian embeds).
 
+import './markdown-embeds.css'
 import { html } from 'htm/preact'
 import type { JSX } from 'preact'
-import { useEffect, useLayoutEffect, useMemo, useRef } from 'preact/hooks'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { decorateColorLiterals } from './color-swatch'
-import { enhanceRichCode } from './rich-code-preview'
 import { Marked, Renderer, type Tokens } from 'marked'
-import { fetchAttachmentBlob } from '../../api/attachments'
+import { enhanceRichCode } from './rich-code-preview'
+import {
+  clearEmbedMetadataCache,
+  hydrateEmbedCards,
+  hydrateWorkspaceMediaSlots,
+  MarkdownImageLightbox,
+  type MarkdownLightboxImage,
+  type MarkdownLightboxRequest,
+} from './markdown-embed-runtime'
 import { sessionEpoch } from '../../core/auth'
 import { sanitizeHtml } from '../../lib/dompurify'
-import { isWorkspaceAttachmentPath, isWorkspaceMediaPath } from '../../lib/keeper-media'
+import { escapeHtml } from '../../lib/html-escape'
+import {
+  hasWorkspaceMediaPrefix,
+  isValidPublishedArtifactId,
+  isValidWikiSlug,
+  isWorkspaceMediaPath,
+  parseObsidianEmbed,
+  type WorkspaceEmbed,
+} from '../../lib/keeper-media'
 import { memoizeLru } from '../../lib/lru-cache'
 import { parseUrl } from '../../lib/parse-url'
+import { acquireWorkspaceMediaObjectUrl, type WorkspaceMediaObjectUrlLease } from '../../lib/workspace-media-cache'
+
+export { clearEmbedMetadataCache }
+
+const MASC_EMBED_DATA_ATTRS = [
+  'data-masc-media-src',
+  'data-masc-media-alt',
+  'data-masc-embed-kind',
+  'data-masc-embed-target',
+  'data-masc-embed-label',
+  'data-masc-embed-scheme',
+] as const
+
+function renderWorkspaceMediaSlotHtml(path: string, alt: string, isBlockEmbed: boolean): string {
+  const kindAttr = isBlockEmbed ? ' data-masc-embed-kind="media"' : ''
+  return `<span class="masc-media-slot"${kindAttr} data-masc-media-src="${escapeHtml(path)}" data-masc-media-alt="${escapeHtml(alt)}"></span>`
+}
+
+function renderInvalidEmbedHtml(rawTarget: string): string {
+  return `<span class="masc-embed-invalid" data-masc-embed-kind="invalid" data-masc-embed-target="${escapeHtml(rawTarget)}">잘못된 임베드: ${escapeHtml(rawTarget)}</span>`
+}
+
+function renderObsidianEmbedHtml(embed: WorkspaceEmbed): string {
+  switch (embed.kind) {
+    case 'media':
+      return renderWorkspaceMediaSlotHtml(embed.path, embed.caption ?? '', true)
+    case 'wiki': {
+      const displayLabel = embed.label ?? embed.slug
+      const href = `#/knowledge/wiki/${encodeURIComponent(embed.slug)}`
+      return `<a class="masc-embed-card masc-embed-card--wiki" href="${escapeHtml(href)}" data-masc-embed-kind="wiki" data-masc-embed-target="${escapeHtml(embed.slug)}" data-masc-embed-label="${escapeHtml(embed.label ?? '')}"><span class="masc-embed-card-head"><span class="masc-embed-badge">Wiki</span><span class="masc-embed-title">${escapeHtml(displayLabel)}</span><span class="masc-embed-meta">/knowledge/wiki/${escapeHtml(embed.slug)}</span></span></a>`
+    }
+    case 'artifact': {
+      const displayLabel = embed.label ?? embed.id
+      const href = `#/knowledge/artifacts/${encodeURIComponent(embed.id)}`
+      return `<a class="masc-embed-card masc-embed-card--artifact" href="${escapeHtml(href)}" data-masc-embed-kind="artifact" data-masc-embed-target="${escapeHtml(embed.id)}" data-masc-embed-label="${escapeHtml(embed.label ?? '')}"><span class="masc-embed-card-head"><span class="masc-embed-badge">Artifact</span><span class="masc-embed-title">${escapeHtml(displayLabel)}</span><span class="masc-embed-meta">/knowledge/artifacts/${escapeHtml(embed.id)}</span></span></a>`
+    }
+    case 'invalid':
+      return renderInvalidEmbedHtml(embed.rawTarget || embed.raw)
+    case 'unsupported':
+      return `<span class="masc-embed-unsupported" data-masc-embed-kind="unsupported" data-masc-embed-scheme="${escapeHtml(embed.scheme)}" data-masc-embed-target="${escapeHtml(embed.rawTarget)}">지원되지 않는 임베드(${escapeHtml(embed.scheme)}): ${escapeHtml(embed.rawTarget)}</span>`
+  }
+}
+
+interface ObsidianEmbedToken extends Tokens.Generic {
+  type: 'obsidianEmbed'
+  raw: string
+  embed: WorkspaceEmbed
+}
+
+const obsidianEmbedExtension = {
+  name: 'obsidianEmbed',
+  level: 'inline' as const,
+  start(source: string) {
+    const idx = source.indexOf('![[')
+    return idx === -1 ? undefined : idx
+  },
+  tokenizer(source: string): ObsidianEmbedToken | undefined {
+    const match = /^!\[\[([^\r\n]+?)\]\]/.exec(source)
+    if (!match) return undefined
+    const inner = match[1] ?? ''
+    if (inner.includes('[[') || inner.includes(']]')) return undefined
+    return {
+      type: 'obsidianEmbed',
+      raw: match[0],
+      embed: parseObsidianEmbed(inner, match[0]),
+    }
+  },
+  renderer(token: Tokens.Generic): string {
+    const embedToken = token as ObsidianEmbedToken
+    return renderObsidianEmbedHtml(embedToken.embed)
+  },
+}
 
 const documentRenderer = {
   image(this: Renderer, token: Tokens.Image) {
+    const href = token.href?.trim() ?? ''
+    const alt = token.text ?? ''
+    if (hasWorkspaceMediaPrefix(href)) {
+      return isWorkspaceMediaPath(href)
+        ? renderWorkspaceMediaSlotHtml(href, alt, false)
+        : renderInvalidEmbedHtml(href)
+    }
     return Renderer.prototype.image.call(this, token)
       .replace(/^<img /, '<img loading="lazy" decoding="async" referrerpolicy="no-referrer" ')
   },
@@ -36,7 +132,10 @@ const documentRenderer = {
 
 const renderer = documentRenderer
 
-const md = new Marked({ gfm: true, breaks: false }).use({ renderer: documentRenderer })
+const md = new Marked({ gfm: true, breaks: false }).use({
+  renderer: documentRenderer,
+  extensions: [obsidianEmbedExtension],
+})
 
 const PURIFY_CONFIG = {
   ALLOWED_TAGS: [
@@ -49,42 +148,17 @@ const PURIFY_CONFIG = {
   ALLOWED_ATTR: [
     'href', 'title', 'target', 'rel', 'src', 'alt', 'class',
     'align', 'start', 'loading', 'decoding', 'referrerpolicy',
+    ...MASC_EMBED_DATA_ATTRS,
   ],
   ALLOW_DATA_ATTR: false,
 }
 
-function sanitize(raw: string): string {
-  return sanitizeHtml(raw, PURIFY_CONFIG)
+const DOCUMENT_PURIFY_CONFIG = {
+  USE_PROFILES: { html: true },
+  FORBID_TAGS: ['script', 'style', 'iframe', 'object', 'embed', 'form'],
+  ALLOW_DATA_ATTR: false,
+  ADD_ATTR: ['target', ...MASC_EMBED_DATA_ATTRS],
 }
-
-const thinkBlock = {
-  name: 'thinkBlock',
-  level: 'block' as const,
-  start(source: string) {
-    const match = /\n {0,3}<think>/i.exec(source)
-    return match ? match.index + 1 : undefined
-  },
-  tokenizer(source: string) {
-    const match = /^ {0,3}<think>([\s\S]*?)<\/think\s*>/i.exec(source)
-    if (!match) return undefined
-    return { type: 'thinkBlock', raw: match[0], text: (match[1] ?? '').trim() }
-  },
-  renderer(token: { type: string; raw: string; text?: string }) {
-    return `<details class="think-block rounded-[var(--r-1)]"><summary>생각 중...</summary><div>${chatMarkdown.parse(token.text ?? '')}</div></details>`
-  },
-}
-
-const chatMarkdown = new Marked({ gfm: true, breaks: true }).use({
-  renderer,
-  extensions: [thinkBlock],
-})
-
-function renderMarkdownUncached(text: string): string {
-  return sanitize(chatMarkdown.parse(text, { async: false }))
-}
-
-const MARKDOWN_CACHE_MAX = 256
-export const renderMarkdown = memoizeLru(renderMarkdownUncached, { max: MARKDOWN_CACHE_MAX })
 
 function allDocumentLinksAlreadyNormalized(sanitizedHtml: string): boolean {
   let pos = 0
@@ -120,35 +194,131 @@ function allDocumentLinksAlreadyNormalized(sanitizedHtml: string): boolean {
   }
 }
 
-function normalizeDocumentLinks(sanitizedHtml: string): string {
-  if (!sanitizedHtml.includes('<a')) return sanitizedHtml
-  if (allDocumentLinksAlreadyNormalized(sanitizedHtml)) return sanitizedHtml
+/**
+ * Post-sanitize DOM normalizer running inside an inert `<template>`:
+ * 1. Rewrites any surviving raw HTML `<img src="/api/v1/media/...">` into a non-fetching
+ *    `.masc-media-slot` (or invalid notice) so `dangerouslySetInnerHTML` NEVER triggers
+ *    unauthenticated browser GET 401s.
+ * 2. Strips forged `data-masc-*` attributes from raw HTML elements whose values fail
+ *    strict canonical validation.
+ * 3. Normalizes external vs hash links when `normalizeLinks` is true.
+ */
+function normalizeSanitizedHtml(sanitizedHtml: string, normalizeLinks: boolean): string {
+  const needsImgPass = sanitizedHtml.includes('<img')
+  const needsDataPass = sanitizedHtml.includes('data-masc-')
+  const needsLinkPass = normalizeLinks && sanitizedHtml.includes('<a') && !allDocumentLinksAlreadyNormalized(sanitizedHtml)
+  if (!needsImgPass && !needsDataPass && !needsLinkPass) return sanitizedHtml
+
   const template = window.document.createElement('template')
   template.innerHTML = sanitizedHtml
-  for (const anchor of template.content.querySelectorAll('a')) {
-    const href = anchor.getAttribute('href')?.trim() ?? ''
-    if (!href || href.startsWith('#')) {
-      anchor.removeAttribute('target')
-    } else {
-      anchor.setAttribute('target', '_blank')
-      anchor.setAttribute('rel', 'noopener noreferrer')
+
+  if (needsImgPass) {
+    for (const img of [...template.content.querySelectorAll('img')]) {
+      const rawSrc = img.getAttribute('src')?.trim() ?? ''
+      if (!hasWorkspaceMediaPrefix(rawSrc)) continue
+      const replacement = window.document.createElement('span')
+      if (isWorkspaceMediaPath(rawSrc)) {
+        replacement.className = 'masc-media-slot'
+        replacement.setAttribute('data-masc-media-src', rawSrc)
+        replacement.setAttribute('data-masc-media-alt', img.getAttribute('alt') ?? '')
+      } else {
+        replacement.className = 'masc-embed-invalid'
+        replacement.setAttribute('data-masc-embed-kind', 'invalid')
+        replacement.setAttribute('data-masc-embed-target', rawSrc)
+        replacement.textContent = `잘못된 임베드: ${rawSrc}`
+      }
+      img.replaceWith(replacement)
     }
   }
+
+  if (needsDataPass) {
+    for (const el of template.content.querySelectorAll('[data-masc-media-src]')) {
+      const src = el.getAttribute('data-masc-media-src')?.trim() ?? ''
+      if (!isWorkspaceMediaPath(src)) {
+        el.removeAttribute('data-masc-media-src')
+        el.removeAttribute('data-masc-media-alt')
+        el.classList.remove('masc-media-slot')
+      }
+    }
+    for (const el of template.content.querySelectorAll('[data-masc-embed-kind]')) {
+      const kind = el.getAttribute('data-masc-embed-kind')
+      const target = el.getAttribute('data-masc-embed-target') ?? ''
+      const href = el.getAttribute('href')?.trim() ?? ''
+      const valid =
+        (kind === 'media' && isWorkspaceMediaPath(el.getAttribute('data-masc-media-src')))
+        || (kind === 'wiki' && el.tagName === 'A' && isValidWikiSlug(target)
+          && href === `#/knowledge/wiki/${encodeURIComponent(target)}`)
+        || (kind === 'artifact' && el.tagName === 'A' && isValidPublishedArtifactId(target)
+          && href === `#/knowledge/artifacts/${encodeURIComponent(target)}`)
+        || kind === 'invalid'
+        || kind === 'unsupported'
+      if (!valid) {
+        for (const attr of MASC_EMBED_DATA_ATTRS) el.removeAttribute(attr)
+        el.classList.remove('masc-embed-card', 'masc-embed-card--wiki', 'masc-embed-card--artifact')
+      }
+    }
+  }
+
+  if (needsLinkPass) {
+    for (const anchor of template.content.querySelectorAll('a')) {
+      const href = anchor.getAttribute('href')?.trim() ?? ''
+      if (!href || href.startsWith('#')) {
+        anchor.removeAttribute('target')
+      } else {
+        anchor.setAttribute('target', '_blank')
+        anchor.setAttribute('rel', 'noopener noreferrer')
+      }
+    }
+  }
+
   return template.innerHTML
 }
 
+function sanitize(raw: string): string {
+  return normalizeSanitizedHtml(sanitizeHtml(raw, PURIFY_CONFIG), false)
+}
+
+const thinkBlock = {
+  name: 'thinkBlock',
+  level: 'block' as const,
+  start(source: string) {
+    const match = /\n {0,3}<think>/i.exec(source)
+    return match ? match.index + 1 : undefined
+  },
+  tokenizer(source: string) {
+    const match = /^ {0,3}<think>([\s\S]*?)<\/think\s*>/i.exec(source)
+    if (!match) return undefined
+    return { type: 'thinkBlock', raw: match[0], text: (match[1] ?? '').trim() }
+  },
+  renderer(token: { type: string; raw: string; text?: string }) {
+    return `<details class="think-block rounded-[var(--r-1)]"><summary>생각 중...</summary><div>${chatMarkdown.parse(token.text ?? '')}</div></details>`
+  },
+}
+
+const chatMarkdown = new Marked({ gfm: true, breaks: true }).use({
+  renderer,
+  extensions: [thinkBlock, obsidianEmbedExtension],
+})
+
+function renderMarkdownUncached(text: string): string {
+  return sanitize(chatMarkdown.parse(text, { async: false }))
+}
+
+const MARKDOWN_CACHE_MAX = 256
+export const renderMarkdown = memoizeLru(renderMarkdownUncached, { max: MARKDOWN_CACHE_MAX })
+
 const renderMarkdownDocument = memoizeLru(
-  (text: string) => normalizeDocumentLinks(
-    sanitizeHtml(md.parse(text, { async: false }), {
-      USE_PROFILES: { html: true },
-      FORBID_TAGS: ['script', 'style', 'iframe', 'object', 'embed', 'form'],
-      ADD_ATTR: ['target'],
-    }),
+  (text: string) => normalizeSanitizedHtml(
+    sanitizeHtml(md.parse(text, { async: false }), DOCUMENT_PURIFY_CONFIG),
+    true,
   ),
   { max: MARKDOWN_CACHE_MAX },
 )
 
-function followDocumentFragment(event: JSX.TargetedMouseEvent<HTMLDivElement>) {
+function handleDocumentClick(
+  event: JSX.TargetedMouseEvent<HTMLDivElement>,
+  onNavigate?: (path: string) => void,
+) {
   if (event.defaultPrevented || event.button !== 0
     || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
   const root = event.currentTarget
@@ -158,7 +328,13 @@ function followDocumentFragment(event: JSX.TargetedMouseEvent<HTMLDivElement>) {
   if (!link || !root.contains(link) || (link.target && link.target !== '_self')) return
 
   const fragment = link.getAttribute('href')?.slice(1) ?? ''
-  if (fragment.startsWith('/')) return
+  if (fragment.startsWith('/')) {
+    if (onNavigate && link.classList.contains('masc-embed-card')) {
+      event.preventDefault()
+      onNavigate(fragment)
+    }
+    return
+  }
 
   // The application routes on window.location.hash, so fragments in a
   // document must stay scoped to that document.
@@ -180,63 +356,12 @@ function followDocumentFragment(event: JSX.TargetedMouseEvent<HTMLDivElement>) {
   target?.scrollIntoView({ block: 'start' })
 }
 
-/**
- * Hydrates same-origin `/api/v1/attachments/*` (and legacy `/api/v1/media/*`)
- * `<img>` elements via authenticated fetch so Bearer-token sessions render
- * inline Markdown attachments cleanly instead of failing with HTTP 401.
- * External images retain the existing `linkUnloadedImages` fallback.
- */
-function enhanceMarkdownImages(container: HTMLElement) {
+function linkUnloadedImages(container: HTMLElement) {
   const cleanups: Array<() => void> = []
-  const controller = new AbortController()
-  cleanups.push(() => controller.abort())
-
   for (const image of container.querySelectorAll('img[src]')) {
-    if (!(image instanceof HTMLImageElement)) continue
-    const rawAttr = image.getAttribute('src')?.trim() ?? ''
-    if (!rawAttr) continue
-    const url = parseUrl(rawAttr, container.ownerDocument.baseURI)
+    if (!(image instanceof HTMLImageElement) || image.closest('a') || image.closest('.masc-media-slot')) continue
+    const url = parseUrl(image.src, container.ownerDocument.baseURI)
     if (!url || (url.protocol !== 'https:' && url.protocol !== 'http:')) continue
-
-    const isSameOriginWorkspaceAttachment =
-      url.origin === window.location.origin
-      && isWorkspaceMediaPath(url.pathname)
-
-    if (isSameOriginWorkspaceAttachment) {
-      const originalSrc = rawAttr
-      const maxPx = isWorkspaceAttachmentPath(url.pathname) && !url.searchParams.has('max_px')
-        ? 640
-        : null
-      void fetchAttachmentBlob(`${url.pathname}${url.search}`, {
-        maxPx,
-        requireRasterImage: true,
-        signal: controller.signal,
-      }).then((res) => {
-        if (controller.signal.aborted) return
-        if (!res.ok) {
-          if (image.closest('a')) return
-          const fallback = container.ownerDocument.createElement('span')
-          fallback.className = 'att-md-fallback'
-          fallback.textContent = image.alt ? `${image.alt} · 이미지를 불러올 수 없습니다` : '이미지를 불러올 수 없습니다'
-          image.replaceWith(fallback)
-          cleanups.push(() => {
-            if (fallback.parentNode) fallback.replaceWith(image)
-          })
-          return
-        }
-        const blobUrl = URL.createObjectURL(res.value.blob)
-        image.src = blobUrl
-        cleanups.push(() => {
-          try {
-            URL.revokeObjectURL(blobUrl)
-          } catch { /* ignore */ }
-          image.setAttribute('src', originalSrc)
-        })
-      })
-      continue
-    }
-
-    if (image.closest('a')) continue
     const showOriginal = () => {
       const link = container.ownerDocument.createElement('a')
       link.href = url.href
@@ -282,12 +407,18 @@ function rewriteLinks(container: HTMLElement, rewrites: ReadonlyMap<string, Link
   return () => restores.forEach(restore => restore())
 }
 
+interface LightboxState {
+  readonly alt: string
+  readonly image: MarkdownLightboxImage
+}
+
 export function MarkdownContent({
   text,
   class: className,
   document = false,
   streaming = false,
   linkRewrites,
+  onNavigate,
 }: {
   text: string
   class?: string
@@ -295,25 +426,78 @@ export function MarkdownContent({
   streaming?: boolean
   /** Links whose written target is a key open the value instead, in this tab. */
   linkRewrites?: ReadonlyMap<string, LinkRewrite>
+  onNavigate?: (path: string) => void
 }) {
   const root = useRef<HTMLDivElement>(null)
   const epoch = sessionEpoch.value
+  const lightboxLeaseRef = useRef<WorkspaceMediaObjectUrlLease | null>(null)
+  // The request whose answer the lightbox may still show; a newer open or a
+  // close replaces it, so a late answer releases its lease instead.
+  const lightboxRequestRef = useRef<AbortController | null>(null)
+  const [lightbox, setLightbox] = useState<LightboxState | null>(null)
+
+  const closeLightbox = useCallback(() => {
+    lightboxRequestRef.current?.abort()
+    lightboxRequestRef.current = null
+    const previous = lightboxLeaseRef.current
+    lightboxLeaseRef.current = null
+    previous?.release()
+    setLightbox(null)
+  }, [])
+
+  const openLightbox = useCallback(({ path, alt }: MarkdownLightboxRequest) => {
+    closeLightbox()
+    const controller = new AbortController()
+    lightboxRequestRef.current = controller
+    setLightbox({ alt, image: { kind: 'loading' } })
+    void acquireWorkspaceMediaObjectUrl(path, { signal: controller.signal }).then((res) => {
+      if (lightboxRequestRef.current !== controller) {
+        if (res.ok) res.value.release()
+        return
+      }
+      lightboxRequestRef.current = null
+      if (!res.ok) {
+        setLightbox({ alt, image: { kind: 'error' } })
+        return
+      }
+      lightboxLeaseRef.current = res.value
+      setLightbox({ alt, image: { kind: 'ready', src: res.value.url } })
+    })
+  }, [closeLightbox])
+
+  useEffect(() => {
+    return () => {
+      closeLightbox()
+    }
+  }, [closeLightbox, epoch])
+
   const htmlStr = useMemo(
     () => (document ? renderMarkdownDocument : renderMarkdown)(text),
     [document, text],
   )
+
   useEffect(() => {
     const element = root.current
     if (!element) return undefined
-    const restoreImages = htmlStr.includes('<img ') ? enhanceMarkdownImages(element) : undefined
-    const restoreFences = !streaming && htmlStr.includes('language-') ? enhanceRichCode(element) : undefined
+    const restoreImages = htmlStr.includes('<img ') ? linkUnloadedImages(element) : undefined
+    const restoreMedia = htmlStr.includes('masc-media-slot')
+      ? hydrateWorkspaceMediaSlots(element, epoch, openLightbox)
+      : undefined
+    const restoreEmbeds = !streaming && htmlStr.includes('masc-embed-card')
+      ? hydrateEmbedCards(element, epoch)
+      : undefined
+    const restoreFences = !streaming && htmlStr.includes('language-')
+      ? enhanceRichCode(element)
+      : undefined
     const restoreColors = decorateColorLiterals(element)
     return () => {
       restoreImages?.()
+      restoreMedia?.()
+      restoreEmbeds?.()
       restoreFences?.()
       restoreColors()
     }
-  }, [htmlStr, streaming, epoch])
+  }, [epoch, htmlStr, openLightbox, streaming])
   // Apart from the enhancers, so a new rewrite map does not rebuild diagrams;
   // before paint, so no click reaches a link that is not rewritten yet.
   useLayoutEffect(() => {
@@ -327,8 +511,15 @@ export function MarkdownContent({
     <div
       ref=${root}
       class=${classes}
-      onClick=${followDocumentFragment}
+      onClick=${(event: JSX.TargetedMouseEvent<HTMLDivElement>) => handleDocumentClick(event, onNavigate)}
       dangerouslySetInnerHTML=${{ __html: htmlStr }}
     ></div>
+    ${lightbox && html`
+      <${MarkdownImageLightbox}
+        title=${lightbox.alt}
+        image=${lightbox.image}
+        onClose=${closeLightbox}
+      />
+    `}
   `
 }

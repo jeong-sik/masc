@@ -1,9 +1,15 @@
 // @vitest-environment jsdom
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { render } from 'preact'
 import { html } from 'htm/preact'
+import { waitFor } from '@testing-library/preact'
 import { axe } from 'jest-axe'
+import { clearWorkspaceMediaCache } from '../../lib/workspace-media-cache'
 import { MarkdownContent } from './markdown-renderer'
+
+const PNG_1X1 = Uint8Array.from(atob(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/lXcAAAAASUVORK5CYII=',
+), byte => byte.charCodeAt(0))
 
 describe('MarkdownContent a11y', () => {
   let container: HTMLElement
@@ -14,6 +20,9 @@ describe('MarkdownContent a11y', () => {
   afterEach(() => {
     render(null, container)
     document.body.removeChild(container)
+    clearWorkspaceMediaCache()
+    vi.restoreAllMocks()
+    vi.unstubAllGlobals()
   })
 
   it('renders plain text accessibly', async () => {
@@ -61,5 +70,38 @@ describe('MarkdownContent a11y', () => {
     const details = container.querySelector('details')
     expect(details).not.toBeNull()
     expect(details?.querySelector('summary')).not.toBeNull()
+  })
+
+  it('renders hydrated workspace media and structured wiki/artifact embed cards accessibly', async () => {
+    vi.stubGlobal('IntersectionObserver', undefined)
+    vi.stubGlobal('URL', Object.assign(URL, {
+      createObjectURL: vi.fn(() => 'blob:a11y-media-1'),
+      revokeObjectURL: vi.fn(),
+    }))
+    vi.stubGlobal('fetch', vi.fn(() =>
+      Promise.resolve(new Response(PNG_1X1, { status: 200, headers: { 'Content-Type': 'image/png' } })),
+    ))
+
+    const sha = 'e'.repeat(64)
+    const artId = `artifact-${'1'.repeat(32)}`
+    render(html`<${MarkdownContent} document text=${`![[media:${sha}|아키텍처 도식]]\n\n![[wiki:design-doc|설계 문서]]\n\n![[artifact:${artId}|벤치마크]]`} />`, container)
+
+    await waitFor(() => {
+      expect(container.querySelector('.masc-media-img')).not.toBeNull()
+    })
+    expect(await axe(container)).toHaveNoViolations()
+  })
+
+  it('renders media error fallback accessibly', async () => {
+    vi.stubGlobal('IntersectionObserver', undefined)
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(new Response(null, { status: 404 }))))
+
+    const sha = 'f'.repeat(64)
+    render(html`<${MarkdownContent} document text=${`![missing](/api/v1/media/${sha})`} />`, container)
+
+    await waitFor(() => {
+      expect(container.querySelector('.masc-media-retry')).not.toBeNull()
+    })
+    expect(await axe(container)).toHaveNoViolations()
   })
 })

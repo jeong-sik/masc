@@ -28,9 +28,7 @@ const TEST_SUPPORT_SUFFIX = '.test-fixture.ts'
 // imports it from a live screen. The check fails when an entry becomes
 // reachable or is deleted, so the entry leaves with its reason; the PR that
 // wires a module in removes its line here.
-const PULL = 'https://github.com/jeong-sik/masc/pull/'
 const PENDING = new Map([
-  ['src/components/common/dialog.ts', `the markdown renderer imports it in ${PULL}55191`],
   ['src/schemas/sse_event_generated.ts', 'https://github.com/jeong-sik/masc/issues/55201 decides it'],
   ['src/api/published-artifact-checks.ts', 'kept as a dependency of the retained living-module tests in https://github.com/jeong-sik/masc/pull/55162'],
   ['src/components/common/happy-dom-helpers.ts', 'kept as a dependency of the retained living-module tests in https://github.com/jeong-sik/masc/pull/55162'],

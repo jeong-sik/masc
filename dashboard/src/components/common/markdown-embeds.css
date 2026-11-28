@@ -1,0 +1,194 @@
+/* Unified Markdown Media Hydration & Rich Embed Runtime Styles (100% OKLCH tokens, 0 raw hex) */
+
+/* Keep large Markdown documents scrolling at 60fps without layout thrashing. */
+.markdown-content > :where(pre, table, blockquote, .rich-code-preview, .masc-media-slot) {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 240px;
+}
+
+/* Workspace Media Hydration Slot (phrasing-safe wrapper valid inside <p>, <li>, <td>) */
+.masc-media-slot {
+  display: inline-flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  max-width: 100%;
+  margin-block: var(--sp-2);
+  vertical-align: top;
+}
+
+.masc-media-slot[data-masc-media-state="loading"] {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: min(260px, 100%);
+  min-height: 160px;
+  aspect-ratio: 16 / 9;
+  padding: var(--sp-3);
+  border-radius: var(--radius-sm);
+  border: 1px dashed var(--line-1);
+  background: var(--bg-2);
+  color: var(--fg-3);
+  font-size: var(--fs-12);
+}
+
+.masc-media-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid var(--line-1);
+  border-radius: var(--radius-sm);
+  background: var(--bg-2);
+  cursor: zoom-in;
+  overflow: hidden;
+  max-width: 100%;
+  transition: border-color var(--t-fast) var(--ease);
+}
+
+.masc-media-trigger:hover,
+.masc-media-trigger:focus-visible {
+  border-color: var(--line-3);
+  outline: none;
+  box-shadow: 0 0 0 2px color-mix(in oklch, var(--focus) 45%, transparent);
+}
+
+.masc-media-img {
+  display: block;
+  max-width: 100%;
+  max-height: 28rem;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+  border-radius: var(--radius-xs);
+}
+
+.masc-media-caption {
+  display: block;
+  font-size: var(--fs-11);
+  color: var(--fg-3);
+}
+
+.masc-media-error {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--radius-sm);
+  border: 1px dashed var(--err-border);
+  background: var(--err-soft);
+  color: var(--err-fg);
+  font-size: var(--fs-12);
+}
+
+.masc-media-retry {
+  padding: var(--sp-0) var(--sp-2);
+  border-radius: var(--radius-xs);
+  border: 1px solid var(--line-2);
+  background: var(--bg-2);
+  color: var(--fg-1);
+  font-size: var(--fs-11);
+  cursor: pointer;
+}
+
+.masc-media-retry:hover,
+.masc-media-retry:focus-visible {
+  background: var(--bg-3);
+  border-color: var(--line-3);
+}
+
+/* Rich Structured Embed Cards (Wiki / Published Artifact) */
+.markdown-content a.masc-embed-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  margin-block: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--line-2);
+  background: var(--bg-1);
+  color: var(--fg-1);
+  text-decoration: none;
+  min-height: 54px;
+  transition: border-color var(--t-fast) var(--ease), background var(--t-fast) var(--ease);
+}
+
+.markdown-content a.masc-embed-card:hover,
+.markdown-content a.masc-embed-card:focus-visible {
+  border-color: var(--info-border);
+  background: var(--bg-2);
+  outline: none;
+  box-shadow: 0 0 0 2px color-mix(in oklch, var(--focus) 40%, transparent);
+}
+
+.masc-embed-card-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
+.masc-embed-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 var(--sp-2);
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--info-border);
+  background: var(--info-soft);
+  color: var(--info-fg);
+  font-size: var(--fs-10);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.masc-embed-card--artifact .masc-embed-badge {
+  border-color: var(--ok-border);
+  background: var(--ok-soft);
+  color: var(--ok-fg);
+}
+
+.masc-embed-title {
+  font-size: var(--fs-13);
+  font-weight: 600;
+  color: var(--fg-1);
+  overflow-wrap: anywhere;
+}
+
+.masc-embed-meta {
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+  color: var(--fg-3);
+}
+
+.masc-embed-summary {
+  display: block;
+  font-size: var(--fs-12);
+  color: var(--fg-2);
+}
+
+.masc-embed-missing {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 var(--sp-1);
+  border-radius: var(--radius-xs);
+  border: 1px solid var(--warn-border);
+  background: var(--warn-soft);
+  color: var(--warn-fg);
+  font-size: var(--fs-10);
+}
+
+.masc-embed-invalid,
+.masc-embed-unsupported {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: var(--sp-0) var(--sp-2);
+  border-radius: var(--radius-sm);
+  border: 1px dashed var(--warn-border);
+  background: var(--warn-soft);
+  color: var(--warn-fg);
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+}

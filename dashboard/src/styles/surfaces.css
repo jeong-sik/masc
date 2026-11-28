@@ -529,7 +529,7 @@ body[data-resizing="row"] {
 }
 
 .spv-seg-btn {
-  padding: 2px var(--sp-2);
+  padding: var(--sp-0) var(--sp-2);
   font-size: var(--fs-11);
 }
 
@@ -592,7 +592,7 @@ body[data-resizing="row"] {
   gap: var(--sp-1);
   border: none;
   background: transparent;
-  padding: 1px 0;
+  padding: var(--sp-0) 0;
   cursor: pointer;
   text-align: left;
   font: inherit;
@@ -658,7 +658,7 @@ body[data-resizing="row"] {
   display: inline-flex;
   align-items: center;
   gap: var(--sp-1);
-  padding: 2px var(--sp-2);
+  padding: var(--sp-0) var(--sp-2);
   border-radius: var(--radius-pill);
   border: 1px solid var(--brass-border);
   background: var(--brass-soft);
@@ -774,7 +774,7 @@ body[data-resizing="row"] {
   border: 1px solid var(--line-1);
   border-radius: var(--radius-pill);
   background: var(--bg-1);
-  padding: 1px var(--sp-2);
+  padding: var(--sp-0) var(--sp-2);
   font-size: var(--fs-11);
   cursor: pointer;
 }

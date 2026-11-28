@@ -27,14 +27,14 @@ type turn_observation
     takes out of its context carrier: an event, and a
     Goal phase, that the vendor's persistent System must not keep past the
     turn. Each is delivered as current-turn input on Start and on every
-    Resume, with the issuer's carrier span as its source. *)
+    Resume. *)
 
 type prepared_turn =
   { messages : Agent_core.Types.message list
     (** The turn's messages; the context carrier among them no longer holds
         [turn_observation]. *)
   ; system_prompt : string
-  ; start_context : Keeper_context_submission_link.t
+  ; start_context : string
     (** Current-turn User observations kept out of the vendor's standing System
         and the canonical history. Each Start adapter must use [start_prompt]. *)
   ; composed_context : Keeper_context_assembly.t option
@@ -46,7 +46,7 @@ type prepared_turn =
   ; reasoning_effort : Llm_provider.Reasoning_effort.t option
   }
 
-val start_prompt : prepared_turn -> string -> Keeper_context_submission_link.t
+val start_prompt : prepared_turn -> string -> string
 (** Prepend the prepared current-turn User observations to the adapter's Start
     prompt, once. Does not change messages, history, Goal or pending events. *)
 
@@ -339,7 +339,6 @@ val transmitted_carrier_receipt :
 
 type resume_delivery =
   { prompt : string
-  ; context_projection : Keeper_context_submission_link.t
   ; held_context : Keeper_official_client_session_store.held_context list
   ; unchanged_sections : Keeper_context_layers.source list
     (** World State sections the prompt left out because the session holds
@@ -407,11 +406,11 @@ val resume_prompt :
     the whole carrier otherwise. [composed_context.system_prompt] supplies
     separately carried Goal and
     Completion Authority observations. The latter retains [Sent_every_resume].
-    Each observation uses its own logical block and exact System source proof.
+    Each observation uses its own logical block.
     The Goal is a carried [Active_goals]
     context. An official session holds its first System prompt until native
     compaction, so a changed/new Goal is sent as a separate encoded User
-    observation, with explicit System-derived source attribution. It is not
+    observation. It is not
     an extra-context carrier and never joins its blocks. A carried
     context goes out only when [held] does not already name it with the same
     digest, or when its block is {!Prompt_block_id.resent_when_held}. A

@@ -2926,8 +2926,7 @@ let run_without_lifecycle
         | [] -> start_goal
         | lines -> String.concat "\n\n" lines ^ "\n\n" ^ start_goal
       in
-      let with_obs = Host.start_prompt start_prepared body in
-      Ok (Keeper_context_submission_link.text with_obs, Some start_prepared.Host.system_prompt))
+      Ok (Host.start_prompt start_prepared body, Some start_prepared.Host.system_prompt))
     else (
       let* framed =
         Host.framed_prompt_for_turn

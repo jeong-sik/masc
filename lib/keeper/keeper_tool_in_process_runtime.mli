@@ -455,7 +455,7 @@ module For_testing : sig
        content:string ->
        mention_user_ids:string list ->
        attachments:Channel_gate_discord_state.post_attachments option ->
-       (string, Channel_gate_discord_state.send_error) result) ->
+       (string, Channel_gate_discord_state.post_error) result) ->
     ?slack_send:
       (thread_ts:string option ->
        channel:string ->

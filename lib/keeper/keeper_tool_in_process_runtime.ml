@@ -1638,11 +1638,13 @@ let each_attachment check ids =
   List.fold_left (fun acc id -> Result.bind acc (fun () -> check id)) (Ok ()) ids
 
 (* Before approval: every named attachment must be one this Keeper may read,
-   and a voice message's must be sound MASC can transcode. Only a post that
-   passes all of that promotes its files to durable, so a refused post leaves
-   them as they were. An ephemeral attachment can otherwise be evicted by the
-   Keeper's own later files while the post waits for an operator, and the
-   approved replay would find nothing to send. Durable bytes stay alive while
+   and a voice message's must be sound MASC can transcode. Files are promoted
+   to durable only once all of them pass, so a post refused here for one file
+   leaves the others as they were. The binding, target and mention checks run
+   after this one, and a post they refuse keeps its files durable. An
+   ephemeral attachment can otherwise be evicted by the Keeper's own later
+   files while the post waits for an operator, and the approved replay would
+   find nothing to send. Durable bytes stay alive while
    the pending gate record names them; attachment GC reads canonical ids
    anywhere in that tree. A file post's bytes are read once, after approval. *)
 let discord_files_held ~base_path ~keeper files =
@@ -1747,15 +1749,36 @@ let replay_connector_post_with_senders
       | None, None ->
         Channel_gate_discord_state.send_message ~channel_id ~content
           ~mention_user_ids ()
+        |> Result.map_error (fun error -> Channel_gate_discord_state.Send_failed error)
       | None, Some (Channel_gate_discord_state.Uploads (first, rest)) ->
         Channel_gate_discord_state.send_files ~channel_id ~content
           ~mention_user_ids ~files:(first, rest) ()
+        |> Result.map_error (fun error -> Channel_gate_discord_state.Send_failed error)
       | None, Some (Channel_gate_discord_state.Voice clip) ->
         Channel_gate_discord_state.send_voice_message ~channel_id ~content
           ~mention_user_ids ~clip ()
     in
+    (* The text in the channel goes into the Keeper's conversation. *)
+    let record_posted_text () =
+      let surface, conversation_id =
+        discord_post_chat_route
+          ~base_dir:config.Workspace.base_path
+          ~keeper_name:meta.name
+          ?continuation_channel
+          ~channel_id
+          ()
+      in
+      Keeper_chat_store.append_assistant_message_result
+        ~base_dir:config.Workspace.base_path
+        ~keeper_name:meta.name
+        ~content
+        ~surface
+        ?conversation_id
+        ?turn_ref
+        ()
+    in
     (match send_result with
-     | Error send_error ->
+     | Error (Channel_gate_discord_state.Send_failed send_error) ->
        (* Discord stays "outcome unknown": its refusals arrive as non-2xx and
           {!Discord_rest_client.Discord_api} carries Discord's own error code
           rather than the HTTP status, so this layer cannot tell a 4xx refusal
@@ -1768,25 +1791,20 @@ let replay_connector_post_with_senders
             "%a"
             Channel_gate_discord_state.pp_send_error
             send_error)
-     | Ok message_id ->
-       let surface, conversation_id =
-         discord_post_chat_route
-           ~base_dir:config.Workspace.base_path
-           ~keeper_name:meta.name
-           ?continuation_channel
-           ~channel_id
-           ()
+     | Error (Channel_gate_discord_state.Voice_failed_after_text _ as post_error) ->
+       (* Discord returned the text's id, so the text is in the channel: the
+          Keeper is told so and the conversation records it, or posting the
+          text again would show it twice. *)
+       let detail =
+         Format.asprintf "%a" Channel_gate_discord_state.pp_post_error post_error
        in
-       (match
-          Keeper_chat_store.append_assistant_message_result
-            ~base_dir:config.Workspace.base_path
-            ~keeper_name:meta.name
-            ~content
-            ~surface
-            ?conversation_id
-            ?turn_ref
-            ()
-        with
+       (match record_posted_text () with
+        | Error persist_detail ->
+          fail_after_effect Keeper_surface_post.discord_label
+            (detail ^ "; local chat persistence of the text also failed: " ^ persist_detail)
+        | Ok () -> fail_after_effect Keeper_surface_post.discord_label detail)
+     | Ok message_id ->
+       (match record_posted_text () with
         | Error detail ->
           fail_after_effect
             Keeper_surface_post.discord_label

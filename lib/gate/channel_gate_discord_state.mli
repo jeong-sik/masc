@@ -222,6 +222,21 @@ val send_files :
     messages. Returns the id of the message that carries the files. A failure
     after an earlier chunk was sent leaves that chunk in the channel. *)
 
+(** How a post that sends its text before its voice message failed. *)
+type post_error =
+  | Send_failed of send_error
+    (** A text chunk failed, or the voice message failed with no text
+        before it. Chunks sent before a failed chunk stay in the channel,
+        as with {!send_files}. *)
+  | Voice_failed_after_text of
+      { text_message_id : string
+        (** The last text chunk's id: the whole text is in the channel. *)
+      ; error : send_error
+      }
+    (** Every text chunk was posted and the voice message failed. *)
+
+val pp_post_error : Format.formatter -> post_error -> unit
+
 val send_voice_message :
   channel_id:string ->
   content:string ->
@@ -229,11 +244,12 @@ val send_voice_message :
   ?mention_user_ids:string list ->
   clip:Discord_rest_client.voice_clip ->
   unit ->
-  (string, send_error) result
+  (string, post_error) result
 (** Post [content] as {!send_message} does, then [clip] as a voice message
     of its own: Discord allows no content on a voice message. The reply
     reference goes on the first text chunk. Returns the voice message's id.
-    A failure after the text was sent leaves the text in the channel. *)
+    A voice message that fails after the text returns
+    [Voice_failed_after_text] with the text's id. *)
 
 type post_attachments =
   | Uploads of Discord_rest_client.upload * Discord_rest_client.upload list
@@ -271,4 +287,12 @@ module For_testing : sig
     content:string ->
     mention_user_ids:string list ->
     outbound_message list
+
+  (** {!send_voice_message}'s order over stand-in senders: each chunk with
+      [~first] true on the first only, then the voice message. *)
+  val post_text_then_voice :
+    send_text:(first:bool -> outbound_message -> (string, send_error) result) ->
+    send_voice:(unit -> (string, send_error) result) ->
+    outbound_message list ->
+    (string, post_error) result
 end

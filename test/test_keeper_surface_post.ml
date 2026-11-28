@@ -487,6 +487,31 @@ let test_replay_connector_post_preserves_discord_and_slack_coordinates () =
          (file_result.disposition = Tool_result.Completed ());
        check (option (list string)) "stored files sent by name, in order"
          (Some [ "cat.png"; "riff.mid" ]) !sent_names;
+       (* A voice message that fails after its text: the text is in the
+          channel, so the Keeper is told its id and the conversation records
+          it. The seam stands in for Discord once the clip is made, and making
+          a clip needs ffmpeg, which the runner lacks; the answer to this
+          error does not depend on which attachments the seam is handed. *)
+       let half_sent =
+         Masc.Keeper_tool_in_process_runtime.For_testing.replay_connector_post_with_senders
+           ~config ~meta ~continuation_channel:discord_cont
+           ~discord_send:(fun ~channel_id:_ ~content:_ ~mention_user_ids:_ ~attachments:_ ->
+             Error
+               (Channel_gate_discord_state.Voice_failed_after_text
+                  { text_message_id = "discord-text-7"
+                  ; error =
+                      Channel_gate_discord_state.Rest_error
+                        (Discord_rest_client.Other
+                           { request_id = ""; reason = "voice refused"; body_bytes = 0 })
+                  }))
+           (file_replay (SP.Files (png_id, [])))
+       in
+       (match half_sent.disposition, half_sent.failure_effect_disposition with
+        | Tool_result.Failed _, Tool_result.Proven_post_effect -> ()
+        | (Tool_result.Completed () | Tool_result.Deferred () | Tool_result.Failed _), _ ->
+          fail "a voice message that failed after its text is not a failure after the effect");
+       check bool "the Keeper is told the text's id" true
+         (Astring.String.is_infix ~affix:"discord-text-7" half_sent.raw_output);
        let missing_id = "att_" ^ String.make 64 'a' in
        let missing_result =
          Masc.Keeper_tool_in_process_runtime.For_testing.replay_connector_post_with_senders
@@ -554,11 +579,17 @@ let test_replay_connector_post_preserves_discord_and_slack_coordinates () =
        check bool "Slack replay completed" true
          (slack_result.disposition = Tool_result.Completed ());
        match Store.load ~base_dir:base_path ~keeper_name:meta.name with
-       (* The text post, the file post and the Slack post each persist a row;
-          the two refused posts persist none. *)
-       | [ discord_row; file_row; slack_row ] ->
+       (* The text post, the file post, the text of the half-sent voice post
+          and the Slack post each persist a row; the refused posts persist
+          none. *)
+       | [ discord_row; file_row; half_sent_row; slack_row ] ->
          check string "the file post's row carries its text" "악보와 그림이에요"
            file_row.content;
+         check string "the half-sent post's row carries the text in the channel"
+           "악보와 그림이에요" half_sent_row.content;
+         check (option string) "the half-sent post stays in the Discord conversation"
+           (Some "discord:guild-42:channel:discord-thread-9")
+           half_sent_row.conversation_id;
          check (option string) "the file post stays in the Discord conversation"
            (Some "discord:guild-42:channel:discord-thread-9")
            file_row.conversation_id;
@@ -594,7 +625,7 @@ let test_replay_connector_post_preserves_discord_and_slack_coordinates () =
               (Some "1700000000.000100") thread_ts
           | _ -> fail "expected Slack surface on persisted row")
        | rows ->
-         failf "expected 3 persisted assistant rows, got %d" (List.length rows))
+         failf "expected 4 persisted assistant rows, got %d" (List.length rows))
 
 let test_slack_mentions_require_stable_ids () =
   let args =

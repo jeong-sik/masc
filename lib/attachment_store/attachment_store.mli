@@ -88,7 +88,7 @@ type supported_mime =
   | Image_jpeg
   | Image_webp
   | Image_gif
-  | Application_pdf
+  | Document of Document_format.t
   | Audio_mpeg
   | Audio_wav
   | Audio_ogg
@@ -104,7 +104,9 @@ val media_kind_of_mime : supported_mime -> media_kind
 val extension_of_mime : supported_mime -> string
 
 val sniff_mime : string -> supported_mime option
-(** Strict magic-byte sniffer for the closed set of supported formats. *)
+(** The supported format the bytes hold: images, audio and video by their
+    signature, documents by their structure ({!Media_format.detect}). An
+    encrypted document is [None]; {!put} reports it as {!Encrypted_document}. *)
 
 val detect_image_dimensions : string -> (int * int) option
 (** Extract positive [(width, height)] from PNG, JPEG, GIF, or WebP headers. *)
@@ -136,6 +138,10 @@ type put_error =
       { declared : string
       ; sniffed : string
       }
+  | Encrypted_document of Document_format.t option
+      (** A document whose body is encrypted: a password, or for HWP also
+          DRM or a certificate. [None] for encrypted Office Open XML, whose
+          inner format is unknown without the password. *)
   | Invalid_keeper_name of string
   | Store_io_failed of string
 

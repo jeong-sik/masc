@@ -18,6 +18,7 @@
   masc.agent_core.digest
   masc_compression
   masc_core
+  masc.media_format
   masc_process
   fs_compat
   unix

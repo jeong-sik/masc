@@ -2276,6 +2276,109 @@ let test_h5_selected_projection_counts_are_observed_once () =
     Alcotest.(check int) "prefix comparisons do not emit more observations" 1
       (List.length !observations))
 
+(* A provider document block carries PDF only, so a DOCX is read into text on
+   a runtime that declares document input too: in the goal, the history, the
+   checkpoint and inside a tool result. The PDF beside it stays a native
+   block, and the DOCX does not steer routing. *)
+let h5_docx_mime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
+let h5_docx_block raw =
+  Agent_core.Types.document_block ~media_type:h5_docx_mime
+    ~source:(stored_source ~media_type:h5_docx_mime raw)
+
+let h5_unread_text_documents messages =
+  List.filter_map (fun (message : Agent_core.Types.message) ->
+    Runtime_agent.unread_text_document message.content) messages
+
+let rec h5_native_documents blocks =
+  List.concat_map (function
+    | Agent_core.Types.Document { media_type; _ } -> [media_type]
+    | Agent_core.Types.ToolResult { content_blocks = Some nested; _ } -> h5_native_documents nested
+    | _ -> []) blocks
+
+let h5_read_bytes ~kind:_ ~media_type:_ ~bytes = Ok bytes
+
+let test_h5_non_pdf_documents_are_read_on_a_document_runtime () =
+  with_runtime_config (h5_runtime_with_document_capabilities ~document:true ~multimodal:true)
+    (fun () ->
+      let runtime = Option.get (Runtime.get_runtime_by_id "media.test_model") in
+      let caps = Runtime_agent.input_capabilities_of_runtime runtime in
+      Alcotest.(check bool) "fixture takes documents natively" true caps.supports_document_input;
+      let goal = [h5_docx_block "goal docx words"; h5_document_block ()] in
+      let history = [message ~role:Agent_core.Types.Tool
+        [h5_nested_media [h5_docx_block "tool docx words"]]] in
+      let checkpoint =
+        { (checkpoint_with_session_id "docx-on-document-runtime") with messages = history } in
+      Alcotest.(check (list string)) "a DOCX asks no input modality" [] (h5_required history);
+      Alcotest.(check int) "a DOCX turn has no media walk" 0
+        (List.length (Runtime_agent.media_walk ~candidates:[runtime] ~initial_messages:history []));
+      (match Runtime_agent.For_testing.validate_content_blocks_for_run_against_capabilities_with_checkpoint
+         ~provider_label:runtime.Runtime_instance.id caps
+         ~checkpoint_messages:[] ~initial_messages:history ~goal_blocks:[] with
+       | Error _ -> ()
+       | Ok () -> Alcotest.fail "the capability gate admitted an unread DOCX");
+      let view = Driver.For_testing.admit_input_for_attempt
+        ~input_source:Masc.Keeper_request_source.Completion_review
+        ~project_media:(h5_projector ~read:h5_read_bytes ())
+        ~media_store:test_media_store
+        ~project_images:(fun ~mode:_ _ -> Alcotest.fail "no image to project")
+        ~keeper_name:"docx-on-document-runtime"
+        ~emit_runtime_manifest:(emit_manifest_collector (ref []))
+        ~goal_blocks:(Some goal) ~goal_metadata:[] ~initial_messages:history
+        ~agent_core_checkpoint:(Some checkpoint) ~runtime_id:runtime.Runtime_instance.id runtime in
+      let goal_blocks = Option.value view.attempt_goal_blocks ~default:[] in
+      let checkpoint_messages = match view.attempt_agent_core_checkpoint with
+        | Some checkpoint -> checkpoint.Agent_core.Checkpoint.messages
+        | None -> Alcotest.fail "the checkpoint must stay present" in
+      List.iter (fun (surface, messages) ->
+          Alcotest.(check (list string)) (surface ^ ": no DOCX block remains") []
+            (h5_unread_text_documents messages))
+        [ "goal", [message ~role:Agent_core.Types.User goal_blocks]
+        ; "history", view.attempt_initial_messages
+        ; "checkpoint", checkpoint_messages ];
+      Alcotest.(check (list string)) "the PDF stays a native block" ["application/pdf"]
+        (h5_native_documents goal_blocks);
+      Alcotest.(check bool) "the goal DOCX is read" true
+        (contains ~needle:"goal docx words" (h5_text_of_blocks goal_blocks));
+      Alcotest.(check bool) "the DOCX inside the tool result is read" true
+        (contains ~needle:"tool docx words" (h5_request_text view.attempt_initial_messages));
+      h5_check_attempt_admitted runtime view;
+      Alcotest.(check int) "canonical history keeps its DOCX" 1
+        (List.length (h5_unread_text_documents history)))
+
+let test_h5_request_reads_non_pdf_documents_on_a_document_runtime () =
+  with_runtime_config (h5_runtime_with_document_capabilities ~document:true ~multimodal:true)
+    (fun () ->
+      let runtime = Option.get (Runtime.get_runtime_by_id "media.test_model") in
+      let observations = ref [] in
+      let selected =
+        [ message ~role:Agent_core.Types.User [h5_document_block ()]
+        ; message ~role:Agent_core.Types.Tool [h5_nested_media [h5_docx_block "request docx words"]] ] in
+      let prepare = Driver.For_testing.prepare_request_media ~eager_images:[]
+        ~on_prepared:(fun ~required ~projected ->
+          observations := (required, projected) :: !observations)
+        ~prepare_media:(h5_preparer ~read:h5_read_bytes ())
+        ~project_images:(fun ~mode:_ _ -> Alcotest.fail "no image to project") runtime in
+      let project = match prepare selected with
+        | Ok project -> project
+        | Error error -> Alcotest.fail (Agent_core.Error.to_string error) in
+      let projected = match project selected with
+        | Ok messages -> messages
+        | Error error -> Alcotest.fail (Agent_core.Error.to_string error) in
+      Alcotest.(check (list string)) "no DOCX block reaches the request" []
+        (h5_unread_text_documents projected);
+      Alcotest.(check bool) "the DOCX is read into the request" true
+        (contains ~needle:"request docx words" (h5_request_text projected));
+      Alcotest.(check (list string)) "the PDF stays a native block" ["application/pdf"]
+        (List.concat_map (fun (message : Agent_core.Types.message) ->
+           h5_native_documents message.content) projected);
+      match !observations with
+      | [required, counts] ->
+        Alcotest.(check (list string)) "the runtime takes the rest, so nothing else is required"
+          [] required;
+        Alcotest.(check (list (pair string int))) "one document is read" ["document", 1] counts
+      | [] | _ :: _ :: _ -> Alcotest.fail "preparation must be observed once")
+
 let test_h5_selected_goal_image_shares_one_captured_reading () =
   let base_path = h5_fresh_dir () in
   Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base_path) (fun () ->
@@ -9326,6 +9429,12 @@ let () =
           Alcotest.test_case
             "H5 selected goal image shares one captured reading" `Quick
             test_h5_selected_goal_image_shares_one_captured_reading;
+          Alcotest.test_case
+            "H5 non-PDF documents are read on a document runtime" `Quick
+            test_h5_non_pdf_documents_are_read_on_a_document_runtime;
+          Alcotest.test_case
+            "H5 request reads non-PDF documents on a document runtime" `Quick
+            test_h5_request_reads_non_pdf_documents_on_a_document_runtime;
           Alcotest.test_case
             "H5-S2 document fact reaches text-only fallback"
             `Quick

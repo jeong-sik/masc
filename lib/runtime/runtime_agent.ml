@@ -385,6 +385,19 @@ let resolve_clock_for_idle
 let add_unique_string value values =
   if List.exists (String.equal value) values then values else values @ [ value ]
 
+(* A provider document block carries a PDF only: the Claude API says
+   "Binary formats such as .xlsx or .docx are not supported in document
+   blocks". The Keeper reads the other eight Document_format formats into
+   text for every runtime ([Keeper_media_reading]), so they ask no input
+   modality of a runtime and do not steer routing. One that reaches the
+   capability gate unread is refused there. A media type outside
+   Document_format keeps asking for document input. *)
+let document_read_as_text ~media_type =
+  match Document_format.of_wire_mime (String.lowercase_ascii media_type) with
+  | Some (Hwp | Hwpx | Doc | Docx | Xls | Xlsx | Ppt | Pptx) -> true
+  | Some Pdf | None -> false
+;;
+
 let rec required_modalities_of_content_blocks
     (blocks : 'source Agent_core.Types.content_block_with list) =
   List.fold_left
@@ -398,6 +411,9 @@ let rec required_modalities_of_content_blocks
        | Agent_core.Types.ToolReference _ ->
            acc
        | Agent_core.Types.Image _ -> add_unique_string "image" acc
+       | Agent_core.Types.Document { media_type; _ }
+         when document_read_as_text ~media_type ->
+           acc
        | Agent_core.Types.Document _ -> add_unique_string "document" acc
        | Agent_core.Types.Audio _ -> add_unique_string "audio" acc
        | Agent_core.Types.ToolResult { content_blocks = Some blocks; _ } ->
@@ -407,6 +423,31 @@ let rec required_modalities_of_content_blocks
              (required_modalities_of_content_blocks blocks)
        | Agent_core.Types.ToolResult { content_blocks = None; _ } -> acc)
     [] blocks
+
+(* The media type of the first document the Keeper should have read into
+   text, top level or inside a tool result. *)
+let rec unread_text_document
+    (blocks : 'source Agent_core.Types.content_block_with list) =
+  List.find_map
+    (fun block ->
+       match block with
+       | Agent_core.Types.Document { media_type; _ }
+         when document_read_as_text ~media_type ->
+           Some media_type
+       | Agent_core.Types.ToolResult { content_blocks = Some nested; _ } ->
+           unread_text_document nested
+       | Agent_core.Types.Document _
+       | Agent_core.Types.Text _
+       | Agent_core.Types.Thinking _
+       | Agent_core.Types.ReasoningDetails _
+       | Agent_core.Types.RedactedThinking _
+       | Agent_core.Types.ToolUse _
+       | Agent_core.Types.ToolReference _
+       | Agent_core.Types.Image _
+       | Agent_core.Types.Audio _
+       | Agent_core.Types.ToolResult { content_blocks = None; _ } ->
+           None)
+    blocks
 
 let content_blocks_of_messages (messages : 'source Agent_core.Types.message_with list) =
   List.concat_map
@@ -664,6 +705,18 @@ let validate_content_blocks_against_capabilities
     (blocks : 'source Agent_core.Types.content_block_with list) =
   let required = required_modalities_of_content_blocks blocks in
   let supported = supported_modalities_of_capabilities caps in
+  match unread_text_document blocks with
+  | Some media_type ->
+      Error
+        (multimodal_capability_error
+           ~provider_label
+           ~required
+           ~supported
+           ~reason:
+             (Printf.sprintf
+                "unread %s document; a provider document block takes PDF only"
+                media_type))
+  | None ->
   if caps_admit_required_modalities caps required then Ok ()
   else
     match

@@ -347,6 +347,8 @@ let put_error_http = function
     `Unsupported_media_type, "unsupported_format", Attachment_store.put_error_to_string err, []
   | Attachment_store.Mime_mismatch _ as err ->
     `Unsupported_media_type, "mime_mismatch", Attachment_store.put_error_to_string err, []
+  | Attachment_store.Encrypted_document _ as err ->
+    `Unsupported_media_type, "encrypted_document", Attachment_store.put_error_to_string err, []
   | Attachment_store.Invalid_keeper_name _ as err ->
     `Bad_request, "invalid_keeper", Attachment_store.put_error_to_string err, []
   | Attachment_store.Store_io_failed _ as err ->

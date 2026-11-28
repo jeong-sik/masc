@@ -1965,6 +1965,12 @@ type attempt_input =
   ; attempt_replay_prefix_projection : Keeper_replay_prefix.projection
   }
 
+let messages_hold_text_document messages =
+  List.exists
+    (fun (message : Agent_core.Types.message) ->
+       Option.is_some (Runtime_agent.unread_text_document message.content))
+    messages
+
 (* Project against the candidate being dispatched, preserving the canonical
    input for subsequent candidates. Inline images that this candidate cannot
    see are delegated through the turn-scoped projector before the generic
@@ -2003,16 +2009,32 @@ let project_input_for_attempt
     ; attempt_replay_prefix_projection = Keeper_replay_prefix.unchanged
     }
   in
-  match
+  let decision =
     Runtime_agent.decide_modality_reroute_for_runtime_candidates
       ~assigned:runtime
       ~candidates:[]
       ~checkpoint_messages
       ~initial_messages
       current_goal_blocks
-  with
-  | Runtime_agent.No_reroute_needed | Runtime_agent.Reroute _ -> unchanged
-  | Runtime_agent.No_capable_runtime { required } ->
+  in
+  (* A non-PDF document asks nothing of the runtime, so the decision passes
+     it, but no provider takes it as a document block: it goes through the
+     projection below on every runtime. When the runtime takes the rest of
+     the input, [required] is empty and reading those documents is all the
+     projection does. *)
+  let projection =
+    match decision with
+    | Runtime_agent.No_capable_runtime { required } -> Some required
+    | Runtime_agent.No_reroute_needed | Runtime_agent.Reroute _ ->
+      if Option.is_some (Runtime_agent.unread_text_document current_goal_blocks)
+         || messages_hold_text_document initial_messages
+         || messages_hold_text_document checkpoint_messages
+      then Some []
+      else None
+  in
+  match projection with
+  | None -> unchanged
+  | Some required ->
     let caps = Runtime_agent.input_capabilities_of_runtime runtime in
     let project_all_media = Runtime_agent.requires_text_media_projection caps ~required in
     let project ~mode blocks =
@@ -2139,7 +2161,9 @@ let project_input_for_attempt
     (match Runtime_agent.media_degrade_note ~runtime_id dropped with
      | None when delegated_images = 0 && !media_projected = [] ->
        (* [required] is non-empty -- that is why the decision was
-          [No_capable_runtime] -- yet nothing was strippable, so there is no
+          [No_capable_runtime]; a non-PDF document is always projected, so
+          its empty [required] never lands here -- yet nothing was
+          strippable, so there is no
           text-only turn to offer and the provider capability floor will reject
           this attempt. Say so here. Falling through in silence is what left the
           operator with a bare provider capability error and no record that
@@ -2171,7 +2195,7 @@ let project_input_for_attempt
         | None, (_ :: _ as projected) ->
           Log.Keeper.info
             "%s: media projected on %s -- %s become attachment readings or \
-             unavailable markers, continuing text-only"
+             unavailable markers"
             keeper_name runtime_id (modality_counts_summary projected);
           emit_runtime_manifest
             ~status:"degraded"
@@ -2324,13 +2348,20 @@ let project_prepared_request_images images blocks =
 let prepare_request_media ~eager_images ~on_prepared ~prepare_media ~project_images
     (runtime : Runtime_instance.t) : Keeper_history_projection.preparation =
   fun messages ->
-    match
-      Runtime_agent.decide_modality_reroute_for_runtime_candidates
-        ~assigned:runtime ~candidates:[] ~initial_messages:messages []
-    with
-    | Runtime_agent.No_reroute_needed | Runtime_agent.Reroute _ ->
-      Ok (fun messages -> Ok messages)
-    | Runtime_agent.No_capable_runtime { required } ->
+    (* As in [project_input_for_attempt]: a non-PDF document is read into
+       text on a runtime that takes everything else too. *)
+    let projection =
+      match
+        Runtime_agent.decide_modality_reroute_for_runtime_candidates
+          ~assigned:runtime ~candidates:[] ~initial_messages:messages []
+      with
+      | Runtime_agent.No_capable_runtime { required } -> Some required
+      | Runtime_agent.No_reroute_needed | Runtime_agent.Reroute _ ->
+        if messages_hold_text_document messages then Some [] else None
+    in
+    match projection with
+    | None -> Ok (fun messages -> Ok messages)
+    | Some required ->
       let caps = Runtime_agent.input_capabilities_of_runtime runtime in
       let project_all_media =
         Runtime_agent.requires_text_media_projection caps ~required

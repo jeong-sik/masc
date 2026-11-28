@@ -671,6 +671,7 @@ let persist_generated_images
                | Attachment_store.Payload_too_large _
                | Attachment_store.Unsupported_or_unknown_format _
                | Attachment_store.Forbidden_mime _
+               | Attachment_store.Encrypted_document _
                | Attachment_store.Invalid_keeper_name _
                | Attachment_store.Store_io_failed _ ) as err -> err
          in

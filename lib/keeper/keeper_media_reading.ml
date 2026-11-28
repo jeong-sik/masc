@@ -562,11 +562,19 @@ let read_stored ?source_reader projector ~kind ~media_type source =
     | Error failure -> Unavailable failure
 ;;
 
+(* The eight non-PDF document formats are read into text whatever the
+   runtime declares ([Runtime_agent.document_read_as_text]). *)
+let format_needs_text ~kind ~media_type =
+  match kind with
+  | Audio -> false
+  | Document -> Runtime_agent.document_read_as_text ~media_type
+;;
+
 let project_with ~read_stored ~needs_projection blocks =
   let open Result.Syntax in
   let replaced : (string * int) list ref = ref [] in
   let project_one ~kind ~media_type ~source block =
-    if not (needs_projection kind)
+    if not (needs_projection kind || format_needs_text ~kind ~media_type)
     then Ok block
     else (
       (let name = kind_to_string kind in
@@ -655,7 +663,7 @@ let prepare ?source_reader projector ~needs_projection bundle =
   let audio = needs_projection Audio and document = needs_projection Document in
   let selected = function Audio -> audio | Document -> document in
   let prepare_one outcomes ~kind ~media_type ~source =
-    if not (selected kind) then outcomes
+    if not (selected kind || format_needs_text ~kind ~media_type) then outcomes
     else match (source : Agent_core.Types.media_source) with
       | Url _ | File_id _ -> outcomes
       | Stored source ->

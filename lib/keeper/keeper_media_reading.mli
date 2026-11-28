@@ -168,9 +168,11 @@ val project :
   Agent_core.Types.content_block list ->
   Agent_core.Types.content_block list * (string * int) list
 (** Replace selected Audio/Document blocks, including nested ToolResult media,
-    with an attributed reading or explicit unavailable data. URL/file-id
-    sources are not fetched. Tool identity, outcome, JSON and original text
-    remain unchanged. Returns replaced counts by modality. *)
+    with an attributed reading or explicit unavailable data. The non-PDF
+    document formats ({!Runtime_agent.document_read_as_text}) are always
+    selected. URL/file-id sources are not
+    fetched. Tool identity, outcome, JSON and original text remain unchanged.
+    Returns replaced counts by modality. *)
 
 type prepared
 type preparation_error =

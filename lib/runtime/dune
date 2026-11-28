@@ -65,6 +65,9 @@
   masc.fs_compat
   masc.fd_accountant
   masc.types_boundary
+  ; Runtime_agent asks Document_format which documents a provider document
+  ; block refuses; masc.media_format links only xmlm and zipc.
+  masc.media_format
   time_compat
   masc.time_codec
   masc_random_id

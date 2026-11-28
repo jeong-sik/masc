@@ -178,10 +178,11 @@ let put_attachment_meta ~base_dir ~media_type ~data =
        bytes labeled image/png), trust magic-byte sniffing instead of dropping
        the generated media. *)
     put_with ()
-  | Error (Attachment_store.Unsupported_or_unknown_format _) ->
+  | Error (Attachment_store.Unsupported_or_unknown_format _ | Attachment_store.Encrypted_document _) ->
     (* Preserve non-allowlisted model-generated media (e.g. FLAC, AAC, PCM,
-       video) opaquely so generated evidence is never dropped; HTTP serves
-       opaque binaries strictly with [Content-Disposition: attachment]. *)
+       video, an encrypted document) opaquely so generated evidence is never
+       dropped; HTTP serves opaque binaries strictly with
+       [Content-Disposition: attachment]. *)
     Attachment_store.put_opaque
       ~max_bytes:(max_raw_bytes ())
       ?declared_mime
@@ -247,6 +248,7 @@ let persist_media_source_meta ~base_dir ~media_type ~source =
                 | Attachment_store.Unsupported_or_unknown_format _
                 | Attachment_store.Forbidden_mime _
                 | Attachment_store.Mime_mismatch _
+                | Attachment_store.Encrypted_document _
                 | Attachment_store.Invalid_keeper_name _
                 | Attachment_store.Store_io_failed _ ) as err) ->
                Error (Write_failed (Attachment_store.put_error_to_string err))))

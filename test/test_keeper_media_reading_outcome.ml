@@ -283,6 +283,30 @@ let test_prepared_success_retains_original_request_reference () = with_fixture (
    | _ -> fail "prepared successful reading was not projected");
   check int "only preparation and explicit observation consult the owner" 2 !calls)
 
+(* A provider document block carries a PDF only, so the other eight formats
+   are read into text even on a runtime that takes documents natively. *)
+let test_non_pdf_documents_are_read_on_a_runtime_that_takes_documents () =
+  with_fixture (fun _base media stored ->
+    let docx_mime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document" in
+    let docx = get H.show_media_error (media.put ~media_type:docx_mime ~raw) in
+    let selections = ref 0 and reads = ref 0 in
+    let projector = builtin ~media ~selections ~reads
+        ~source_reader:(fun ~kind:_ ~media_type:_ _ -> M.Use_builtin) in
+    let blocks = [document stored; document ~media_type:docx_mime docx] in
+    let runtime_takes_documents = function M.Document | M.Audio -> false in
+    let expect label = function
+      | [Agent_core.Types.Document {media_type; _}; Agent_core.Types.Text text] ->
+        check string (label ^ ": the PDF stays a native block") mime media_type;
+        check bool (label ^ ": the DOCX is read into text") true
+          (String_util.contains_substring text "builtin text")
+      | _ -> fail (label ^ ": expected the PDF block, then the DOCX reading")
+    in
+    expect "history" (fst (M.project projector ~needs_projection:runtime_takes_documents blocks));
+    let prepared = M.prepare projector ~needs_projection:runtime_takes_documents [blocks] in
+    expect "prepared" (fst (prepared_blocks prepared blocks));
+    check int "only the DOCX selects a reader" 1 !selections;
+    check int "the DOCX is read once" 1 !reads)
+
 let () = run "keeper_media_reading_outcome"
   ["owner boundary",[
     test_case "owned observation precedes builtin memo" `Quick test_owner_observation_precedes_cached_selection;
@@ -294,4 +318,6 @@ let () = run "keeper_media_reading_outcome"
     test_case "prepared source identity and missing source are explicit" `Quick
       test_prepared_sources_use_complete_identity_and_refuse_new_sources;
     test_case "successful prepared history retains its original request" `Quick
-      test_prepared_success_retains_original_request_reference]]
+      test_prepared_success_retains_original_request_reference;
+    test_case "non-PDF documents are read on a runtime that takes documents" `Quick
+      test_non_pdf_documents_are_read_on_a_runtime_that_takes_documents]]

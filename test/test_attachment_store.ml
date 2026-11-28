@@ -270,6 +270,84 @@ let test_security_rejections () =
     | Error err -> Alcotest.fail err)
 ;;
 
+(* Documents arrive by structure (Media_format): a client sends
+   application/octet-stream and the store names the format. *)
+let zip members =
+  let add archive (path, data) =
+    match Zipc.File.deflate_of_binary_string data with
+    | Error message -> Alcotest.fail message
+    | Ok file ->
+      (match Zipc.Member.make ~path (Zipc.Member.File file) with
+       | Error message -> Alcotest.fail message
+       | Ok member -> Zipc.add member archive)
+  in
+  match Zipc.to_binary_string (List.fold_left add Zipc.empty members) with
+  | Ok bytes -> bytes
+  | Error message -> Alcotest.fail message
+;;
+
+let manifest_namespace = "urn:oasis:names:tc:opendocument:xmlns:manifest:1.0"
+
+let hwpx manifest_body =
+  zip
+    [ "mimetype", "application/hwp+zip"
+    ; "Contents/header.xml", "<head/>"
+    ; ( "META-INF/manifest.xml"
+      , Printf.sprintf {|<odf:manifest xmlns:odf="%s">%s</odf:manifest>|} manifest_namespace manifest_body )
+    ]
+;;
+
+let docx_mime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
+let docx =
+  zip
+    [ ( "[Content_Types].xml"
+      , {|<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>|}
+      )
+    ; ( "_rels/.rels"
+      , {|<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>|}
+      )
+    ; "word/document.xml", "<w:document/>"
+    ]
+;;
+
+let test_documents_by_structure () =
+  with_temp_base_path (fun base_path ->
+    let store = A.create ~base_path in
+    let put ?declared_mime bytes =
+      A.put ?declared_mime ~origin:A.User_upload ~created_by:"alice" ~retention:A.Durable store ~bytes
+    in
+    Alcotest.(check (option string))
+      "sniff docx"
+      (Some docx_mime)
+      (Option.map A.mime_to_string (A.sniff_mime docx));
+    (match put ~declared_mime:"application/octet-stream" docx with
+     | Ok meta ->
+       Alcotest.(check string) "docx mime" docx_mime meta.mime_type;
+       Alcotest.(check string) "docx kind" "document" (A.media_kind_to_string meta.kind)
+     | Error err -> Alcotest.fail (A.put_error_to_string err));
+    (match put (hwpx "") with
+     | Ok meta -> Alcotest.(check string) "hwpx mime" "application/hwp+zip" meta.mime_type
+     | Error err -> Alcotest.fail (A.put_error_to_string err));
+    (match put ~declared_mime:"application/x-hwpx" (hwpx "") with
+     | Ok meta -> Alcotest.(check string) "hwpx declared by its shared-mime-info name" "application/hwp+zip" meta.mime_type
+     | Error err -> Alcotest.fail (A.put_error_to_string err));
+    (match put ~declared_mime:"application/msword" docx with
+     | Error (A.Mime_mismatch { declared = "application/msword"; sniffed }) ->
+       Alcotest.(check string) "mismatch names the DOCX" docx_mime sniffed
+     | Ok _ | Error _ -> Alcotest.fail "expected Mime_mismatch for a DOCX declared as DOC");
+    let encrypted =
+      hwpx {|<odf:file-entry full-path="Contents/section0.xml"><odf:encryption-data/></odf:file-entry>|}
+    in
+    (match put encrypted with
+     | Error (A.Encrypted_document (Some Document_format.Hwpx)) -> ()
+     | Ok _ | Error _ -> Alcotest.fail "expected Encrypted_document for a password-protected HWPX");
+    Alcotest.(check bool) "encrypted sniffs as unsupported" true (Option.is_none (A.sniff_mime encrypted));
+    match put (zip [ "readme.txt", "plain" ]) with
+    | Error (A.Unsupported_or_unknown_format _) -> ()
+    | Ok _ | Error _ -> Alcotest.fail "expected Unsupported_or_unknown_format for a plain ZIP")
+;;
+
 let test_put_dedup_wire_json_and_integrity () =
   with_temp_base_path (fun base_path ->
     let store = A.create ~base_path in
@@ -1015,6 +1093,7 @@ let () =
     [ ( "attachment_store"
       , [ Alcotest.test_case "magic sniffing and raster dimensions" `Quick test_magic_sniffing_and_dimensions
         ; Alcotest.test_case "security rejections (SVG/HTML/spoof/size/empty)" `Quick test_security_rejections
+        ; Alcotest.test_case "documents by structure, encrypted refusal" `Quick test_documents_by_structure
         ; Alcotest.test_case "put dedup wire JSON and integrity verification" `Quick test_put_dedup_wire_json_and_integrity
         ; Alcotest.test_case "ephemeral LRU pruning, multi-keeper pins, and promotion" `Quick test_ephemeral_lru_and_promotion
         ; Alcotest.test_case "put_opaque binary preservation and fail-closed pin scan" `Quick test_put_opaque_and_fail_closed_pins

@@ -310,6 +310,7 @@
   masc.lsp_client
   masc.masc_tool_blob_store
   masc.attachment_store
+  masc.media_format
   ; Wiki_link and Published_artifact read media references through it.
   masc.media_ref_scan
   masc.activity_graph

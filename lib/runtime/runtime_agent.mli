@@ -274,6 +274,18 @@ val input_capabilities_of_runtime :
     with the model's declarations, constrained by the execution transport.
     Used by reroute, candidate projection, and image delegation. *)
 
+val document_read_as_text : media_type:string -> bool
+(** [true] for the eight {!Document_format} formats other than PDF. A
+    provider document block carries PDF only, so the Keeper reads these into
+    text for every runtime: they add no input modality to a turn, and the
+    capability gate before a provider call refuses one that is still a
+    document block. *)
+
+val unread_text_document :
+  'source Agent_core.Types.content_block_with list -> string option
+(** The media type of the first document block, top level or inside a tool
+    result, that {!document_read_as_text} names. *)
+
 val caps_admit_required_modalities :
   Llm_provider.Capabilities.capabilities -> string list -> bool
 (** Shared RFC-0265 modality-admission predicate. Callers that need to preselect

@@ -102,7 +102,7 @@ type supported_mime =
   | Image_jpeg
   | Image_webp
   | Image_gif
-  | Application_pdf
+  | Document of Document_format.t
   | Audio_mpeg
   | Audio_wav
   | Audio_ogg
@@ -118,7 +118,7 @@ let mime_to_string = function
   | Image_jpeg -> "image/jpeg"
   | Image_webp -> "image/webp"
   | Image_gif -> "image/gif"
-  | Application_pdf -> "application/pdf"
+  | Document format -> Document_format.wire_mime format
   | Audio_mpeg -> "audio/mpeg"
   | Audio_wav -> "audio/wav"
   | Audio_ogg -> "audio/ogg"
@@ -134,7 +134,7 @@ let media_kind_of_mime = function
   | Image_png | Image_jpeg | Image_webp | Image_gif -> Image
   | Audio_mpeg | Audio_wav | Audio_ogg | Audio_midi | Audio_mp4 | Audio_webm -> Audio
   | Video_mp4 | Video_webm | Video_quicktime -> Video
-  | Application_pdf -> Document
+  | Document _ -> Document
 ;;
 
 let extension_of_mime = function
@@ -142,7 +142,7 @@ let extension_of_mime = function
   | Image_jpeg -> ".jpg"
   | Image_webp -> ".webp"
   | Image_gif -> ".gif"
-  | Application_pdf -> ".pdf"
+  | Document format -> Document_format.extension format
   | Audio_mpeg -> ".mp3"
   | Audio_wav -> ".wav"
   | Audio_ogg -> ".ogg"
@@ -159,7 +159,6 @@ let supported_mime_of_normalized = function
   | "image/jpeg" | "image/jpg" -> Some Image_jpeg
   | "image/webp" -> Some Image_webp
   | "image/gif" -> Some Image_gif
-  | "application/pdf" -> Some Application_pdf
   | "audio/mpeg" | "audio/mp3" -> Some Audio_mpeg
   | "audio/wav" | "audio/x-wav" | "audio/wave" -> Some Audio_wav
   | "audio/ogg" -> Some Audio_ogg
@@ -169,7 +168,14 @@ let supported_mime_of_normalized = function
   | "video/mp4" | "video/x-m4v" -> Some Video_mp4
   | "video/webm" -> Some Video_webm
   | "video/quicktime" -> Some Video_quicktime
-  | _ -> None
+  (* Other names for HWP and HWPX that clients declare: freedesktop
+     shared-mime-info (7261213d200b), which a Linux browser reads, makes
+     application/x-hwpx its HWPX type; Apache Tika (bc502d9c81ae) calls an
+     HWP 5 file application/x-hwp-v5. IANA registers no HWP type. *)
+  | "application/vnd.haansoft-hwp" | "application/x-hwp-v5" -> Some (Document Document_format.Hwp)
+  | "application/x-hwpx" | "application/vnd.hancom.hwpx" | "application/x-hwp+zip" ->
+    Some (Document Document_format.Hwpx)
+  | other -> Option.map (fun format -> Document format) (Document_format.of_wire_mime other)
 ;;
 
 let normalize_mime_header raw =
@@ -380,7 +386,7 @@ let sniff_webm bytes =
       if has_video then Some Video_webm else Some Audio_webm))
 ;;
 
-let sniff_mime bytes =
+let sniff_media bytes =
   let len = String.length bytes in
   let starts prefix = String.starts_with ~prefix bytes in
   if len >= 8 && starts Rgb_png.signature
@@ -391,8 +397,6 @@ let sniff_mime bytes =
   then Some Image_gif
   else if len >= 12 && starts "RIFF" && String.sub bytes 8 4 = "WEBP"
   then Some Image_webp
-  else if len >= 5 && starts "%PDF-"
-  then Some Application_pdf
   else if len >= 12 && starts "RIFF" && String.sub bytes 8 4 = "WAVE"
   then Some Audio_wav
   else if len >= 4 && starts "OggS"
@@ -409,6 +413,30 @@ let sniff_mime bytes =
          if (len >= 3 && starts "ID3") || is_mpeg_audio_frame_sync bytes
          then Some Audio_mpeg
          else None)
+;;
+
+type sniffed =
+  | Supported of supported_mime
+  | Password_protected of Document_format.t option
+  | Unrecognized
+
+(* Documents are read by structure (Media_format). Their signatures (%PDF-,
+   ZIP, Compound File) start no image, audio or video format, so the order of
+   the two checks does not change an answer. *)
+let sniff bytes =
+  match Media_format.detect bytes with
+  | Media_format.Document format -> Supported (Document format)
+  | Media_format.Encrypted format -> Password_protected format
+  | Media_format.Unknown _ ->
+    (match sniff_media bytes with
+     | Some mime -> Supported mime
+     | None -> Unrecognized)
+;;
+
+let sniff_mime bytes =
+  match sniff bytes with
+  | Supported mime -> Some mime
+  | Password_protected _ | Unrecognized -> None
 ;;
 
 let be16 bytes offset =
@@ -507,23 +535,29 @@ let webp_dimensions bytes =
   else None
 ;;
 
+(* [put] and [put_opaque] pass the format they already sniffed, so a document
+   is not read a second time. *)
+let image_dimensions_of_mime mime bytes =
+  match mime with
+  | Image_png -> Rgb_png.header_dimensions bytes
+  | Image_jpeg -> jpeg_walk bytes 2
+  | Image_gif -> gif_dimensions bytes
+  | Image_webp -> webp_dimensions bytes
+  | Document _
+  | Audio_mpeg
+  | Audio_wav
+  | Audio_ogg
+  | Audio_midi
+  | Audio_mp4
+  | Audio_webm
+  | Video_mp4
+  | Video_webm
+  | Video_quicktime -> None
+;;
+
 let detect_image_dimensions bytes =
   match sniff_mime bytes with
-  | Some Image_png -> Rgb_png.header_dimensions bytes
-  | Some Image_jpeg -> jpeg_walk bytes 2
-  | Some Image_gif -> gif_dimensions bytes
-  | Some Image_webp -> webp_dimensions bytes
-  | Some
-      ( Application_pdf
-      | Audio_mpeg
-      | Audio_wav
-      | Audio_ogg
-      | Audio_midi
-      | Audio_mp4
-      | Audio_webm
-      | Video_mp4
-      | Video_webm
-      | Video_quicktime )
+  | Some mime -> image_dimensions_of_mime mime bytes
   | None -> None
 ;;
 
@@ -554,6 +588,7 @@ type put_error =
       { declared : string
       ; sniffed : string
       }
+  | Encrypted_document of Document_format.t option
   | Invalid_keeper_name of string
   | Store_io_failed of string
 
@@ -572,6 +607,12 @@ let put_error_to_string = function
       "declared Content-Type %S does not match sniffed format %S"
       declared
       sniffed
+  | Encrypted_document (Some format) ->
+    Printf.sprintf
+      "the %s document is encrypted (a password, DRM or a certificate); save a copy without it and upload that"
+      (Document_format.extension format)
+  | Encrypted_document None ->
+    "the Office document is encrypted with a password; save a copy without it and upload that"
   | Invalid_keeper_name name ->
     Printf.sprintf "invalid keeper name for ephemeral attachment: %S" name
   | Store_io_failed detail -> "attachment store I/O failed: " ^ detail
@@ -1290,7 +1331,7 @@ let prune_ephemeral_keeper_unlocked
       sorted)
 ;;
 
-let validate_mime ~declared_mime ~bytes =
+let validate_mime ~declared_mime ~bytes ~sniffed =
   let normalized_declared =
     Option.bind declared_mime (fun raw ->
       let n = normalize_mime_header raw in
@@ -1299,13 +1340,14 @@ let validate_mime ~declared_mime ~bytes =
   match normalized_declared with
   | Some d when is_forbidden_declared_mime d -> Error (Forbidden_mime d)
   | Some _ | None ->
-    (match sniff_mime bytes with
-     | None ->
+    (match sniffed with
+     | Password_protected format -> Error (Encrypted_document format)
+     | Unrecognized ->
        (match looks_like_forbidden_active_content bytes with
         | Some forbidden -> Error (Forbidden_mime forbidden)
         | None ->
           Error (Unsupported_or_unknown_format { declared_mime = normalized_declared }))
-     | Some sniffed ->
+     | Supported sniffed ->
        (match normalized_declared with
         | None | Some "application/octet-stream" -> Ok sniffed
         | Some declared ->
@@ -1468,16 +1510,18 @@ let put
   if actual = 0
   then Error Empty_payload
   else (
+    let sniffed = sniff bytes in
     let pre_limit =
       match max_bytes_opt with
       | Some explicit -> explicit
       | None ->
-        (match sniff_mime bytes with
-         | Some sniffed ->
-           (match media_kind_of_mime sniffed with
+        (match sniffed with
+         | Supported mime ->
+           (match media_kind_of_mime mime with
             | Video -> max_video_bytes ()
             | Image | Audio | Document -> max_bytes ())
-         | None -> max (max_bytes ()) (max_video_bytes ()))
+         | Password_protected _ -> max_bytes ()
+         | Unrecognized -> max (max_bytes ()) (max_video_bytes ()))
     in
     if actual > pre_limit
     then Error (Payload_too_large { actual; maximum = pre_limit })
@@ -1490,11 +1534,11 @@ let put
           then Ok ()
           else Error (Invalid_keeper_name keeper)
       in
-      let* sniffed = validate_mime ~declared_mime ~bytes in
+      let* sniffed = validate_mime ~declared_mime ~bytes ~sniffed in
       let kind = media_kind_of_mime sniffed in
       let sha256 = Agent_core_sha256.to_hex (Agent_core_sha256.digest_string bytes) in
       let width, height =
-        match detect_image_dimensions bytes with
+        match image_dimensions_of_mime sniffed bytes with
         | Some (w, h) -> Some w, Some h
         | None -> None, None
       in
@@ -1573,7 +1617,7 @@ let put_opaque
         if agrees
         then (
           let dims =
-            match detect_image_dimensions bytes with
+            match image_dimensions_of_mime known bytes with
             | Some (w, h) -> Some w, Some h
             | None -> None, None
           in

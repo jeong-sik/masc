@@ -3590,22 +3590,32 @@ let operator_sources_need_marker =
   "a binding that reads an operator-only source requires operator_authority = true"
 let inherited_keeper_needs_marker =
   "a binding that only inherits Keeper visibility requires operator_authority = true"
+let fusion_run_has_another_owner =
+  "none of the binding's Fusion runs belongs to the Keeper its visibility names"
 let marker_lifts_it = "; only the operator allows it, with operator_authority = true"
 
 type declared_authority = { executes_as : Lane_addon_sources.access; reads_as : Lane_addon_sources.access }
 
-(* Whether one of the binding's own Fusion runs is [keeper]'s. A run's owner
-   is fixed when the run registers, so the bytes alone name it. *)
-let binding_names_fusion_owner ~binding keeper =
+(* What the binding's own Fusion runs say about one Keeper. A run's owner is
+   fixed when the run registers, so the bytes name it through the registry. *)
+type fusion_owner_evidence =
+  | Reads_keeper_run (* one of its Fusion runs is that Keeper's *)
+  | Reads_other_keeper_run (* it reads Fusion runs and none is that Keeper's *)
+  | Reads_no_fusion_run (* its Keeper visibility comes only from upstream Lanes *)
+
+let binding_fusion_owner_evidence ~binding keeper =
   let* sources = Lane_addon_sources.parse binding in
   List.fold_left (fun result source ->
-    let* found = result in
+    let* evidence = result in
     match source with
     | Lane_addon_sources.Fusion_run {run_id;_} ->
         let* owner = Lane_addon_sources.fusion_owner ~access:Lane_addon_sources.Operator_configuration ~run_id in
-        Ok (found || String.equal owner keeper)
-    | Lane_output _ | Snapshot_file _ | Msx_capture _ | Dos_capture _ | Browser_document _ -> Ok found)
-    (Ok false) sources
+        Ok (match evidence with
+          | Reads_keeper_run -> Reads_keeper_run
+          | Reads_other_keeper_run | Reads_no_fusion_run ->
+              if String.equal owner keeper then Reads_keeper_run else Reads_other_keeper_run)
+    | Lane_output _ | Snapshot_file _ | Msx_capture _ | Dos_capture _ | Browser_document _ -> Ok evidence)
+    (Ok Reads_no_fusion_run) sources
 
 (* HIGH-RISK-UNREVIEWED: RFC lane-declaration-operator-authority 3.2. A
    declaration file carries operator authority only when it says so, and the
@@ -3614,9 +3624,12 @@ let binding_names_fusion_owner ~binding keeper =
    of those authorities. A Shared binding reads nothing an unauthenticated
    caller cannot read. A Keeper_only binding reads as its Keeper only when one
    of its own Fusion runs is that Keeper's: visibility inherited from an
-   upstream Lane can change after the save, so it names no saver. Nobody but
-   the operator may save an operator-only binding. A marked Keeper_only
-   binding still reads as its Keeper, since only that Keeper sees its output. *)
+   upstream Lane can change after the save, so it names no saver. A binding
+   whose runs all belong to another Keeper than the visibility it kept is
+   refused without naming the line, since a marked file still reads as the
+   Keeper the visibility names. Nobody but the operator may save an
+   operator-only binding. A marked Keeper_only binding still reads as its
+   Keeper, since only that Keeper sees its output. *)
 let declared_authority ~binding (authority : Lane_addon_config.authority) visibility =
   match authority, visibility with
   | Lane_addon_config.Operator_marked, Keeper_only keeper ->
@@ -3624,10 +3637,12 @@ let declared_authority ~binding (authority : Lane_addon_config.authority) visibi
   | Operator_marked, (Shared | Operator_only) ->
       Ok {executes_as=Lane_addon_sources.Operator_configuration; reads_as=Lane_addon_sources.Operator_configuration}
   | Unmarked, Keeper_only keeper ->
-      let* names_owner = binding_names_fusion_owner ~binding keeper in
-      if names_owner then
-        Ok {executes_as=Lane_addon_sources.Keeper keeper; reads_as=Lane_addon_sources.Keeper keeper}
-      else Error inherited_keeper_needs_marker
+      let* evidence = binding_fusion_owner_evidence ~binding keeper in
+      (match evidence with
+       | Reads_keeper_run ->
+           Ok {executes_as=Lane_addon_sources.Keeper keeper; reads_as=Lane_addon_sources.Keeper keeper}
+       | Reads_other_keeper_run -> Error fusion_run_has_another_owner
+       | Reads_no_fusion_run -> Error inherited_keeper_needs_marker)
   | Unmarked, Shared ->
       Ok {executes_as=Lane_addon_sources.Unauthenticated; reads_as=Lane_addon_sources.Unauthenticated}
   | Unmarked, Operator_only -> Error operator_sources_need_marker

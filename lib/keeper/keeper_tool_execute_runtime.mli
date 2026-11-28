@@ -31,10 +31,12 @@ val handle_tool_execute :
   result_projection:Tool_output.model_projection ->
     (** The projection this call's result crosses on its way to the model,
         resolved for the lane running it
-        ({!Keeper_tool_runtime.result_projection_for}). Its ceiling is where
-        output stops being returned inline and is stored as blobs, so the
-        bound Execute keeps is the one the lane declares. A caller with no
-        lane to resolve passes {!Tool_output.default_model_projection}. *)
+        ({!Keeper_tool_runtime.result_projection_for}). Output is returned
+        inline while the result that carries it is within this projection's
+        ceiling ({!Tool_bridge.fits_inline}) and is stored as blobs
+        otherwise, so the bound Execute keeps is the one the lane declares. A
+        caller with no lane to resolve passes
+        {!Tool_output.default_model_projection}. *)
   args:Yojson.Safe.t ->
   unit ->
   string
@@ -105,10 +107,12 @@ val handle_tool_execute_with_outcome :
   result_projection:Tool_output.model_projection ->
     (** The projection this call's result crosses on its way to the model,
         resolved for the lane running it
-        ({!Keeper_tool_runtime.result_projection_for}). Its ceiling is where
-        output stops being returned inline and is stored as blobs, so the
-        bound Execute keeps is the one the lane declares. A caller with no
-        lane to resolve passes {!Tool_output.default_model_projection}. *)
+        ({!Keeper_tool_runtime.result_projection_for}). Output is returned
+        inline while the result that carries it is within this projection's
+        ceiling ({!Tool_bridge.fits_inline}) and is stored as blobs
+        otherwise, so the bound Execute keeps is the one the lane declares. A
+        caller with no lane to resolve passes
+        {!Tool_output.default_model_projection}. *)
   args:Yojson.Safe.t ->
   unit ->
   Keeper_tool_execution.t

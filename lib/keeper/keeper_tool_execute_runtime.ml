@@ -248,16 +248,17 @@ let composable_output_fields ~placement ~base_path ~stdout ~stderr ~output =
     | Stored -> false
   in
   if inline
-  then Ok [ "output", `String output ]
+  then Ok (Keeper_execute_output_files.Returned_inline, [ "output", `String output ])
   else
     try
       let store = Tool_blob_store.create ~base_path in
       let store_stream bytes = Tool_blob_store.put_durable store ~bytes ~mime:"text/plain" in
       Ok
-        (Keeper_execute_output_files.stream_artifact_fields
-           ~output:(store_stream output)
-           ~stdout:(store_stream stdout)
-           ~stderr:(store_stream stderr))
+        ( Keeper_execute_output_files.Stored_as_artifacts
+        , Keeper_execute_output_files.stream_artifact_fields
+            ~output:(store_stream output)
+            ~stdout:(store_stream stdout)
+            ~stderr:(store_stream stderr) )
     with
     | Eio.Cancel.Cancelled _ as exn -> raise exn
     | exn -> Error (Printexc.to_string exn)
@@ -1199,7 +1200,11 @@ let handle_tool_execute_typed
             let answer_with (publication : Keeper_execute_output_files.publication)
                   completeness_evidence =
               let output_fields = publication.Keeper_execute_output_files.fields in
-              let handler_stored = List.mem_assoc "output_artifact" output_fields in
+              let handler_stored =
+                match publication.placed with
+                | Keeper_execute_output_files.Stored_as_artifacts -> true
+                | Keeper_execute_output_files.Returned_inline -> false
+              in
               (* [execution_location] stays with the model: it is the
                  observation channel for where a call ran.
                  So do the
@@ -1262,8 +1267,9 @@ let handle_tool_execute_typed
                 composable_output_fields
                   ~placement
                   ~base_path:config.base_path ~stdout ~stderr ~output
-                |> Result.map (fun fields ->
+                |> Result.map (fun (placed, fields) ->
                   ( { Keeper_execute_output_files.fields
+                    ; placed
                     ; compared_output_bytes = String.length output
                     ; release_sources = (fun () -> ())
                     }
@@ -1280,8 +1286,13 @@ let handle_tool_execute_typed
                not: JSON escaping and the status fields are added around it. That
                result would be stored whole and reach the model as a preview of
                escaped JSON. The projection is asked about the result itself, and
-               the output is stored when the answer is no, so the model still
-               reads the exit status inline (#55433). *)
+               the output is stored when the answer is no, so the model reads the
+               exit status beside the output's reference (#55433).
+
+               The result with the output inline is already a complete answer.
+               When the output cannot be stored that answer is kept, and the
+               projection then stores it whole or reports the store's failure,
+               as it did before this question was asked. *)
             let output_fields =
               let answered (publication, completeness_evidence) =
                 publication, answer_with publication completeness_evidence
@@ -1291,14 +1302,22 @@ let handle_tool_execute_typed
                   (Keeper_execute_output_files.Inline_when_at_most inline_ceiling_bytes)
                 |> Result.map answered
               with
-              | Ok (publication, answer)
-                when (not
-                        (List.mem_assoc "output_artifact"
-                           publication.Keeper_execute_output_files.fields))
-                     && not
-                          (Tool_projection.fits_inline ~model_projection:result_projection
-                             answer) ->
-                publish_output Keeper_execute_output_files.Stored |> Result.map answered
+              | Ok
+                  ( { Keeper_execute_output_files.placed =
+                        Keeper_execute_output_files.Returned_inline
+                    ; _
+                    }
+                  , answer ) as inline
+                when not (Tool_bridge.fits_inline ~model_projection:result_projection answer) ->
+                (match publish_output Keeper_execute_output_files.Stored |> Result.map answered with
+                 | Ok _ as stored -> stored
+                 | Error detail ->
+                   Log.Keeper.warn
+                     ~keeper_name:meta.name
+                     "execute output could not be stored beside its result, which carries it \
+                      inline: %s"
+                     (Keeper_execute_output_files.error_to_string detail);
+                   inline)
               | (Ok _ | Error _) as chosen -> chosen
             in
             (match output_fields with

@@ -18,8 +18,13 @@ let capture_dirname = "execute_output"
 let capture_directory ~base_path =
   Filename.concat (Common.masc_dir_from_base_path ~base_path) capture_dirname
 
+type placed =
+  | Returned_inline
+  | Stored_as_artifacts
+
 type publication =
   { fields : (string * Yojson.Safe.t) list
+  ; placed : placed
   ; compared_output_bytes : int
   ; release_sources : unit -> unit
   }
@@ -148,21 +153,23 @@ let publish ~placement ~base_path ~redaction (files : Process_output_capture.fil
               if String_util.is_valid_utf8 bytes then Some bytes else None
             else None
         in
-        let fields =
+        let placed, fields =
           match inline_output with
-          | Some output -> [ "output", `String output ]
+          | Some output -> Returned_inline, [ "output", `String output ]
           | None ->
             let store = Tool_blob_store.create ~base_path in
             let store_file path =
               Tool_blob_store.put_file_durable_blocking store ~path ~mime:"text/plain"
             in
-            stream_artifact_fields
-              ~output:(store_file combined)
-              ~stdout:(store_file stdout)
-              ~stderr:(store_file stderr)
+            ( Stored_as_artifacts
+            , stream_artifact_fields
+                ~output:(store_file combined)
+                ~stdout:(store_file stdout)
+                ~stderr:(store_file stderr) )
         in
         Ok
           { fields = ("output_completeness", `String "complete") :: fields
+          ; placed
           ; compared_output_bytes = total_bytes
           ; release_sources = (fun () ->
               Eio_guard.run_in_systhread ~label:"keeper-execute-release-output"

@@ -7,8 +7,16 @@ val error_to_string : error -> string
 val error_code : error -> string
 val capture_directory : base_path:string -> string
 
+type placed =
+  | Returned_inline  (** [fields] holds the output itself, as [output]. *)
+  | Stored_as_artifacts
+  (** [fields] holds the references {!stream_artifact_fields} writes. *)
+
 type publication =
   { fields : (string * Yojson.Safe.t) list
+  ; placed : placed
+  (** Where this publication put the output. A caller reads it here and not
+      from the names in [fields]. *)
   ; compared_output_bytes : int
   ; release_sources : unit -> unit
   }
@@ -35,7 +43,14 @@ val publish :
     states, and the combined artifact is stdout followed by stderr. Sources
     are removed only when the caller invokes [release_sources] after its
     result manifest has been committed. Incomplete or failed
-    captures remain private and do not produce a complete-output claim. *)
+    captures remain private and do not produce a complete-output claim.
+
+    The same files may be published again with another [placement] before
+    any publication is released: a publication reads the sources and removes
+    only its own temporary files, and [Inline_when_at_most] stores nothing
+    when it returns the output inline. Each publication's [release_sources]
+    removes the same sources, so the caller invokes the one it keeps and
+    drops the other. *)
 
 val stream_artifact_fields :
   output:Tool_output.artifact_ref ->

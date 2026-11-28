@@ -444,8 +444,10 @@ needs a connection that stays open: a proxy that buffers responses can hold the
 rows back, and the server sends `x-accel-buffering: no` for the proxies that
 honour it. A pipeline with a file redirect, or another shape the dispatcher
 chains without streaming, shows its output when the command ends rather than
-line by line. A missing earlier sequence means the in-memory server history
-has already been truncated.
+line by line. The first snapshot carries at most the newest 2,000 rows and
+counts the older rows it leaves out in `lines_omitted`; the server still holds
+those rows. A sequence before `first_retained_seq` is gone from the in-memory
+server history.
 
 For a terminal tail of several Keepers, from a MASC checkout use:
 

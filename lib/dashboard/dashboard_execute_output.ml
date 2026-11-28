@@ -32,11 +32,10 @@ type snapshot = {
   task_id : string option;
   task_count : int;
   lines : output_line list;
+  lines_omitted : int;
   active_streams : active_stream list;
   first_retained_seq : int;
   last_seq : int;
-  stdout_since : string;
-  stderr_since : string;
   since_stdout : int;
   since_stderr : int;
   bytes_dropped_stdout : int;
@@ -106,6 +105,13 @@ let per_keeper_cap = 50
 let retained_stream_bytes = 256 * 1024
 let event_log_capacity = 5000
 let max_line_bytes = 4096
+
+(* The dashboard terminal (dashboard/src/workspaces/keepers/
+   keeper-sandbox-terminal.ts, [MAX_TERMINAL_LINES]) keeps 2,000 rows and
+   drops the rest of a longer first frame after parsing it. A full log of
+   [event_log_capacity] rows near [max_line_bytes] each made that frame about
+   20 MB (#46909); this many rows keep it to the part a viewer shows. *)
+let snapshot_line_limit = 2_000
 let first_seq = 1
 
 (* Stdlib.Mutex: producer callbacks can run outside an Eio context, and the
@@ -366,28 +372,36 @@ let closed_status_text status =
           ; "reason", `String "status_exceeds_display_limit"
           ])
 
-let retained_lines_locked ?(include_status = false) keeper =
+(* The newest [limit] rows of the log, oldest first, and how many older
+   retained rows were left out for [limit]. *)
+let retained_lines_locked ?(include_status = false) ~limit keeper =
   match Hashtbl.find_opt logs keeper with
-  | None -> []
+  | None -> [], 0
   | Some log ->
-    let rec collect seq acc =
-      if seq < oldest_retained_seq log
-      then acc
+    let oldest = oldest_retained_seq log in
+    let rec collect seq acc kept omitted =
+      if seq < oldest
+      then acc, omitted
       else (
+        let keep line =
+          if kept < limit
+          then collect (seq - 1) (line :: acc) (kept + 1) omitted
+          else collect (seq - 1) acc kept (omitted + 1)
+        in
         match log.slots.(seq mod event_log_capacity) with
-        | Line_event { line; _ } -> collect (seq - 1) (line :: acc)
-        | Task_closed_event { seq; stream_id; task_id; status; generated_at; _ }
+        | Line_event { line; _ } -> keep line
+        | Task_closed_event { stream_id; task_id; status; generated_at; _ }
           when include_status ->
           (* Project the retained close into the snapshot. A live subscriber
              already receives this same numbered close as an event; a new
              viewer must also see earlier unknown results after a later close. *)
           let text = closed_status_text status in
-          let line = { seq; stream_id; task_id; ts_ms = ts_ms_of_unix generated_at
-                     ; stream = "status"; text; ansi = false } in
-          collect (seq - 1) (line :: acc)
-        | Task_opened_event _ | Task_closed_event _ -> collect (seq - 1) acc)
+          keep { seq; stream_id; task_id; ts_ms = ts_ms_of_unix generated_at
+               ; stream = "status"; text; ansi = false }
+        | Task_opened_event _ | Task_closed_event _ ->
+          collect (seq - 1) acc kept omitted)
     in
-    collect (log.next_seq - 1) []
+    collect (log.next_seq - 1) [] 0 0
 
 (* A close is recorded before its completed-output entry, and failures may
    never have such an entry. The marker is the actual observed lifecycle
@@ -408,7 +422,7 @@ let last_transition_locked keeper =
 let snapshot_state keeper_name =
   let keeper = normalize_keeper keeper_name in
   if keeper = ""
-  then "", [], [], first_seq - 1, [], None, first_seq
+  then "", [], ([], 0), first_seq - 1, [], None, first_seq
   else
     with_lock (fun () ->
       let entries =
@@ -418,7 +432,9 @@ let snapshot_state keeper_name =
       in
       let first_retained_seq = match Hashtbl.find_opt logs keeper with
         | None -> first_seq | Some log -> oldest_retained_seq log in
-      keeper, entries, retained_lines_locked ~include_status:true keeper, last_logged_seq_locked keeper,
+      keeper, entries,
+      retained_lines_locked ~include_status:true ~limit:snapshot_line_limit keeper,
+      last_logged_seq_locked keeper,
       List.map (fun state -> state.active) (active_streams_locked keeper),
       last_transition_locked keeper, first_retained_seq)
 
@@ -430,16 +446,16 @@ let add_stream_chunks entries select =
     (fun entry -> Exec_buffer.add_string buffer (select entry))
     entries;
   (* Once older output is dropped, the ring's first byte can be the middle of
-     a character. Start at the next character and count the skipped bytes as
-     dropped, so [bytes_dropped] still covers everything not shown. *)
+     a character. The window starts at the next character, and the skipped
+     bytes count as dropped. *)
   let ring_tail = Exec_buffer.tail buffer in
   let tail = String_util.utf8_suffix ~max_bytes:retained_stream_bytes ring_tail in
-  ( tail
-  , Exec_buffer.total_bytes buffer
+  ( Exec_buffer.total_bytes buffer
   , Exec_buffer.bytes_dropped buffer + (String.length ring_tail - String.length tail) )
 
 let snapshot ~keeper_name =
-  let keeper, entries, lines, last_seq, active_streams, transition, first_retained_seq =
+  let keeper, entries, (lines, lines_omitted), last_seq, active_streams, transition,
+      first_retained_seq =
     snapshot_state keeper_name
   in
   let latest = match List.rev entries with [] -> None | entry :: _ -> Some entry in
@@ -456,10 +472,10 @@ let snapshot ~keeper_name =
   match lifecycle with
   | None -> None
   | Some (task_id, closed, status, generated_at) ->
-    let stdout_since, since_stdout, bytes_dropped_stdout =
+    let since_stdout, bytes_dropped_stdout =
       add_stream_chunks entries (fun entry -> entry.stdout)
     in
-    let stderr_since, since_stderr, bytes_dropped_stderr =
+    let since_stderr, bytes_dropped_stderr =
       add_stream_chunks entries (fun entry -> entry.stderr)
     in
     Some
@@ -467,11 +483,10 @@ let snapshot ~keeper_name =
       ; task_id
       ; task_count = List.length entries
       ; lines
+      ; lines_omitted
       ; active_streams
       ; first_retained_seq
       ; last_seq
-      ; stdout_since
-      ; stderr_since
       ; since_stdout
       ; since_stderr
       ; bytes_dropped_stdout
@@ -516,6 +531,7 @@ let snapshot_json (s : snapshot) =
     ; "task_id", option_json (fun value -> `String value) s.task_id
     ; "task_count", `Int s.task_count
     ; "lines", `List (List.map output_line_json s.lines)
+    ; "lines_omitted", `Int s.lines_omitted
     ; ( "active_streams"
       , `List (List.map (fun (stream : active_stream) ->
           `Assoc
@@ -536,8 +552,6 @@ let snapshot_json (s : snapshot) =
     ; "bytes_dropped_stdout", `Int s.bytes_dropped_stdout
     ; "bytes_dropped_stderr", `Int s.bytes_dropped_stderr
     ; "generated_at", `Float s.generated_at
-    ; "stdout_since", `String (String_util.sanitize_utf8 s.stdout_since)
-    ; "stderr_since", `String (String_util.sanitize_utf8 s.stderr_since)
     ]
 
 let no_task_json keeper_name =
@@ -652,8 +666,8 @@ let initial_event_json subscriber =
   match snapshot ~keeper_name:subscriber.keeper with
   | None -> no_task_json subscriber.keeper
   | Some s ->
-    (* The snapshot holds every retained line up to [s.last_seq], so the live
-       tail starts after it and no line reaches the viewer twice. *)
+    (* The snapshot holds the newest retained lines up to [s.last_seq], so the
+       live tail starts after it and no line reaches the viewer twice. *)
     with_lock (fun () -> subscriber.delivered_seq <- s.last_seq);
     snapshot_json s
 
@@ -700,7 +714,7 @@ let output_lines_for_testing ~keeper_name =
   let keeper = normalize_keeper keeper_name in
   if keeper = ""
   then []
-  else with_lock (fun () -> retained_lines_locked keeper)
+  else with_lock (fun () -> fst (retained_lines_locked ~limit:event_log_capacity keeper))
 
 let inject_for_testing
       ~keeper_name

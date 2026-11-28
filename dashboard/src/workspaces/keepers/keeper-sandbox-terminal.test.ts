@@ -216,4 +216,22 @@ describe('KeeperSandboxTerminal', () => {
     expect(state.headDroppedCount).toBe(15)
     expect(state.lines[0]!.text).toBe('line-16')
   })
+
+  it('counts the rows the server left out of the snapshot as head-dropped', () => {
+    const lines = Array.from({ length: 3 }, (_, idx) => ({
+      seq: 3001 + idx,
+      stream: 'stdout',
+      text: `line-${3001 + idx}`,
+    }))
+    const state = reduceTerminalEvent(createInitialTerminalState(), {
+      type: 'snapshot',
+      lines,
+      lines_omitted: 3000,
+      first_retained_seq: 1,
+      last_seq: 3003,
+    })
+    expect(state.lines).toHaveLength(3)
+    expect(state.headDroppedCount).toBe(3000)
+    expect(state.gap.firstRetainedSeq).toBe(1)
+  })
 })

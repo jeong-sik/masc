@@ -31,13 +31,18 @@ type snapshot = {
   task_id : string option;
   task_count : int;
   lines : output_line list;
+      (** At most the newest {!snapshot_line_limit} rows the log retains,
+          oldest first. *)
+  lines_omitted : int;
+      (** How many older rows the log still retains but [lines] leaves out
+          for {!snapshot_line_limit}. *)
   active_streams : active_stream list;
   first_retained_seq : int;
+      (** Number of the oldest event the log still retains. Events before it
+          are gone from the server. *)
   last_seq : int;
       (** Newest log number at the time [lines] was read; [0] when the
           keeper has logged nothing. *)
-  stdout_since : string;
-  stderr_since : string;
   since_stdout : int;
   since_stderr : int;
   bytes_dropped_stdout : int;
@@ -55,6 +60,11 @@ val event_log_capacity : int
     open/close markers) the log retains. A subscriber more than this many
     events behind receives one [gap] event naming the numbers it missed,
     then continues from the oldest retained event. *)
+
+val snapshot_line_limit : int
+(** How many of the newest retained rows a snapshot carries. The dashboard
+    terminal keeps this many rows, so a longer first frame would be parsed
+    only to be dropped. The snapshot counts the rest in [lines_omitted]. *)
 
 val record_completed :
   keeper_name:string ->
@@ -100,10 +110,11 @@ val record_stream_end :
 (** Log a [task_closed] marker and release the open stream binding. *)
 
 val snapshot : keeper_name:string -> snapshot option
-(** Retained Execute lines, retained close statuses, and the latest observed stream state. A running
-    invocation is visible even before any Execute has completed. The
-    [stdout_since]/[stderr_since] byte fields summarize completed captures;
-    [lines] also includes output from the currently open stream. *)
+(** The newest retained Execute lines and close statuses, and the latest
+    observed stream state. A running invocation is visible even before any
+    Execute has completed. The [since_*] and [bytes_dropped_*] byte counters
+    summarize completed captures; [lines] also includes output from the
+    currently open stream. *)
 
 val event_json : keeper_name:string -> Yojson.Safe.t
 (** Build the SSE payload. Returns a [no_task] event when the keeper has no

@@ -7,7 +7,9 @@
  *   preset first.
  * - Saving snapshots the live state under a new name (`/create`). When the
  *   name is taken the server answers 409, and the operator chooses to
- *   replace that preset (`POST /api/v1/presets`) or not.
+ *   replace that preset (`POST /api/v1/presets`) or not. The name and the
+ *   description that met the 409 are kept with the other write outcomes, so
+ *   the choice is still there after leaving the Presets view.
  * - A restore changes prompt overrides and the `_autosave` preset, so both
  *   the preset list and the prompt catalog are read again afterwards.
  * - Transport decodes only a 2xx answer, so an answer that fails to decode is
@@ -88,17 +90,23 @@ function failureOutcome(kind: ApiErrorKind): 'applied' | 'refused' | 'unknown' {
 
 type PresetWrite = { readonly target: string; readonly action: '저장' | '복원' | '삭제' }
 
+/** A save the server refused because the name exists: what to send if the operator replaces it. */
+type TakenName = { readonly name: string; readonly description: string }
+
 type WriteFeedback = {
   readonly epoch: number
   readonly active: PresetWrite | null
   readonly refusal: string | null
+  readonly taken: TakenName | null
   readonly report: RestoreReport | null
 }
 
-const writeFeedback = signal<WriteFeedback>({ epoch: sessionEpoch.peek(), active: null, refusal: null, report: null })
+const idleFeedback = (epoch: number): WriteFeedback => ({ epoch, active: null, refusal: null, taken: null, report: null })
+
+const writeFeedback = signal<WriteFeedback>(idleFeedback(sessionEpoch.peek()))
 sessionEpoch.subscribe(epoch => {
   if (writeFeedback.peek().epoch !== epoch) {
-    writeFeedback.value = { epoch, active: null, refusal: null, report: null }
+    writeFeedback.value = idleFeedback(epoch)
   }
 })
 
@@ -106,13 +114,18 @@ sessionEpoch.subscribe(epoch => {
 function beginWrite(epoch: number, active: PresetWrite): boolean {
   const before = writeFeedback.peek()
   if (epoch !== sessionEpoch.peek() || (before.epoch === epoch && before.active !== null)) return false
-  writeFeedback.value = { epoch, active, refusal: null, report: before.epoch === epoch ? before.report : null }
+  writeFeedback.value = { epoch, active, refusal: null, taken: null, report: before.epoch === epoch ? before.report : null }
   return true
 }
 
-function finishWrite(epoch: number, result: Partial<Pick<WriteFeedback, 'refusal' | 'report'>> = {}) {
+function finishWrite(epoch: number, result: Partial<Pick<WriteFeedback, 'refusal' | 'taken' | 'report'>> = {}) {
   if (epoch !== sessionEpoch.peek()) return
   writeFeedback.value = { ...writeFeedback.peek(), ...result, active: null }
+}
+
+function dismissTaken(epoch: number) {
+  const current = writeFeedback.peek()
+  if (current.epoch === epoch && current.taken !== null) writeFeedback.value = { ...current, taken: null }
 }
 
 export function PresetFeedback() {
@@ -157,10 +170,12 @@ export function PresetsPanel({ canEdit, catalog, onPromptsChanged }: PresetsPane
   const [selected, setSelected] = useState<string | null>(null)
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
-  const [taken, setTaken] = useState<string | null>(null)
   const [unreadableDelete, setUnreadableDelete] = useState<string | null>(null)
   const feedback = writeFeedback.value
   const busy = feedback.epoch === epoch && feedback.active !== null
+  // Kept outside this component: the answer can arrive after the operator
+  // left the Presets view, and the form's own fields are gone by then.
+  const taken = feedback.epoch === epoch ? feedback.taken : null
   // The selection when an answer arrives, not when the request left.
   const selectedRef = useRef<string | null>(selected)
   selectedRef.current = selected
@@ -205,28 +220,26 @@ export function PresetsPanel({ canEdit, catalog, onPromptsChanged }: PresetsPane
     pushShellToast(message, out.kind === 'refused' ? 'error' : 'warning')
   }
 
-  const save = async (replace: boolean) => {
-    if (!beginWrite(epoch, { target: trimmed, action: '저장' })) return
-    const body = { name: trimmed, description }
-    const res = await apiMutate<PresetSaved>('POST', replace ? '/api/v1/presets' : '/api/v1/presets/create', body, { decode: decodePresetSaved })
+  const save = async (target: TakenName, replace: boolean) => {
+    if (!beginWrite(epoch, { target: target.name, action: '저장' })) return
+    const res = await apiMutate<PresetSaved>('POST', replace ? '/api/v1/presets' : '/api/v1/presets/create', target, { decode: decodePresetSaved })
     if (epoch !== sessionEpoch.peek()) return
     if (!res.ok && res.error.kind === 'conflict_cas') {
-      finishWrite(epoch)
-      setTaken(trimmed)
+      finishWrite(epoch, { taken: target })
+      pushShellToast(`${target.name} 프리셋이 이미 있어서 저장하지 않았어요. 「프리셋」에서 덮어쓸지 골라 주세요.`, 'warning')
       return
     }
-    const out = settle(res, `${trimmed} 저장`, false)
+    const out = settle(res, `${target.name} 저장`, false)
     if (out.kind === 'refused' || out.kind === 'unknown') {
-      refuse(trimmed, '저장', out)
+      refuse(target.name, '저장', out)
       return
     }
     finishWrite(epoch)
     if (out.kind === 'done') pushShellToast(`${out.value.preset.name} 프리셋에 지금 상태를 ${replace ? '덮어썼어요' : '저장했어요'}.`, 'success')
-    setTaken(null)
     setName('')
     setDescription('')
-    setSelected(trimmed)
-    void loadPresetShow(trimmed, 'manual')
+    setSelected(target.name)
+    void loadPresetShow(target.name, 'manual')
   }
 
   const restore = async (target: string) => {
@@ -274,11 +287,11 @@ export function PresetsPanel({ canEdit, catalog, onPromptsChanged }: PresetsPane
         <form
           data-testid="preset-save-form"
           style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-1)' }}
-          onSubmit=${(e: Event) => { e.preventDefault(); if (nameOk) void save(false) }}
+          onSubmit=${(e: Event) => { e.preventDefault(); if (nameOk) void save({ name: trimmed, description }, false) }}
         >
           <div style=${{ display: 'flex', gap: 'var(--sp-1)', flexWrap: 'wrap' }}>
             <input aria-label="새 프리셋 이름" placeholder="이름 (A-Z a-z 0-9 . _ -)" value=${name} disabled=${busy}
-              onInput=${(e: Event) => { setName((e.currentTarget as HTMLInputElement).value); setTaken(null) }}
+              onInput=${(e: Event) => { setName((e.currentTarget as HTMLInputElement).value); dismissTaken(epoch) }}
               style=${{ ...fieldStyle, flex: '1 1 8rem' }} />
             <input aria-label="새 프리셋 설명" placeholder="설명 (선택)" value=${description} disabled=${busy}
               onInput=${(e: Event) => setDescription((e.currentTarget as HTMLInputElement).value)}
@@ -288,10 +301,10 @@ export function PresetsPanel({ canEdit, catalog, onPromptsChanged }: PresetsPane
           ${trimmed !== '' && !nameOk && html`<div style=${{ fontSize: 'var(--fs-11)', color: 'var(--warn-fg)' }}>이름에는 영문, 숫자, 점, 밑줄, 하이픈만 쓸 수 있어요.</div>`}
           ${taken !== null && html`
             <div class="ap-inline-panel ap-inline-panel--err" role="alert" data-testid="preset-taken">
-              <span style=${{ fontSize: 'var(--fs-12)', color: 'var(--err-fg)' }}><span class="mono">${taken}</span> 프리셋이 이미 있어요. 지금 상태로 덮어쓸까요?</span>
+              <span style=${{ fontSize: 'var(--fs-12)', color: 'var(--err-fg)' }}><span class="mono">${taken.name}</span> 프리셋이 이미 있어요. 지금 상태로 덮어쓸까요?</span>
               <div style=${{ display: 'flex', gap: 'var(--sp-1)' }}>
-                <button type="button" class="btn-primary ap-danger-solid" data-testid="preset-replace" disabled=${busy} onClick=${() => void save(true)}>덮어쓰기</button>
-                <button type="button" class="btn-ghost" disabled=${busy} onClick=${() => setTaken(null)}>취소</button>
+                <button type="button" class="btn-primary ap-danger-solid" data-testid="preset-replace" disabled=${busy} onClick=${() => void save(taken, true)}>덮어쓰기</button>
+                <button type="button" class="btn-ghost" disabled=${busy} onClick=${() => dismissTaken(epoch)}>취소</button>
               </div>
             </div>
           `}

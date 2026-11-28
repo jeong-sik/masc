@@ -182,6 +182,30 @@ describe('Runtime → Prompts → 프리셋', () => {
     await vi.waitFor(() => expect(server.reads(SHOW_DEFAULT)).toBeGreaterThan(showReads))
   })
 
+  it('keeps a taken name to replace after leaving the Presets view before the 409 arrives', async () => {
+    let release: (r: Response) => void = () => {}
+    const server = serve((url) => url === '/api/v1/presets/create'
+      ? new Promise<Response>(resolve => { release = resolve })
+      : jsonResponse({ ok: true, preset: manifest('default') }))
+    mount()
+    await vi.waitFor(() => expect(container.querySelector('[data-testid="preset-save-form"]')).not.toBeNull())
+    await typeInto('새 프리셋 이름', 'default')
+    await typeInto('새 프리셋 설명', 'night shift')
+    click('[data-testid="preset-save"]')
+    await vi.waitFor(() => expect(server.posts).toHaveLength(1))
+    click('[data-section="prompts"]')
+    await flushUi()
+    release(jsonResponse({ ok: false, error: 'preset default already exists' }, 409))
+    await vi.waitFor(() => expect(shellToasts.value.at(-1)?.tone).toBe('warning'))
+    expect(shellToasts.value.at(-1)?.message).toContain('default')
+    expect(container.querySelector('[data-testid="preset-write-pending"]')).toBeNull()
+    click('[data-section="presets"]')
+    await vi.waitFor(() => expect(container.querySelector('[data-testid="preset-taken"]')?.textContent).toContain('default'))
+    click('[data-testid="preset-replace"]')
+    await vi.waitFor(() => expect(server.posts).toHaveLength(2))
+    expect(server.posts[1]).toEqual({ url: '/api/v1/presets', body: { name: 'default', description: 'night shift' } })
+  })
+
   it('reads the lists again when a save answers 2xx without the preset', async () => {
     const server = serve(() => jsonResponse({ ok: true }))
     mount()

@@ -3859,6 +3859,125 @@ let test_wave2_keeper_context_tool_calls_and_schedules () =
             (contains_sub ~needle:"assembly order" txt
              || contains_sub ~needle:"조립 순서" txt))
     Keeper_context_store.all_context_subtabs;
+  (* Prompt Blocks: the fixture's digests are not the captured texts' digests,
+     so a capture of this very turn reads as the server's copy and a capture of
+     another turn reads as different. The scroll end the store layout allows
+     shows the text's last line. *)
+  let keeper = "e-masc-the-leader" in
+  let long_text =
+    String.concat "\n\n"
+      (List.init 100 (fun i -> Printf.sprintf "line-%03d" (i + 1)))
+  in
+  let capture_of ~trace_id ~absolute_turn =
+    let json =
+      `Assoc
+        [
+          ("keeper", `String keeper);
+          ("captured_at", `Float 1.0);
+          ("trace_id", `String trace_id);
+          ("absolute_turn", `Int absolute_turn);
+          ( "blocks",
+            `List
+              [
+                `Assoc
+                  [
+                    ("id", `String "keeper_instructions");
+                    ("bytes", `Int (String.length long_text));
+                    ("text", `String long_text);
+                  ];
+              ] );
+        ]
+    in
+    match Wire_keeper_context.decode_last_prompt_capture json with
+    | Ok c -> c
+    | Error e -> Alcotest.fail ("decode_last_prompt_capture failed: " ^ e)
+  in
+  let blocks_model ~auth_session capture =
+    {
+      m_ctx with
+      auth_session;
+      keeper_context =
+        m_ctx.keeper_context
+        |> Keeper_context_store.set_subtab ~keeper
+             Keeper_context_store.Ctx_prompt_blocks
+        |> Keeper_context_store.apply_last_prompt ~observed_at:t0 ~keeper capture;
+    }
+  in
+  let blocks_rect = Rect.make ~x:0 ~y:0 ~w:140 ~h:40 in
+  let draw_blocks (m : Model.t) =
+    let st = Keeper_context_store.get_keeper ~keeper m.keeper_context in
+    let grid = Cell_grid.create ~cols:140 ~rows:40 in
+    Keeper_prompt_blocks_view.draw grid ~rect:blocks_rect
+      ~theme:(Theme.of_preset m.theme_preset) ~model:m ~st;
+    grid_all_text grid
+  in
+  let m_same =
+    blocks_model ~auth_session:m_ctx.auth_session
+      (capture_of ~trace_id:"tr-900" ~absolute_turn:90)
+  in
+  let txt_same = draw_blocks m_same in
+  Alcotest.(check bool) "the capture's own turn shows the server's copy" true
+    (contains_sub ~needle:"The server's copy" txt_same
+     && contains_sub ~needle:"line-001" txt_same);
+  let max_scroll =
+    let st = Keeper_context_store.get_keeper ~keeper m_same.keeper_context in
+    let block_text =
+      match
+        ( Keeper_context_store.selected_turn_entry st,
+          Keeper_context_store.selected_prompt_block st,
+          Observed.to_option st.last_prompt )
+      with
+      | Some entry, Some block, Some capture ->
+          Keeper_context_store.block_text_in_capture capture entry.record block
+      | Some _, Some _, None | Some _, None, _ | None, _, _ ->
+          Alcotest.fail "the fixture selects a turn, a block and a capture"
+    in
+    let content =
+      Card.pad_inner
+        ~pad_x:(Ops_common.pad_x_for ~model:m_same blocks_rect)
+        blocks_rect
+    in
+    let layout = Keeper_context_store.prompt_blocks_layout content in
+    let text_r =
+      Keeper_context_store.prompt_block_text_rect
+        layout.Keeper_context_store.pb_text block_text
+    in
+    let lines =
+      Markdown.render_lines
+        ~theme:(Theme.of_preset m_same.theme_preset)
+        ~width:text_r.w long_text
+    in
+    Int.max 0 (List.length lines - text_r.h)
+  in
+  Alcotest.(check bool) "the text is longer than the pane" true (max_scroll > 0);
+  let m_end =
+    {
+      m_same with
+      keeper_context =
+        Keeper_context_store.move_scroll ~keeper ~max_scroll ~delta:100_000
+          m_same.keeper_context;
+    }
+  in
+  let txt_end = draw_blocks m_end in
+  Alcotest.(check bool) "the scroll end shows the last line" true
+    (contains_sub ~needle:"line-100" txt_end
+     && not (contains_sub ~needle:"line-001" txt_end));
+  let txt_other =
+    draw_blocks
+      (blocks_model ~auth_session:m_ctx.auth_session
+         (capture_of ~trace_id:"tr-899" ~absolute_turn:89))
+  in
+  Alcotest.(check bool) "a capture of another turn reads as different" true
+    (contains_sub ~needle:"This turn's text is not kept" txt_other
+     && not (contains_sub ~needle:"line-001" txt_other));
+  let txt_worker =
+    draw_blocks
+      (blocks_model ~auth_session:Rbac.single_user_local_worker
+         (capture_of ~trace_id:"tr-900" ~absolute_turn:90))
+  in
+  Alcotest.(check bool) "a session without admin reads no block text" true
+    (contains_sub ~needle:"needs an admin session" txt_worker
+     && not (contains_sub ~needle:"line-001" txt_worker));
   (* 401/403 permission notice on Exact_input renders gracefully without crashing *)
   let m_denied =
     {

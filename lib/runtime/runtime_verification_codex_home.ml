@@ -24,8 +24,11 @@ let project_config ?(disabled_mcp_servers = []) body =
         Otoml.TomlTable ["enabled", Otoml.TomlBoolean false]) disabled_mcp_servers);
       credentials_store_key, Otoml.TomlString credentials_store_file;
       "web_search", Otoml.TomlString "disabled";
+      (* [apps] is not listed: Runtime_codex_app_server.client_argv turns it
+         off for every Codex client, and [cli_overrides] repeats each key
+         listed here as another -c. *)
       "features", Otoml.TomlTable (List.map (fun key -> key, Otoml.TomlBoolean false)
-        [ "apps"; "plugins"; "hooks"; "enable_mcp_apps"; "skill_search";
+        [ "plugins"; "hooks"; "enable_mcp_apps"; "skill_search";
           "skill_mcp_dependency_install"; "multi_agent"; "multi_agent_v2";
           "browser_use"; "browser_use_external"; "browser_use_full_cdp_access";
           "computer_use"; "in_app_browser"; "shell_tool"; "unified_exec" ])

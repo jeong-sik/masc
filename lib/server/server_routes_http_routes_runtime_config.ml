@@ -1,10 +1,10 @@
 (* server_routes_http_routes_runtime_config — HTTP routes that edit runtime.toml
    from the dashboard.
 
-   The raw source (read, preview, save), the fusion table, memory recall,
-   routing, Keeper assignment, the model setup resume, and the [tui]
-   preferences. Server_routes_http_routes_dashboard.add_routes registers this
-   group in the middle of its own pipeline. *)
+   The raw source (read, preview, save), the fusion table, routing, Keeper
+   assignment, the model setup resume, and the [tui] preferences.
+   Server_routes_http_routes_dashboard.add_routes registers this group in the
+   middle of its own pipeline. *)
 
 open Server_runtime_config_editor
 

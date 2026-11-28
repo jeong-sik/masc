@@ -622,19 +622,6 @@ type typesafeai_destination =
   }
 [@@deriving show, eq]
 
-(** Which keepers memory recall judges. *)
-type memory_recall_scope =
-  | All_keepers  (** every keeper that [excluded_keepers] does not name *)
-  | Listed_keepers of string * string list  (** only these keepers, at least one *)
-[@@deriving show, eq]
-
-(** [\[typesafeai\] memory_recall], with the scope it needs. Switching recall
-    on names the keepers it reaches: there is no on without a scope. *)
-type memory_recall =
-  | Memory_recall_off
-  | Memory_recall_on of memory_recall_scope
-[@@deriving show, eq]
-
 (** [\[typesafeai\]] -- the TypeSafe AI (System One Jev) lane. Keys stay in
     the environment; each destination names the variable holding its own
     ([api_key_env]). Everything else about the lane is here. [lane_enabled]
@@ -645,9 +632,8 @@ type memory_recall =
     [board_attention] gate asks the vendor (the Board attention judgment,
     {!Keeper_board_attention_exact_flow}, which sends the post and the
     keeper's context). Context
-    preservation, Skill applicability, host shared-memory selection and
-    memory recall each require independent opt-in. Memory recall also needs
-    its scope. All reach the
+    preservation, Skill applicability and host shared-memory selection each
+    require independent opt-in. All reach the
     same destinations, so one [excluded_keepers] applies to every review: a
     keeper named there is never asked about, whichever gate asks. *)
 type typesafeai =
@@ -664,9 +650,6 @@ type typesafeai =
   ; workspace_memory_selection_enabled : bool
       (** Independent opt-in to send current input/task context and shared-memory
           interpretations/source details for host retrieval. Defaults to false. *)
-  ; memory_recall : memory_recall
-      (** Opt-in to send a keeper's stored facts and the turn's input for the
-          recall judgment. Defaults to off. *)
   ; excluded_keepers : string list
   }
 [@@deriving show, eq]
@@ -681,8 +664,7 @@ let typesafe_destination =
 ;;
 
 (* What an absent [typesafeai] table means: the lane on when a key is set,
-   the vendor's own server alone, Board attention on, memory recall off,
-   nobody excluded.
+   the vendor's own server alone, Board attention on, nobody excluded.
 
    The Board attention confidence floor follows TypeSafe's confidence-gated
    routing (https://docs.typesafe.ai/confidence.md: act when confidence is
@@ -700,7 +682,6 @@ let default_typesafeai =
   ; context_review = false
   ; skill_applicability = false
   ; workspace_memory_selection_enabled = false
-  ; memory_recall = Memory_recall_off
   ; excluded_keepers = []
   }
 ;;

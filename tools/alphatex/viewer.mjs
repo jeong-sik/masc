@@ -23,6 +23,7 @@ const { values, positionals } = parseArgs({
     check: { type: 'boolean' },
     render: { type: 'string' },
     audio: { type: 'string' },
+    'export-midi': { type: 'string' },
     record: { type: 'boolean' },
     devices: { type: 'boolean' },
     session: { type: 'string' },
@@ -59,7 +60,7 @@ if (values.help) {
     + '  --record opens audio/MIDI input selection; r begins recording, s saves WAV and UMP.\n'
     + '  --session directory opens a saved waveform/MIDI timeline; --session-root sets the take folder.\n'
     + '  --devices lists CoreAudio devices and CoreMIDI inputs/outputs on macOS.\n'
-    + '  --check validates; --render output.png and --audio output.wav export using alphaTab 1.8.4.')
+    + '  --check validates; --render output.png, --audio output.wav and --export-midi output.mid export using alphaTab 1.8.4.')
   process.exit(0)
 }
 
@@ -101,10 +102,21 @@ try {
   }
   const index = Number(values.index) - 1
   if (!Number.isInteger(index) || index < 0 || index >= sources.length) throw new Error('score index is outside the snapshot')
-  if (values.check || values.render || values.audio) {
-    const { readScore, renderScore, engineVersion } = await import('./engine.mjs')
-    const { score } = readScore(sources[index])
+  if (values.check || values.render || values.audio || values['export-midi']) {
+    const { readScore, renderScore, midiForScore, engineVersion } = await import('./engine.mjs')
+    let score
+    try {
+      ({ score } = readScore(sources[index]))
+    } catch (error) {
+      // sysexits EX_DATAERR: the alphaTex itself does not parse, so a caller
+      // can tell a score to fix from a tool that failed.
+      throw Object.assign(error, { exitCode: 65 })
+    }
     if (values.render) writeFileSync(values.render, renderScore(sources[index]).pages[0].png, { flag: 'wx', mode: 0o600 })
+    // smf1Mode makes the events ones a Standard MIDI File can hold: without it
+    // alphaTab emits MIDI 2.0 per-note bends and toBinary refuses the score.
+    // The file is SMF format 0, one track with a channel per instrument.
+    if (values['export-midi']) writeFileSync(values['export-midi'], midiForScore(sources[index], { smf1Mode: true }).midi.toBinary(), { flag: 'wx', mode: 0o600 })
     if (values.audio) {
       const { exportWave } = await import('./audio.mjs')
       exportWave(sources[index], values.audio, { soundfontPath: values.soundfont })
@@ -116,7 +128,7 @@ try {
   }
 } catch (error) {
   console.error(`alphaTex: ${errorDetail(error).split('\n').map(safeText).join('\n')}`)
-  process.exitCode = 1
+  process.exitCode = error?.exitCode ?? 1
 }
 
 async function viewScores(sources, initialIndex) {

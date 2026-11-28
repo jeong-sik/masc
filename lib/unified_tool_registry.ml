@@ -122,7 +122,7 @@ let tag_of_runtime_handler
   | Tool_masc_file_dispatch
   | Tool_keeper_job_dispatch
   | Tool_lane_addon _
-  | Tool_analyze_image | Tool_read_image | Tool_generate_image -> Mod_external
+  | Tool_analyze_image | Tool_read_image | Tool_generate_image | Tool_music_render -> Mod_external
 
 (** Resolve only exact schema or descriptor membership. *)
 let tag_of_name name : TD.module_tag option =
@@ -206,6 +206,7 @@ let runtime_schema_for_descriptor
     | Keeper_tool_descriptor.Tool_masc_wiki_dispatch
     | Keeper_tool_descriptor.Tool_masc_local_runtime_dispatch
     | Keeper_tool_descriptor.Tool_analyze_image | Keeper_tool_descriptor.Tool_read_image | Keeper_tool_descriptor.Tool_generate_image
+    | Keeper_tool_descriptor.Tool_music_render
     | Keeper_tool_descriptor.Tool_lane_addon _ -> Config.raw_all_tool_schemas
   in
   List.find_opt

@@ -41,6 +41,7 @@ let expected =
   ; "keeper_analyze_image"
   ; "keeper_image_read"
   ; "keeper_generate_image"
+  ; "keeper_music_render"
   ]
 ;;
 
@@ -135,6 +136,24 @@ let test_analyze_image_enum_matches_its_owner () =
     declared_types
 ;;
 
+(* keeper_music_render's outputs enum is the names its handler reads. *)
+let test_music_render_outputs_match_their_owner () =
+  let declared_outputs =
+    match declared "keeper_music_render" ~field:"outputs" ~key:"items" with
+    | Some (`Assoc items) ->
+      (match List.assoc_opt "enum" items with
+       | Some (`List names) ->
+         List.filter_map (function `String name -> Some name | _ -> None) names
+       | _ -> [])
+    | _ -> []
+  in
+  check
+    (list string)
+    "keeper_music_render declares Keeper_music_render.all_outputs"
+    (List.map Masc.Keeper_music_render.output_name Masc.Keeper_music_render.all_outputs)
+    declared_outputs
+;;
+
 let () =
   run
     "keeper_runtime_schemas_toml_parity"
@@ -154,6 +173,10 @@ let () =
             "keeper_analyze_image enum matches its owner"
             `Quick
             test_analyze_image_enum_matches_its_owner
+        ; test_case
+            "keeper_music_render outputs match their owner"
+            `Quick
+            test_music_render_outputs_match_their_owner
         ] )
     ]
 ;;

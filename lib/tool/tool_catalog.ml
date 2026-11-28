@@ -550,6 +550,9 @@ let explicit_metadata : (string * metadata) list =
        writes durable blobs into [Attachment_store], so it requires write
        authority. *)
     ("keeper_generate_image", keeper_shard_write);
+    (* [keeper_music_render] stores the files it renders as the Keeper's
+       attachments, so it requires write authority. *)
+    ("keeper_music_render", keeper_shard_write);
     (* The browser host tools are the browser surface for MCP callers too;
        a browser Add-on's own export is called only by this host. *)
     ("masc_browser_tabs", public_keeper_shard_read);

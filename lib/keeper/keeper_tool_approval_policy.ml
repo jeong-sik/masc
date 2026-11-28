@@ -79,6 +79,7 @@ let producer_authorizes descriptor =
   | Descriptor.Tool_analyze_image
   | Descriptor.Tool_read_image
   | Descriptor.Tool_generate_image
+  | Descriptor.Tool_music_render
   | Descriptor.Tool_lane_addon _ -> false
 ;;
 

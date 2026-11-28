@@ -932,7 +932,8 @@ let test_markdown_embeds () =
                  Cell_grid.rows =
                    {
                      Cell_grid.source =
-                       ( Cell_grid.Mermaid _ | Cell_grid.Embedded_png _ | Cell_grid.Retained_png _
+                       ( Cell_grid.Mermaid _ | Cell_grid.Pele_scene _ | Cell_grid.Embedded_png _
+                       | Cell_grid.Retained_png _
                        | Cell_grid.Retained_image { mime_type = Some _; _ } );
                      _;
                    };

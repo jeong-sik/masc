@@ -27,9 +27,9 @@ Dashboard의 **New TOML / Edit TOML**과 Keeper의 선언 편집 도구도 같�
 1. 기존 MSX Lane에서 관측할 머신을 준비한다. 이 선언은 머신을 생성하거나 게임 입력을 보내지 않는다.
 2. [MSX 패키지 manifest](../../addons/msx-observer/lane.toml)가 가리키는 worker 이미지를 준비한다.
    이미지 구성은 [패키지 안내](../../addons/README.md)를 따른다. 설치 선언이 이미지를 빌드하지 않는다.
-3. 예제를 활성 config root의 `lane-addons/` 바로 아래에 복사하고, `manifest_path`를 실제 패키지
-   manifest의 절대 경로나 **설치한 선언 파일 기준** 상대 경로로 바꾼다. 예제의 상대 경로는 저장소 내
-   예제 위치에서 유효하므로 복사 후 그대로 사용하지 않는다.
+3. 패키지를 서버의 workspace(`<base-path>`) 안에 둔다. 예제를 활성 config root의 `lane-addons/`
+   바로 아래에 복사하고, `manifest_path`를 패키지 manifest의 절대 경로나 **설치한 선언 파일 기준**
+   상대 경로로 바꾼다. 예제의 상대 경로는 저장소의 원래 위치에서만 유효하다.
 4. 다른 설치와 겹치지 않는 `id`와 관측 묶음의 `run_id`를 정하고 저장한다. Dashboard를 새로 읽어
    설정 적용 상태와 인스턴스의 관측 상태를 각각 확인한다.
 
@@ -81,6 +81,9 @@ Dashboard의 **New TOML / Edit TOML**과 Keeper의 선언 편집 도구도 같�
 
 `manifest_path`와 `binding.sources`의 `snapshot_file.path`는 선언 파일이 있는 디렉터리를 기준으로
 해석한다. 그 밖의 package-specific binding 문자열을 파일 경로로 추측하거나 확장하지 않는다.
+`operator_authority = true`가 없는 선언의 `manifest_path`는 심볼릭 링크를 해석한 실제 경로도
+workspace(`<base-path>`) 안에 있어야 한다. workspace 밖의 패키지가 필요한 경우 운영자가 대상
+manifest를 확인한 뒤 설치 선언 최상위에 `operator_authority = true`를 추가한다.
 현재 source 종류는 `snapshot_file`, `msx_capture`, `browser_document`, `lane_output`, `fusion_run`이다.
 `fusion_run`은 정확한 Fusion run ID의 현재 상태와 Board 근거를 호스트에서 캡처한다.
 Fusion 상태 갱신 시 해당 run을 연결한 설치만 다시 관측한다. 모델 계산·인증·기존 전달 수명은 바꾸지 않는다.

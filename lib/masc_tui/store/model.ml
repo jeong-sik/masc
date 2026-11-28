@@ -1543,6 +1543,16 @@ let dive_work_json_pane_index m =
               else Some (if task_dive_has_two_main_panes m tk.id then 2 else 1)
         else None
 
+let layout_breakpoint m =
+  match m.breakpoint with
+  | Wide -> Masc_tui_ui.Layout.Wide
+  | Standard -> Masc_tui_ui.Layout.Standard
+  | Compact -> Masc_tui_ui.Layout.Compact
+  | Micro -> Masc_tui_ui.Layout.Micro
+
+let card_pad_x m ~width =
+  Masc_tui_ui.Layout.card_pad_x_for_width (layout_breakpoint m) width
+
 let keeper_preview_has_inner_split m =
   match selected_keeper_name m with
   | None -> false

@@ -172,9 +172,16 @@ let draw_text_pane grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
               (Ops_common.put_line ~clip:body_r grid ~x:body_r.x ~y:body_r.y
                  ~max_w:body_r.w
                  ~style:(Typography.whisper ~bg theme)
-                 (Ops_common.say model
-                    ~ko:"서버 사본 · sha256 다름 · 비밀값과 연결 앱 개인 기억을 뺐어요"
-                    ~en:"The server's copy · sha256 differs · secrets and connector personal memory removed"));
+                 (if
+                    Prompt_block_id.equal block.block
+                      Prompt_block_id.Dynamic_context
+                  then
+                    Ops_common.say model
+                      ~ko:"서버 사본 · sha256 다름 · 비밀값과 연결 앱 개인 기억을 뺐어요"
+                      ~en:"The server's copy · sha256 differs · secrets and connector personal memory removed"
+                  else
+                    Ops_common.say model ~ko:"서버 사본 · sha256 다름 · 비밀값을 가렸어요"
+                      ~en:"The server's copy · sha256 differs · secrets redacted"));
             draw_text text_r text
         | Keeper_context_store.Block_text_differs ->
             say_lines

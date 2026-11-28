@@ -542,6 +542,13 @@ val focusable_pane_count : t -> int
     currently rendered for [m]'s active view, sub-tab, breakpoint, zoom, and
     data state. Returns [1] when pane cycling is a no-op (never ghost panes). *)
 
+val layout_breakpoint : t -> Masc_tui_ui.Layout.breakpoint
+(** {!breakpoint} as the UI layout reads it. *)
+
+val card_pad_x : t -> width:int -> int
+(** The horizontal padding a card [width] cells wide gets. Views pad with it,
+    and key handling that bounds a scroll inside a card pads with it too. *)
+
 val keeper_preview_has_inner_split : t -> bool
 val has_active_memory_reading : t -> bool
 

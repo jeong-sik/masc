@@ -12835,7 +12835,7 @@ let apply_move (m : Model.t) dir =
               let ch = max 1 (raw_ch - trace_hdr_h) in
               let hdr_h = 2 + if ch >= 6 then 1 else 0 in
               let body_h = max 1 (ch - hdr_h) in
-              let pad_x = if cw >= 88 then 2 else 1 in
+              let pad_x = Model.card_pad_x m ~width:cw in
               let inner_w = max 1 (cw - (2 * pad_x)) in
               let theme = Theme.of_preset m.theme_preset in
               let keeper_context =

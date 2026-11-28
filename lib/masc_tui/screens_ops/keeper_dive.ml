@@ -2724,14 +2724,27 @@ let render_work_sandbox_tab grid ~(rect : Rect.t) ~(theme : Theme.t)
             (Printf.sprintf "%s %s %s %s" (Glyph.to_utf8 g) tk.id tk.title gl))
         keeper_tasks;
     let total_scheds = List.length keeper_scheds in
+    (* With a page left unread, the count, the empty line and the time order
+       speak for the pages read only; an earlier schedule may be on the
+       next page. *)
+    let schedules_read =
+      match Observed.to_option model.work.schedules with
+      | None -> `Not_read
+      | Some ((_ : Wire_work.schedule_row list), None) -> `Every_page
+      | Some ((_ : Wire_work.schedule_row list), Some (_ : string)) -> `Pages_left
+    in
     push_blank ();
     push_hairline
-      (Printf.sprintf "%s (%d)"
+      (Printf.sprintf "%s (%d%s)"
          (Ops_common.say model ~ko:"예약 일정" ~en:"Schedules")
-         total_scheds);
+         total_scheds
+         (match schedules_read with `Pages_left -> "+" | `Not_read | `Every_page -> ""));
     if keeper_scheds = [] then
       push_line ~fg:theme.text_muted ~attrs:Attr.italic
-        (Ops_common.say model ~ko:"등록된 일정이 없습니다" ~en:"No scheduled jobs")
+        (match schedules_read with
+         | `Not_read -> say ~ko:"예약 목록을 아직 못 읽음" ~en:"Schedules not read yet"
+         | `Every_page -> say ~ko:"등록된 일정이 없습니다" ~en:"No scheduled jobs"
+         | `Pages_left -> say ~ko:"읽은 쪽에는 일정이 없습니다" ~en:"None on the pages read")
     else (
       (* Today's times read as HH:MM, other days carry their date, as the
          memory timeline writes them. *)
@@ -2778,7 +2791,13 @@ let render_work_sandbox_tab grid ~(rect : Rect.t) ~(theme : Theme.t)
           push_line ~fg:(Theme.status_color theme wake_tok) ~attrs:Attr.none
             (Printf.sprintf "%s · %s · %s%s" next sc.recurrence_summary last
                summary))
-        (Keeper_cadence.by_next_due keeper_scheds));
+        (Keeper_cadence.by_next_due keeper_scheds);
+      match schedules_read with
+      | `Pages_left ->
+          push_line ~fg:theme.text_muted ~attrs:Attr.italic
+            (say ~ko:"다음 쪽은 읽지 않음 · 더 이른 일정이 있을 수 있음"
+               ~en:"More pages not read · an earlier schedule may be there")
+      | `Not_read | `Every_page -> ());
     let total_posts = List.length keeper_posts in
     push_blank ();
     push_hairline

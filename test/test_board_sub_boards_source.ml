@@ -66,6 +66,27 @@ let test_stale_update_preserves_foreign_policy base_path =
   Alcotest.(check string) "the foreign policy survives update and restart" "foreign"
     (get restarted "foreign").name
 
+(* #55449: the refusal above lasted until a restart, for reads as well.
+   [Board.reobserve] reads the policy again only when the refusal proves the
+   observation stale. *)
+let test_stale_update_is_reobserved base_path =
+  let first = new_store base_path in
+  ignore (require (create first "existing"));
+  let stale = new_store base_path in
+  ignore (require (create first "foreign"));
+  require_unavailable (Board.update_sub_board stale ~sub_board_id:"existing" ~name:"not committed" ());
+  require_unavailable (Board.read_sub_boards stale);
+  (match Board.reobserve stale with
+   | [] -> ()
+   | (_, error) :: _ -> Alcotest.fail (Board.show_board_error error));
+  Alcotest.(check string) "the fresh read installs the other writer's policy" "foreign"
+    (get stale "foreign").name;
+  ignore (require (Board.update_sub_board stale ~sub_board_id:"existing" ~name:"committed" ()));
+  let restarted = new_store base_path in
+  Alcotest.(check string) "the updated policy survives restart" "committed" (get restarted "existing").name;
+  Alcotest.(check string) "the other writer's policy survives restart" "foreign"
+    (get restarted "foreign").name
+
 let test_stale_append_and_delete_preserve_foreign_policy base_path =
   let first = new_store base_path in
   ignore (require (create first "existing"));
@@ -274,6 +295,8 @@ let () =
     ["actual writers and restart",
       [Alcotest.test_case "stale update retains foreign policy" `Quick
          (with_fixture test_stale_update_preserves_foreign_policy);
+       Alcotest.test_case "stale update is read again once" `Quick
+         (with_fixture test_stale_update_is_reobserved);
        Alcotest.test_case "stale append and deletion retain foreign policy" `Quick
          (with_fixture test_stale_append_and_delete_preserve_foreign_policy)];
      "source loss and byte changes",

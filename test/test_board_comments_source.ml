@@ -80,6 +80,34 @@ let test_stale_append_requires_full_reload base_path =
   Alcotest.(check bool) "first comment survives restart" true (has_comment restarted retained);
   Alcotest.(check bool) "reloaded writer's comment survives restart" true (has_comment restarted next)
 
+(* #55449: the refusal above lasted until a restart or an explicit reload.
+   [Board.reobserve] is that reload, taken only when the refusal proves the
+   observation stale. A Board operation runs it at entry. *)
+let test_stale_append_is_reobserved base_path =
+  let stale, post = seed base_path in
+  let own = require (append stale post "this store's durable comment") in
+  let other = new_store base_path in
+  let foreign = require (append other post "another writer's durable comment") in
+  require_io_error (append stale post "refused against the stale cursor");
+  require_io_error (append stale post "still refused without a fresh read");
+  (match Board.reobserve stale with
+   | [] -> ()
+   | (_, error) :: _ -> Alcotest.fail (Board.show_board_error error));
+  Alcotest.(check bool) "the fresh read installs the other writer's comment" true
+    (has_comment stale foreign);
+  Alcotest.(check bool) "the fresh read keeps this store's comment" true (has_comment stale own);
+  let reply_count store =
+    match Board.read_post store ~post_id:(Board.Post_id.to_string post.id) with
+    | Ok (current : Board.post) -> current.reply_count
+    | Error error -> Alcotest.fail (Board.show_board_read_error error) in
+  Alcotest.(check int) "the post counts both writers' comments" 2 (reply_count stale);
+  let next = require (append stale post "accepted after the fresh read") in
+  Alcotest.(check int) "the next comment is counted once" 3 (reply_count stale);
+  let restarted = new_store base_path in
+  List.iter (fun comment ->
+    Alcotest.(check bool) "every writer's comment survives restart" true
+      (has_comment restarted comment)) [own; foreign; next]
+
 let test_stale_snapshot_keeps_foreign_append base_path =
   let first, post = seed base_path in
   let first_comment = require (append first post "first store snapshot") in
@@ -524,6 +552,7 @@ let test_snapshot_reuse_keeps_row_caches_empty_and_preserves_top_k_order base_pa
 let () = Alcotest.run "board comments source"
   ["persistence",
     [Alcotest.test_case "stale append requires model reload" `Quick (with_fixture test_stale_append_requires_full_reload);
+     Alcotest.test_case "stale append is read again once" `Quick (with_fixture test_stale_append_is_reobserved);
      Alcotest.test_case "stale flush retains foreign append" `Quick (with_fixture test_stale_snapshot_keeps_foreign_append);
      Alcotest.test_case "same inode and size do not authorize overwrite" `Quick
        (with_fixture test_same_inode_same_length_edit_is_not_overwritten);

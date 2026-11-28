@@ -92,6 +92,58 @@ let test_stale_toggle_preserves_accepted_reaction base_path =
     Alcotest.(check bool) "accepted reactor remains selected" true summary.reacted
   | _ -> Alcotest.fail "a stale toggle lost or replayed a reaction"
 
+let emoji_counts store parent user =
+  summaries store parent user
+  |> List.map (fun (summary : Board.reaction_summary) -> summary.emoji, summary.count)
+  |> List.sort (fun (left, _) (right, _) -> String.compare left right)
+
+(* #55449: the refusal above lasted until a restart, for reads as well.
+   [Board.reobserve] reads the table again only when the refusal proves the
+   observation stale. *)
+let test_stale_toggle_is_reobserved base_path =
+  let stale = fresh_store base_path in
+  let parent = post stale "a stale reaction source is read again before the next operation" in
+  ignore (require (toggle stale parent "first-reactor" "👍"));
+  let other = fresh_store base_path in
+  ignore (require (toggle other parent "foreign-reactor" "🔥"));
+  require_io_error (toggle stale parent "stale-reactor" "👍");
+  require_io_error (Board.list_reactions stale ~target_type:Board.Reaction_post
+    ~target_id:(Board.Post_id.to_string parent.id) ());
+  (match Board.reobserve stale with
+   | [] -> ()
+   | (_, error) :: _ -> Alcotest.fail (Board.show_board_error error));
+  Alcotest.(check (list (pair string int))) "the fresh read installs both writers' reactions"
+    ["👍", 1; "🔥", 1] (emoji_counts stale parent "stale-reactor");
+  ignore (require (toggle stale parent "stale-reactor" "👍"));
+  let restarted = fresh_store base_path in
+  Alcotest.(check (list (pair string int))) "a fresh load holds every writer's reaction once"
+    ["👍", 2; "🔥", 1] (emoji_counts restarted parent "stale-reactor")
+
+(* The Board operations reach [Board.reobserve] at entry: after the refusal a
+   read and a write through Dispatch both answer without a restart. *)
+let test_dispatch_entries_reobserve base_path =
+  let store = fresh_store base_path in
+  let parent = post store "Dispatch reads a stale reaction source again at entry" in
+  let target_id = Board.Post_id.to_string parent.id in
+  let reader = Masc_board_handlers.Board_access.Operator in
+  ignore (require (toggle store parent "first-reactor" "👍"));
+  let another_writer_toggles user =
+    let other = Board.create_store ~base_path () in
+    require (Board.initialize_store other);
+    ignore (require (toggle other parent user "🔥")) in
+  another_writer_toggles "foreign-one";
+  require_io_error (toggle store parent "stale-reactor" "👍");
+  Alcotest.(check int) "a read through Dispatch answers with both emoji" 2
+    (List.length (require (Board_dispatch.list_reactions ~reader
+       ~target_type:Board.Reaction_post ~target_id ())));
+  another_writer_toggles "foreign-two";
+  require_io_error (toggle store parent "stale-reactor" "👍");
+  ignore (require (Board_dispatch.toggle_reaction ~reader ~target_type:Board.Reaction_post
+    ~target_id ~user_id:"stale-reactor" ~emoji:"👍"));
+  let restarted = fresh_store base_path in
+  Alcotest.(check (list (pair string int))) "a fresh load holds every writer's reaction once"
+    ["👍", 2; "🔥", 2] (emoji_counts restarted parent "stale-reactor")
+
 let test_stale_flush_preserves_accepted_reaction base_path =
   let stale = fresh_store base_path in
   let parent = post stale "a stale ordinary flush cannot compact away another reaction" in
@@ -307,6 +359,10 @@ let () =
     ["actual writers and fresh loads",
       [Alcotest.test_case "stale toggle retains another writer's reaction" `Quick
          (with_fixture test_stale_toggle_preserves_accepted_reaction);
+       Alcotest.test_case "stale toggle is read again once" `Quick
+         (with_fixture test_stale_toggle_is_reobserved);
+       Alcotest.test_case "Dispatch reads and writes read a stale source again" `Quick
+         (with_fixture test_dispatch_entries_reobserve);
        Alcotest.test_case "stale compaction retains another writer's reaction" `Quick
          (with_fixture test_stale_flush_preserves_accepted_reaction);
        Alcotest.test_case "valid orphan survives compaction and restart" `Quick

@@ -191,13 +191,36 @@ let test_known_append_publishes_before_reserved_cleanup base_path =
   Alcotest.(check int) "the known append and a subsequent cast both survive a fresh store" 2
     (read_post restarted parent).votes_up
 
+(* #55449: the refusal above lasted until a restart. [Board.reobserve] reads
+   the ledger again only when the refusal proves the observation stale. *)
+let test_stale_append_is_reobserved base_path =
+  let stale = fresh_store base_path in
+  let parent = post stale "a stale vote source is read again before the next operation" in
+  ignore (require (cast stale parent "first-voter"));
+  let other = fresh_store base_path in
+  ignore (require (cast other parent "foreign-voter"));
+  require_io_error (cast stale parent "stale-voter");
+  require_io_error (cast stale parent "stale-voter");
+  (match Board.reobserve stale with
+   | [] -> ()
+   | (_, error) :: _ -> Alcotest.fail (Board.show_board_error error));
+  Alcotest.(check int) "the fresh read counts both writers' votes" 2
+    (read_post stale parent).votes_up;
+  ignore (require (cast stale parent "stale-voter"));
+  Alcotest.(check int) "the next vote is counted once" 3 (read_post stale parent).votes_up;
+  let restarted = fresh_store base_path in
+  Alcotest.(check int) "a fresh load holds every writer's vote once" 3
+    (read_post restarted parent).votes_up
+
 let () =
   Alcotest.run "board_votes_source"
     ["actual writers and fresh loads",
       [Alcotest.test_case "stale snapshot retains another writer's vote" `Quick
          (with_fixture test_stale_snapshot_preserves_accepted_vote);
        Alcotest.test_case "stale append cannot adopt a newer ledger" `Quick
-         (with_fixture test_stale_append_cannot_adopt_a_foreign_ledger)];
+         (with_fixture test_stale_append_cannot_adopt_a_foreign_ledger);
+       Alcotest.test_case "stale append is read again once" `Quick
+         (with_fixture test_stale_append_is_reobserved)];
      "actual transaction settlement",
       [Alcotest.test_case "unknown deletion rewrite retains bytes without replay" `Quick
          (with_fixture test_unknown_rewrite_retains_exact_deletion_bytes);

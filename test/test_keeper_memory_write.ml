@@ -3317,30 +3317,26 @@ let test_of_history_marks_folded_history_as_lower_bounds () =
   with_temp_dir
   @@ fun base_path ->
   let log_path = Filename.concat base_path "keeper-log.jsonl" in
-  let base = Result.get_ok (Librarian_archive.history log_path) in
-  let origin : Keeper_memory_os_types.origin =
-    { kind = Keeper_memory_os_types.Authored; trace_id = "fixture" }
-  in
-  let fact =
-    Keeper_memory_os_types.observed ~claim:"folded away" ~category:Keeper_memory_os_types.Fact
-      ~now:1. ~origin
-  in
-  let id = Keeper_memory_os_types.memory_id fact in
-  let left : Librarian_archive.left =
-    { fact
-    ; removal = Librarian_effects.Retracted { by = Librarian_effects.Keeper; reason = "folded away" }
+  let base = Result.get_ok (Masc.Librarian_archive.history log_path) in
+  let folded_fact = fact "folded away" in
+  let id = Masc.Keeper_memory_os_types.memory_id folded_fact in
+  let left : Masc.Librarian_archive.left =
+    { fact = folded_fact
+    ; removal =
+        Masc.Librarian_effects.Retracted
+          { by = Masc.Librarian_effects.Keeper; reason = "folded away" }
     ; at = 5.
     ; line_at = 0
     }
   in
-  let folded_marker : Librarian_archive.folded =
+  let folded_marker : Masc.Librarian_archive.folded =
     { through_seq = 10; min_revision = 1; max_revision = 10; min_at = 1.; max_at = 10. }
   in
-  let check_folded label history =
-    let t = Keeper_memory_id_history.of_history ~memory_id:id history in
+  let check_folded label ~retracted history =
+    let t = Masc.Keeper_memory_id_history.of_history ~memory_id:id history in
     Alcotest.(check bool) (label ^ ": folded flag set") true t.folded;
-    Alcotest.(check int) (label ^ ": the surviving removal is still counted") 1 t.retracted;
-    let key, json = Keeper_memory_id_history.receipt_field (Ok t) in
+    Alcotest.(check int) (label ^ ": retracted count") retracted t.retracted;
+    let key, json = Masc.Keeper_memory_id_history.receipt_field (Ok t) in
     Alcotest.(check string) (label ^ ": receipt key") "memory_id_history" key;
     (match json with
      | `Assoc fields ->
@@ -3350,9 +3346,19 @@ let test_of_history_marks_folded_history_as_lower_bounds () =
          (List.assoc "older_history_folded" fields = `Bool true)
      | _ -> Alcotest.fail (label ^ ": receipt is not an object"))
   in
-  check_folded "compaction fold"
+  check_folded "compaction fold + sidecar" ~retracted:1
     { base with folded = Some folded_marker; unsequenced = [left] };
-  check_folded "sidecar left row only" { base with unsequenced = [left] };
+  check_folded "sidecar left row only" ~retracted:1 { base with unsequenced = [left] };
+  check_folded "compaction marker alone" ~retracted:0
+    { base with folded = Some folded_marker };
+  let plain = Masc.Keeper_memory_id_history.of_history ~memory_id:id base in
+  Alcotest.(check bool) "unfolded log: folded flag clear" false plain.folded;
+  (match Masc.Keeper_memory_id_history.receipt_field (Ok plain) with
+   | key, `Assoc fields ->
+     Alcotest.(check string) "unfolded log: receipt key" "memory_id_history" key;
+     Alcotest.(check bool) "unfolded log: no folded marker"
+       false (List.mem_assoc "older_history_folded" fields)
+   | _ -> Alcotest.fail "unfolded log: receipt is not an object");
   ()
 ;;
 

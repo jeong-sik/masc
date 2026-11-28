@@ -1131,9 +1131,11 @@ supports-multimodal-inputs = true
 wizard-default = true
 cache-retention = "1h"
 
+# K2.7 Code Highspeed has no 1M context; the official table gives 262144
+# (https://www.kimi.com/code/docs/en/kimi-code/models.html, checked 2026-11-28).
 [models.kimi-for-coding-highspeed]
 api-name = "kimi-for-coding-highspeed"
-max-context = 1048576
+max-context = 262144
 tools-support = true
 streaming = true
 
@@ -2533,7 +2535,7 @@ supports-image-input = true
 
 [models.acp-kimi-for-coding-highspeed]
 api-name = "kimi-code/kimi-for-coding-highspeed"
-max-context = 1048576
+max-context = 262144
 tools-support = true
 thinking-support = true
 streaming = true

@@ -1620,7 +1620,7 @@ ACP_CURATED_MODELS = {
         dict(id='kimi-code/k3', label='Kimi K3 (ACP)', context=1048576, supports_image_input=True),
         dict(id='kimi-code/k3-256k', label='Kimi K3 256K (ACP)', context=262144, supports_image_input=True),
         dict(id='kimi-code/kimi-for-coding', label='Kimi for Coding (ACP)', context=1048576, supports_image_input=True),
-        dict(id='kimi-code/kimi-for-coding-highspeed', label='Kimi for Coding Highspeed (ACP)', context=1048576, supports_image_input=True),
+        dict(id='kimi-code/kimi-for-coding-highspeed', label='Kimi for Coding Highspeed (ACP)', context=262144, supports_image_input=True),
     ],
     'antigravity_acp': [
         dict(id='gemini-4-neon-medium', label='Gemini 4 Neon Medium (ACP)', context=1048576, supports_image_input=True),

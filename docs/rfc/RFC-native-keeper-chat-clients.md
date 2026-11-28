@@ -139,7 +139,9 @@ Dashboard·TUI 를 생성 타입으로 옮기는 일은 이 RFC 밖이다(§3).
 - 다루는 범위: record, option, list, enum, `<json name>`, type-field variant.
   - Swift 는 associated value 를 가진 `enum` 과 `Decodable` 구현이다.
   - Kotlin 은 `sealed interface` 와, `"type"` 을 먼저 읽고 그 종류의 `@Serializable` record 로 읽는 `DeserializationStrategy` 다. 열린 variant 의 `Unrecognized(name, raw)` 도 이 함수가 만든다.
-  - 단계 1 의 생성물은 읽기만 한다. 앱이 보내는 요청 본문은 단계 2 에서 쓰기(Swift `Encodable`)와 `nullable` 을 더한다.
+  - 단계 1 의 생성물은 읽기만 한다. 앱이 보내는 요청 본문은 단계 2 에서 두 언어의 쓰기와 `nullable` 을 더한다.
+    - Swift: `Encodable` 을 더한다.
+    - Kotlin: record 와 enum 은 이미 쓸 수 있다. tagged sum 은 `DeserializationStrategy` 라 읽기만 하므로, 요청 본문에 들어가면 `KSerializer` 로 넓힌다.
 - 열린 variant: 앱은 서버보다 늦게 업데이트되므로, 모르는 이름을 받아도 decode 가 실패하면 안 된다.
   - type-field variant 에 생성기 전용 annotation `<native open>` 을 붙이면, 생성기가 `unrecognized(name, raw)` 경우를 더한다. 앱은 이 경우를 기본값으로 바꾸지 않고 「이 앱이 모르는 이벤트」로 보인다.
   - ATD 의 `<json open_enum>` 은 payload 없는 enum 에만 쓸 수 있어 이 자리에 맞지 않는다.

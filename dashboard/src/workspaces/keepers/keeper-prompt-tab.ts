@@ -1,34 +1,39 @@
 /**
  * Keeper → Prompt: what this keeper was told on its last assembled turn.
  *
- * - `GET /last-prompt` keeps the blocks in assembly order, the text they
- *   assembled into and the system prompt. The blocks are stable turn to turn,
- *   so the last assembly is also the preview of the next one.
- * - `GET /provider-input?turn_ref=` lists the parts of that same turn's
- *   provider request (system prompt, messages, tool schemas) without their
- *   text; a part's text is read when the operator opens it.
+ * - `GET /last-prompt` keeps the blocks in assembly order, the system prompt
+ *   and the extra context (`assembled`). The server writes it on a turn's
+ *   first provider round only, the round that carries every block; it keeps
+ *   one capture per keeper.
+ * - Which blocks went into the system prompt comes from the capture's
+ *   partition: the base instructions and the System observations. Every other
+ *   block is the extra context.
+ * - `GET /provider-input?turn_ref=` lists the parts of that turn's last
+ *   provider request without their text; a part's text is read when the
+ *   operator opens it. On a turn that used tools, that request followed tool
+ *   results and carried only the blocks such a round keeps.
  * - Both are admin reads on the server, so a session without admin sees a
  *   notice and sends nothing.
  */
 
 import { html } from 'htm/preact'
-import { useEffect, useState } from 'preact/hooks'
+import { useEffect, useRef, useState } from 'preact/hooks'
 import { authSession, resourceCache, sessionEpoch, type Observed } from '../../core'
 import { RefreshButton } from '../../components/primitives/refresh-button'
 import { isAdminLockedForSession } from '../../routes/router'
 import type { ProviderInputPart, ProviderInputSnapshot } from '../../api/dashboard-provider-input'
 import { fetchKeeperLastPromptApi, fetchKeeperProviderInputApi, fetchKeeperProviderInputPartApi } from './keepers-api'
-import { PROMPT_BLOCK_IDS, type PromptBlockId, type PromptCapture } from './prompt-capture-wire'
+import { PROMPT_BLOCK_IDS, systemPromptBlocks, type BlockDestination, type PromptBlockId, type PromptCapture } from './prompt-capture-wire'
 
 /** What each injection site carries (`Prompt_block_id`, `keeper_context_assembly.ml`). */
 const BLOCK_NAMES: Readonly<Record<PromptBlockId, { readonly label: string; readonly what: string }>> = {
-  keeper_instructions: { label: 'Keeper 지시문', what: '렌더된 system prompt' },
-  dynamic_context: { label: '턴 맥락', what: '이어 받기 스냅샷, skill 경로, worktree, 최근 실패 기억 같은 나머지 맥락' },
+  keeper_instructions: { label: 'Keeper 지시문', what: '렌더한 Keeper 기본 지시문. System observation 을 붙이기 전이에요' },
+  dynamic_context: { label: '턴 맥락', what: '이어 받기 스냅샷, skill 경로, worktree, 턴 지시, 최근 실패 기억 같은 나머지 맥락' },
   active_goals: { label: '진행 중 Goal', what: 'Goal 스냅샷과 지금 기준·측정값' },
   direct_input_source: { label: '직접 작업 출처', what: '받아들인 직접 작업의 출처. 권한을 주지 않아요' },
   completion_authority: { label: '완료 승인 기록', what: 'Task 승인·거절 사건과 그 연결 키' },
   goals_awaiting_proof: { label: '증명 기다리는 Goal', what: '검증자가 판정 중인(Verifying) Goal' },
-  constitution_amendments: { label: '세계 조항 변경', what: 'System 을 렌더한 뒤 쓰이거나 거둬진 세계 조항' },
+  constitution_amendments: { label: '세계 조항', what: 'System 을 렌더한 뒤 바뀐 조항, 또는 그 턴이 실은 지금 조항 전체' },
   temporal_summary: { label: '시간 요약', what: '공유 맥락의 시간 요약' },
   memory_os_recall: { label: 'Memory 회상', what: 'Memory OS 가 이 턴에 꺼낸 사실' },
   librarian_working_context: { label: '사서 작업 맥락', what: '작은 작업 맥락 자료 색인' },
@@ -36,7 +41,7 @@ const BLOCK_NAMES: Readonly<Record<PromptBlockId, { readonly label: string; read
   recalled_memory_status: { label: '회상 판정', what: '판정 결과, 그 턴, 가져온 id' },
   operator_note: { label: '운영자 메모', what: '운영자가 이 Keeper 에게 남긴 메모' },
   skill_compositions: { label: 'Skill 조합', what: '이 턴의 도구에 실린 조합 Skill 이름' },
-  arrived_stimuli: { label: '턴 중 도착', what: '턴이 시작된 뒤 큐에 들어온 항목' },
+  arrived_stimuli: { label: '턴 중 도착', what: '턴이 시작된 뒤 큐에 들어온 항목. 도구 결과 뒤 라운드에만 실려요' },
 }
 
 // One tone per block id, by declaration order, so a block keeps its color from turn to turn.
@@ -50,10 +55,15 @@ type View = 'blocks' | 'assembled' | 'system' | 'provider'
 
 const VIEWS: readonly (readonly [View, string])[] = [
   ['blocks', '블록'],
-  ['assembled', '합쳐진 텍스트'],
   ['system', 'System prompt'],
-  ['provider', 'Provider 요청'],
+  ['assembled', '추가 맥락'],
+  ['provider', '마지막 Provider 요청'],
 ]
+
+const DESTINATION_LABELS: Readonly<Record<BlockDestination, string>> = {
+  system_prompt: 'System prompt',
+  extra_context: '추가 맥락',
+}
 
 type PartText =
   | { readonly kind: 'loading' }
@@ -72,12 +82,26 @@ function loadCapture(keeper: string, reason: 'mount' | 'manual') {
   )
 }
 
-function loadProviderInput(keeper: string, turnRef: string) {
+function loadProviderInput(keeper: string, turnRef: string, reason: 'mount' | 'manual') {
   return resourceCache.fetch<ProviderInputSnapshot>(
     providerKey(keeper, turnRef),
     (signal) => fetchKeeperProviderInputApi(keeper, turnRef, signal),
-    { ttlMs: 30_000, topics: ['keeper-prompt'], reason: 'mount' },
+    { ttlMs: 30_000, topics: ['keeper-prompt'], reason },
   )
+}
+
+// A turn's snapshot is written when the turn ends, after its capture, so a
+// refresh reads both: the capture may name a new turn, and a turn whose
+// request was not there a moment ago may have one now.
+async function refresh(keeper: string, shownTurnRef: string | null) {
+  const capture = await loadCapture(keeper, 'manual')
+  const turnRef = capture.kind === 'value' ? turnRefOf(capture.data) : shownTurnRef
+  if (turnRef !== null) await loadProviderInput(keeper, turnRef, 'manual')
+}
+
+function destinationOf(capture: PromptCapture): (id: PromptBlockId) => BlockDestination {
+  const inSystem = systemPromptBlocks(capture)
+  return id => inSystem.has(id) ? 'system_prompt' : 'extra_context'
 }
 
 const preStyle = {
@@ -120,30 +144,60 @@ function Composition({ capture }: { capture: PromptCapture }) {
   `
 }
 
-function Flow({ capture, provider }: { capture: PromptCapture; provider: ProviderInputSnapshot | null }) {
-  const count = (kind: ProviderInputPart['kind']) => provider?.parts.filter(p => p.kind === kind).length ?? 0
-  const box = (title: string, body: string) => html`
-    <div class="kp-kv-box" style=${{ minWidth: '9rem', flex: '1 1 9rem' }}>
+function providerSummary(obs: Observed<ProviderInputSnapshot>): string {
+  switch (obs.kind) {
+    case 'value': {
+      const count = (kind: ProviderInputPart['kind']) => obs.data.parts.filter(p => p.kind === kind).length
+      return `${obs.data.wire.provider}/${obs.data.wire.model} · system ${count('system_prompt')} · message ${count('message')} · tool ${count('tool_schema')} · ${obs.data.wire.bodyBytes.toLocaleString('en-US')} bytes`
+    }
+    case 'loading':
+      return '불러오는 중…'
+    case 'absent':
+    case 'unreported':
+      return '이 턴의 요청 기록이 없어요'
+    case 'failed':
+      return '읽지 못했어요'
+  }
+}
+
+function Flow({ capture, providerObs }: { capture: PromptCapture; providerObs: Observed<ProviderInputSnapshot> }) {
+  const destination = destinationOf(capture)
+  const sum = (where: BlockDestination) => capture.blocks
+    .filter(b => destination(b.id) === where)
+    .reduce((acc, b) => ({ count: acc.count + 1, bytes: acc.bytes + b.bytes }), { count: 0, bytes: 0 })
+  const toSystem = sum('system_prompt')
+  const toExtra = sum('extra_context')
+  const box = (testid: string, title: string, body: string) => html`
+    <div class="kp-kv-box" data-testid=${testid} style=${{ minWidth: '9rem', flex: '1 1 9rem' }}>
       <div style=${{ fontSize: 'var(--fs-12)', fontWeight: 600 }}>${title}</div>
       <div style=${noteStyle}>${body}</div>
     </div>
   `
   const arrow = html`<span aria-hidden="true" style=${{ alignSelf: 'center', color: 'var(--fg-3)' }}>→</span>`
+  const bytes = (n: number) => `${n.toLocaleString('en-US')} bytes`
   return html`
     <div data-testid="keeper-prompt-flow" style=${{ display: 'flex', gap: 'var(--sp-1)', flexWrap: 'wrap', alignItems: 'stretch' }}>
-      ${box(`블록 ${capture.blocks.length}개`, `${capture.blocks.reduce((s, b) => s + b.bytes, 0).toLocaleString('en-US')} bytes`)}
+      <div style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-1)', flex: '2 1 18rem' }}>
+        <div style=${{ display: 'flex', gap: 'var(--sp-1)' }}>
+          ${box('keeper-prompt-flow-system-blocks', `블록 ${toSystem.count}개`, bytes(toSystem.bytes))}
+          ${arrow}
+          ${box('keeper-prompt-flow-system', 'System prompt', capture.system_prompt === null ? '없음' : bytes(new TextEncoder().encode(capture.system_prompt).length))}
+        </div>
+        <div style=${{ display: 'flex', gap: 'var(--sp-1)' }}>
+          ${box('keeper-prompt-flow-extra-blocks', `블록 ${toExtra.count}개`, bytes(toExtra.bytes))}
+          ${arrow}
+          ${box('keeper-prompt-flow-extra', '추가 맥락', capture.assembled === null ? '없음' : bytes(capture.assembled_bytes))}
+        </div>
+      </div>
       ${arrow}
-      ${box('합쳐진 텍스트', capture.assembled === null ? '없음' : `${capture.assembled_bytes.toLocaleString('en-US')} bytes`)}
-      ${arrow}
-      ${box('Provider 요청', provider === null
-        ? '이 턴의 요청 기록 없음'
-        : `${provider.wire.provider}/${provider.wire.model} · system ${count('system_prompt')} · message ${count('message')} · tool ${count('tool_schema')} · ${provider.wire.bodyBytes.toLocaleString('en-US')} bytes`)}
+      ${box('keeper-prompt-flow-provider', '이 턴의 마지막 Provider 요청', providerSummary(providerObs))}
     </div>
   `
 }
 
 function Blocks({ capture }: { capture: PromptCapture }) {
   const total = capture.blocks.reduce((sum, b) => sum + b.bytes, 0)
+  const destination = destinationOf(capture)
   if (capture.blocks.length === 0) return html`<div class="kp-empty">이 턴에 기록된 블록이 없어요.</div>`
   return html`
     <ol style=${{ margin: 0, paddingLeft: 0, listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 'var(--sp-1)' }}>
@@ -155,6 +209,7 @@ function Blocks({ capture }: { capture: PromptCapture }) {
               <strong style=${{ fontSize: 'var(--fs-13)' }}>${i + 1}. ${BLOCK_NAMES[b.id].label}</strong>
               <span class="mono" style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-3)' }}>${b.id}</span>
               <span style=${noteStyle}>${b.bytes.toLocaleString('en-US')} bytes${total > 0 ? ` · ${Math.round((b.bytes / total) * 100)}%` : ''}</span>
+              <span data-testid="keeper-prompt-block-destination" style=${{ ...noteStyle, color: 'var(--fg-3)' }}>→ ${DESTINATION_LABELS[destination(b.id)]}</span>
               <span style=${{ ...noteStyle, color: 'var(--fg-3)' }}>${BLOCK_NAMES[b.id].what}</span>
             </summary>
             ${b.text === '' ? html`<div class="kp-empty">비어 있어요.</div>` : html`<pre class="mono" style=${preStyle}>${b.text}</pre>`}
@@ -166,10 +221,18 @@ function Blocks({ capture }: { capture: PromptCapture }) {
 }
 
 function ProviderParts({ keeper, turnRef, provider }: { keeper: string; turnRef: string; provider: ProviderInputSnapshot }) {
-  const [texts, setTexts] = useState<ReadonlyMap<number, PartText>>(new Map())
-  const put = (index: number, value: PartText) => setTexts(prev => new Map(prev).set(index, value))
+  // The map lives in a ref so that two toggles before a render see the read
+  // the first one started; the state copy only draws it.
+  const held = useRef(new Map<number, PartText>())
+  const [texts, setTexts] = useState<ReadonlyMap<number, PartText>>(held.current)
+  const put = (index: number, value: PartText) => {
+    held.current = new Map(held.current).set(index, value)
+    setTexts(held.current)
+  }
   const open = async (part: ProviderInputPart) => {
-    if (texts.has(part.index)) return
+    // A failed read is tried again when the part is opened again.
+    const current = held.current.get(part.index)
+    if (current !== undefined && current.kind !== 'failed') return
     put(part.index, { kind: 'loading' })
     const res = await fetchKeeperProviderInputPartApi(keeper, turnRef, part)
     put(part.index, res.ok ? { kind: 'text', text: res.value } : { kind: 'failed', why: res.error.message })
@@ -177,6 +240,7 @@ function ProviderParts({ keeper, turnRef, provider }: { keeper: string; turnRef:
   return html`
     <div style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-1)' }}>
       <div style=${noteStyle}>${provider.wire.provider}/${provider.wire.model} · ${provider.wire.httpCodec} · ${provider.runtimeProfile}</div>
+      <div style=${noteStyle}>이 턴의 마지막 요청이에요. 도구를 쓴 턴이면 도구 결과 뒤 라운드라서 블록을 다 싣지 않았을 수 있어요.</div>
       ${provider.parts.map(part => {
         const state = texts.get(part.index)
         return html`
@@ -215,14 +279,13 @@ function KeeperPromptView({ keeperName }: { keeperName: string }) {
   const capture = obs.kind === 'value' ? obs.data : null
   const turnRef = capture === null ? null : turnRefOf(capture)
   const providerObs = resourceCache.observe<ProviderInputSnapshot>(providerKey(keeperName, turnRef ?? '')).value
-  const provider = turnRef !== null && providerObs.kind === 'value' ? providerObs.data : null
   const [view, setView] = useState<View>('blocks')
 
   useEffect(() => {
     void loadCapture(keeperName, 'mount')
   }, [keeperName, epoch])
   useEffect(() => {
-    if (turnRef !== null) void loadProviderInput(keeperName, turnRef)
+    if (turnRef !== null) void loadProviderInput(keeperName, turnRef, 'mount')
   }, [keeperName, turnRef, epoch])
 
   return html`
@@ -230,7 +293,7 @@ function KeeperPromptView({ keeperName }: { keeperName: string }) {
       <div class="kp-card" style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-2)' }}>
         <div class="kp-card-head">
           <h3>마지막으로 조립한 프롬프트 · ${keeperName}</h3>
-          <${RefreshButton} onRefresh=${() => loadCapture(keeperName, 'manual')} />
+          <${RefreshButton} onRefresh=${() => refresh(keeperName, turnRef)} />
         </div>
         ${obs.kind === 'loading' && html`<div class="kp-empty">불러오는 중…</div>`}
         ${obs.kind === 'absent' && html`<div class="kp-empty" data-testid="keeper-prompt-not-captured">아직 조립한 턴이 없어요${obs.reason === undefined ? '.' : `: ${obs.reason}`}</div>`}
@@ -240,8 +303,8 @@ function KeeperPromptView({ keeperName }: { keeperName: string }) {
           <div style=${noteStyle}>
             Turn #${capture.absolute_turn} · ${new Date(capture.captured_at * 1000).toLocaleString('ko-KR')} · <span class="mono">${capture.trace_id}</span>
           </div>
-          <div style=${noteStyle}>블록은 턴마다 거의 같아서, 마지막 조립이 다음 턴의 미리 보기이기도 해요.</div>
-          <${Flow} capture=${capture} provider=${provider} />
+          <div style=${noteStyle}>Keeper 마다 마지막으로 조립한 턴 하나만 남아요. 턴의 첫 Provider 라운드에서 기록해요.</div>
+          <${Flow} capture=${capture} providerObs=${providerObs} />
           <${Composition} capture=${capture} />
           <div class="ap-viewseg" role="group" aria-label="프롬프트 보기 선택" style=${{ alignSelf: 'flex-start', flexWrap: 'wrap' }}>
             ${VIEWS.map(([id, label]) => html`
@@ -250,7 +313,7 @@ function KeeperPromptView({ keeperName }: { keeperName: string }) {
           </div>
           ${view === 'blocks' && html`<${Blocks} capture=${capture} />`}
           ${view === 'assembled' && (capture.assembled === null
-            ? html`<div class="kp-empty">이 턴은 합쳐진 텍스트를 남기지 않았어요.</div>`
+            ? html`<div class="kp-empty">이 턴은 추가 맥락을 남기지 않았어요.</div>`
             : html`<pre class="mono" data-testid="keeper-prompt-assembled" style=${preStyle}>${capture.assembled}</pre>`)}
           ${view === 'system' && (capture.system_prompt === null
             ? html`<div class="kp-empty">이 턴은 system prompt 를 남기지 않았어요.</div>`

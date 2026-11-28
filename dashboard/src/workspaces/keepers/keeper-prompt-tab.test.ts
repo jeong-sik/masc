@@ -14,9 +14,15 @@ async function flushUi(ms = 25): Promise<void> {
   await new Promise(resolve => setTimeout(resolve, ms))
 }
 
-const SYSTEM = 'write well.\n'
+const SYSTEM = 'write well.\n\n\ngoal.\n'
 
-// `Keeper_prompt_capture.to_json` with the keeper and surface the route prefixes.
+const span = (source: unknown, bytes: number) => ({
+  source, offset: 0, bytes, sha256: 'a'.repeat(64), subpartition: { status: 'not_applicable' },
+})
+
+// The shape of a real capture (`Keeper_prompt_capture.to_json` behind
+// `handle_last_prompt_get`): the base instructions and the System observation
+// make the system prompt; the other block is the extra context.
 const capture = (overrides: Record<string, unknown> = {}) => ({
   keeper: 'albini',
   dashboard_surface: '/api/v1/keepers/:name/last-prompt',
@@ -24,18 +30,32 @@ const capture = (overrides: Record<string, unknown> = {}) => ({
   trace_id: 'trace-one',
   absolute_turn: 7,
   blocks: [
-    { id: 'keeper_instructions', bytes: 12, text: SYSTEM },
-    { id: 'active_goals', bytes: 0, text: '' },
+    { id: 'keeper_instructions', bytes: 12, text: 'write well.\n' },
+    { id: 'active_goals', bytes: 6, text: 'goal.\n' },
     { id: 'dynamic_context', bytes: 5, text: 'now.\n' },
   ],
-  assembled: 'write well.\nnow.\n',
-  assembled_bytes: 17,
+  assembled: 'now.\n',
+  assembled_bytes: 5,
   system_prompt: SYSTEM,
-  system_prompt_partition: null,
+  system_prompt_partition: {
+    carrier: 'system_prompt',
+    scope: 'canonical_issued_system_prompt_before_transport_projection',
+    partition: {
+      schema: 'masc.logical-context-partition.v2',
+      scope: 'assembled_raw_utf8_before_message_or_ipc_encoding',
+      bytes: 20,
+      sha256: 'b'.repeat(64),
+      spans: [
+        span({ kind: 'unattributed', reason: 'existing_prefix' }, 12),
+        span({ kind: 'unattributed', reason: 'separator' }, 2),
+        span({ kind: 'block', block: 'active_goals' }, 6),
+      ],
+    },
+  },
   ...overrides,
 })
 
-// `masc.provider-input-manifest.v1` for the same turn.
+// `masc.provider-input-manifest.v1` for the same turn, as `manifest_to_json` writes it.
 const manifest = {
   dashboard_surface: '/api/v1/keepers/:name/provider-input',
   schema: 'masc.provider-input-manifest.v1',
@@ -74,17 +94,25 @@ const LAST_PROMPT = '/api/v1/keepers/albini/last-prompt'
 const PROVIDER_INPUT = '/api/v1/keepers/albini/provider-input?turn_ref=trace-one%237'
 const PART_ZERO = '/api/v1/keepers/albini/provider-input/part?turn_ref=trace-one%237&index=0'
 
-function serve(lastPrompt: () => Response) {
+interface Answers {
+  readonly lastPrompt: () => Response
+  readonly providerInput?: () => Response
+  readonly partZero?: () => Response
+}
+
+function serve(answers: Answers | Answers['lastPrompt']) {
+  const { lastPrompt, providerInput = () => jsonResponse(manifest), partZero = () => jsonResponse(partAnswer) } =
+    typeof answers === 'function' ? { lastPrompt: answers } : answers
   const reads: string[] = []
   globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
     const url = String(input)
     reads.push(url)
     if (url === LAST_PROMPT) return lastPrompt()
-    if (url === PROVIDER_INPUT) return jsonResponse(manifest)
-    if (url === PART_ZERO) return jsonResponse(partAnswer)
+    if (url === PROVIDER_INPUT) return providerInput()
+    if (url === PART_ZERO) return partZero()
     return jsonResponse({ error: 'not served' }, 404)
   }) as typeof fetch
-  return { reads }
+  return { reads, count: (url: string) => reads.filter(r => r === url).length }
 }
 
 describe('Keeper → Prompt', () => {
@@ -121,17 +149,51 @@ describe('Keeper → Prompt', () => {
     el!.click()
   }
 
-  it('lists the blocks in assembly order and the request they went into', async () => {
+  const textOf = (testid: string) => container.querySelector(`[data-testid="${testid}"]`)?.textContent ?? ''
+
+  it('lists the blocks in assembly order with where each went, and the turn\'s last request', async () => {
     serve(() => jsonResponse(capture()))
     mount()
     await vi.waitFor(() => expect(container.querySelectorAll('[data-testid="keeper-prompt-block"]')).toHaveLength(3))
     const titles = Array.from(container.querySelectorAll('[data-testid="keeper-prompt-block"] strong')).map(n => n.textContent)
     expect(titles).toEqual(['1. Keeper 지시문', '2. 진행 중 Goal', '3. 턴 맥락'])
-    await vi.waitFor(() => expect(container.querySelector('[data-testid="keeper-prompt-flow"]')?.textContent).toContain('openai-compatible/model-seven'))
-    expect(container.querySelector('[data-testid="keeper-prompt-flow"]')?.textContent).toContain('message 1')
+    const destinations = Array.from(container.querySelectorAll('[data-testid="keeper-prompt-block-destination"]')).map(n => n.textContent)
+    expect(destinations).toEqual(['→ System prompt', '→ System prompt', '→ 추가 맥락'])
+    expect(textOf('keeper-prompt-flow-system-blocks')).toContain('블록 2개')
+    expect(textOf('keeper-prompt-flow-system-blocks')).toContain('18 bytes')
+    expect(textOf('keeper-prompt-flow-system')).toContain('20 bytes')
+    expect(textOf('keeper-prompt-flow-extra-blocks')).toContain('블록 1개')
+    expect(textOf('keeper-prompt-flow-extra')).toContain('5 bytes')
+    await vi.waitFor(() => expect(textOf('keeper-prompt-flow-provider')).toContain('openai-compatible/model-seven'))
+    expect(textOf('keeper-prompt-flow-provider')).toContain('message 1')
     click('[data-view="assembled"]')
     await flushUi()
-    expect(container.querySelector('[data-testid="keeper-prompt-assembled"]')?.textContent).toBe('write well.\nnow.\n')
+    expect(container.querySelector('[data-testid="keeper-prompt-assembled"]')?.textContent).toBe('now.\n')
+  })
+
+  it('tells a turn with no request record from a request it could not read', async () => {
+    serve({ lastPrompt: () => jsonResponse(capture()), providerInput: () => jsonResponse({ error: 'no provider-input snapshot' }, 404) })
+    mount()
+    await vi.waitFor(() => expect(textOf('keeper-prompt-flow-provider')).toContain('이 턴의 요청 기록이 없어요'))
+    render(null, container)
+    resourceCache.clearAll()
+    serve({ lastPrompt: () => jsonResponse(capture()), providerInput: () => jsonResponse({ error: 'store unavailable' }, 503) })
+    mount()
+    await vi.waitFor(() => expect(textOf('keeper-prompt-flow-provider')).toContain('읽지 못했어요'))
+  })
+
+  it('reads the turn\'s request again on refresh, since it is written when the turn ends', async () => {
+    let written = false
+    const server = serve({
+      lastPrompt: () => jsonResponse(capture()),
+      providerInput: () => written ? jsonResponse(manifest) : jsonResponse({ error: 'no provider-input snapshot' }, 404),
+    })
+    mount()
+    await vi.waitFor(() => expect(textOf('keeper-prompt-flow-provider')).toContain('이 턴의 요청 기록이 없어요'))
+    written = true
+    click('.refresh-btn')
+    await vi.waitFor(() => expect(textOf('keeper-prompt-flow-provider')).toContain('openai-compatible/model-seven'))
+    expect(server.count(PROVIDER_INPUT)).toBe(2)
   })
 
   it('reads a request part only when it is opened, and checks it against the manifest', async () => {
@@ -145,7 +207,33 @@ describe('Keeper → Prompt', () => {
     first.open = true
     first.dispatchEvent(new Event('toggle'))
     await vi.waitFor(() => expect(first.querySelector('pre')?.textContent).toBe(SYSTEM))
-    expect(server.reads.filter(u => u === PART_ZERO)).toHaveLength(1)
+    expect(server.count(PART_ZERO)).toBe(1)
+  })
+
+  it('tries a part again when it is opened again after a failed read', async () => {
+    let fail = true
+    const server = serve({
+      lastPrompt: () => jsonResponse(capture()),
+      partZero: () => fail ? jsonResponse({ error: 'blob store unavailable' }, 503) : jsonResponse(partAnswer),
+    })
+    mount()
+    await vi.waitFor(() => expect(server.reads).toContain(PROVIDER_INPUT))
+    click('[data-view="provider"]')
+    const first = await vi.waitFor(() => {
+      const found = container.querySelector<HTMLDetailsElement>('[data-testid="keeper-prompt-part"]')
+      expect(found).not.toBeNull()
+      return found!
+    })
+    // jsdom fires `toggle` itself when `open` changes.
+    first.open = true
+    await vi.waitFor(() => expect(first.querySelector('.ap-error')?.textContent).toContain('읽지 못했어요'))
+    expect(server.count(PART_ZERO)).toBe(1)
+    fail = false
+    first.open = false
+    await flushUi()
+    first.open = true
+    await vi.waitFor(() => expect(first.querySelector('pre')?.textContent).toBe(SYSTEM))
+    expect(server.count(PART_ZERO)).toBe(2)
   })
 
   it('says the keeper has not assembled a turn yet', async () => {

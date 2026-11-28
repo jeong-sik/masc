@@ -555,7 +555,7 @@ describe('Multi-Account Personal Keepers UI flows (Worker & Admin)', () => {
       throw new Error(`Unexpected SU fetch in MA SU-only tab: ${url}`)
     }))
 
-    for (const tab of ['memory', 'portrait-candle', 'work-sandbox', 'config'] as const) {
+    for (const tab of ['memory', 'portrait-candle', 'work-sandbox', 'config', 'prompt'] as const) {
       seenUrls.length = 0
       const view = render(
         html`<${KeepersWorkspace} subroute="detail" entityId="admin-keeper" entityTab=${tab} onNavigate=${vi.fn()} onInspect=${vi.fn()} />`,

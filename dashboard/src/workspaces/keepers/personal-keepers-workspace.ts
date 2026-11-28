@@ -686,39 +686,42 @@ export function PersonalKeepersWorkspace(props: PersonalKeepersWorkspaceProps) {
   `
 }
 
-function singleUserOnlyTabDetails(tab: 'memory' | 'portrait-candle' | 'work-sandbox' | 'prompt', keeperId: string) {
+interface SingleUserOnlyTabDetails {
+  readonly title: string
+  readonly description: string
+  /** A screen this session can open for the nearest workspace-wide view, when one exists. */
+  readonly secondary: { readonly label: string; readonly path: string } | null
+}
+
+function singleUserOnlyTabDetails(tab: 'memory' | 'portrait-candle' | 'work-sandbox' | 'prompt', keeperId: string): SingleUserOnlyTabDetails {
   switch (tab) {
     case 'memory':
       return {
         title: `Memory OS · ${keeperId}`,
         description:
           'Keeper Memory OS Facts·Journal·Internals 조회 및 복구/철회(/api/v1/keepers/:k/memory-*)는 싱글유저 로컬 세션 전용입니다. 멀티 계정 서버에서는 마운트되지 않아 요청을 전송하지 않습니다.',
-        secondaryLabel: 'World Memory →',
-        secondaryPath: '/knowledge/memory',
+        secondary: { label: 'World Memory →', path: '/knowledge/memory' },
       }
     case 'portrait-candle':
       return {
         title: `Portrait & Candle · ${keeperId}`,
         description:
           'Keeper 초상화 렌더링(/api/v1/keepers/:k/portrait.png)과 장신구 상점(/api/v1/keepers/:k/items)은 싱글유저 로컬 세션 전용입니다. 워크스페이스 전체 Candle 원장은 Work → Candle에서 볼 수 있습니다.',
-        secondaryLabel: 'Work → Candle →',
-        secondaryPath: '/work/candle',
+        secondary: { label: 'Work → Candle →', path: '/work/candle' },
       }
     case 'work-sandbox':
       return {
         title: `Work & Sandbox · ${keeperId}`,
         description:
           'Keeper 운영자 노트(/operator-note), 도구 호출 통계/상세(/tool-stats, /tool-calls), 원시 트레이스, 개별 샌드박스 텔레메트리는 싱글유저 로컬 세션 전용입니다. 워크스페이스 작업은 Work → Tasks에서 확인할 수 있습니다.',
-        secondaryLabel: 'Work → Tasks →',
-        secondaryPath: '/work/tasks',
+        secondary: { label: 'Work → Tasks →', path: '/work/tasks' },
       }
     case 'prompt':
       return {
         title: `Prompt · ${keeperId}`,
         description:
-          'Keeper 가 마지막으로 조립한 프롬프트(/api/v1/keepers/:k/last-prompt)와 Provider 요청(/provider-input)은 싱글유저 로컬 세션 전용입니다. 공유 프롬프트는 Runtime → Prompts 에서 볼 수 있습니다.',
-        secondaryLabel: 'Runtime → Prompts →',
-        secondaryPath: '/runtime/prompts',
+          'Keeper 가 마지막으로 조립한 프롬프트(/api/v1/keepers/:k/last-prompt)와 Provider 요청(/provider-input)은 싱글유저 로컬 세션 전용입니다.',
+        secondary: null,
       }
   }
 }
@@ -748,13 +751,15 @@ function SingleUserOnlyTabNotice(props: {
           <button type="button" class="btn-primary" onClick=${props.onBackToChat}>
             Chat으로 돌아가기
           </button>
-          <button
-            type="button"
-            class="btn-ghost"
-            onClick=${() => props.onNavigate(details.secondaryPath)}
-          >
-            ${details.secondaryLabel}
-          </button>
+          ${details.secondary !== null && html`
+            <button
+              type="button"
+              class="btn-ghost"
+              onClick=${() => { if (details.secondary !== null) props.onNavigate(details.secondary.path) }}
+            >
+              ${details.secondary.label}
+            </button>
+          `}
         </div>
       </section>
     </div>

@@ -95,7 +95,7 @@ let assemble ~dynamic_context_partition ~existing_extra_system_context ~blocks =
       | (Block (Prompt_block_id.Librarian_working_context), _)
       | (Block (Prompt_block_id.Recalled_memory), _)
       | (Block (Prompt_block_id.Recalled_memory_status), _)
-      | (Block (Prompt_block_id.Operator_note), _) | (Block (Prompt_block_id.Skill_compositions), _)
+      | (Block (Prompt_block_id.Operator_note), _)
       | (Block (Prompt_block_id.Arrived_stimuli), _) -> Not_applicable in
     spans :=
       { kind
@@ -279,8 +279,7 @@ let block_author = function
   | Prompt_block_id.Goals_awaiting_proof
   | Prompt_block_id.Constitution_amendments
   | Prompt_block_id.Temporal_summary
-  | Prompt_block_id.Recalled_memory_status
-  | Prompt_block_id.Skill_compositions -> Keeper_context_layers.Host_state
+  | Prompt_block_id.Recalled_memory_status -> Keeper_context_layers.Host_state
   | Prompt_block_id.Active_goals
   | Prompt_block_id.Direct_input_source
   | Prompt_block_id.Completion_authority

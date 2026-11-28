@@ -29,8 +29,6 @@ let block_name : Prompt_block_id.t -> Say.t = function
   | Prompt_block_id.Recalled_memory_status ->
       Say.make ~ko:"회상 판정" ~en:"Recall judgment"
   | Prompt_block_id.Operator_note -> Say.make ~ko:"운영자 메모" ~en:"Operator note"
-  | Prompt_block_id.Skill_compositions ->
-      Say.make ~ko:"Skill 조합" ~en:"Skill compositions"
   | Prompt_block_id.Arrived_stimuli ->
       Say.make ~ko:"턴 중 도착" ~en:"Arrived during the turn"
 

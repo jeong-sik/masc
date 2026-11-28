@@ -43,14 +43,6 @@
     ids it carried. The body holds those memories and exists only when the
     judgment carried some. A Keeper whose recall judgment is off has neither.
 
-    [Skill_compositions] names the composition Skills carried by this turn's
-    tool surface. It exists because nothing else says they are there to a model
-    that does not read tool descriptions: keeper prompt blocks mentioned Skills
-    only through [current_task.skills] / [held_task.skills], which render only
-    when a task names one, and 0 of 292 recorded tasks ever did.
-    Measured 2026-09, Skills were opened 250 times across 108,185 tool calls,
-    and the busiest runtime opened none in 24,041 calls.
-
     [Arrived_stimuli] lists the queue rows that reached a Keeper's queue after
     the running turn began. The queue is read between turns, so a row that
     arrives during a turn waited for the turn to end; this block shows it on
@@ -75,7 +67,6 @@ type t =
   | Recalled_memory
   | Recalled_memory_status
   | Operator_note
-  | Skill_compositions
   | Arrived_stimuli
 
 val equal : t -> t -> bool
@@ -96,15 +87,15 @@ val cache_rank : t -> int
     always do — regardless of their size.
 
     Measured over 386 consecutive one measured Keeper turns (2026-09-08), distinct contents
-    per block: [skill_compositions] 1, [keeper_instructions] 5,
+    per block: [keeper_instructions] 5,
     [memory_os_recall] 65, [dynamic_context] 295, [temporal_summary] 306.
     Size runs the other way: [memory_os_recall] was 51,518 B of the 88,177 B
     assembled, sitting behind an 81 B clock line that changed nearly every
     turn. That turn reported 314,080 cache-creation tokens against 50,788
     cache reads.
 
-    [constitution_amendments] sits after [skill_compositions]: it changes only
-    when the world's article ledger is written. The delta leaves when the
+    [constitution_amendments] sits right after [keeper_instructions]: it
+    changes only when the world's article ledger is written. The delta leaves when the
     System is rendered again; the complete current article set does not.
 
     [goals_awaiting_proof] sits just in front of [completion_authority]: it

@@ -292,7 +292,6 @@ let read_composition (components : Turn_record.input_component list) =
              | Prompt_block_id.Recalled_memory
              | Prompt_block_id.Recalled_memory_status
              | Prompt_block_id.Operator_note
-             | Prompt_block_id.Skill_compositions
              | Prompt_block_id.Arrived_stimuli ) as id) ->
           ( instructions
           , schemas

@@ -1042,14 +1042,16 @@ status: reference
   접수 응답은 실행 완료를 뜻하지 않는다.
   → [Keeper_chat_operation_payload](../../lib/keeper/keeper_chat_operation_payload.mli)
 
-**Keeper Turn Slot Admission Priority (키퍼 턴 슬롯 진입 우선순위)**
-: 한 Keeper 파이버(`Owner` fiber)의 단일 실행 슬롯(`turn slot`)이 해제되었을 때, 큐에 대기 중인
-  청구 가능한 직접 입력(`claimable queued chat operation`)이 자율 턴(`autonomous turn`)보다
-  항상 먼저 슬롯을 획득하는 엄격한 우선순위 규칙(#41654). 자율 레인이 바쁜 슬롯을 반복
-  관측하더라도 진입 순서는 바뀌지 않는다. 러너가 준비되지 않은 Queued
-  chat은 자율 진입을 막지 않으며, 이전에 슬롯을 거절당한 자율 레인은 청구 가능한 직접 오퍼레이션이
-  슬롯을 가져가지 않고 슬롯이 여전히 미청구(`unclaimed`) 상태일 때 `notify_turn_slot_released`
-  신호로 깨어나 실행을 재개한다.
+**Keeper Turn Slot Alternation (키퍼 턴 슬롯 번갈아 받기)**
+: 한 Keeper 의 실행 슬롯(`turn slot`)이 비면 채팅 줄과 자율 줄이 번갈아 받는 규칙(#46120,
+  RFC a-keeper-takes-every-waiting-message-in-one-turn §4.1-3). 두 줄 모두 시작할 입력이 있으면
+  직전 턴을 받지 않은 줄이 받는다. 한 줄에만 입력이 있으면 그 줄이 받는다. 채팅 줄의 입력은
+  claim 가능한 채팅 작업이고, 자율 줄의 입력은 intake 가 지금 받는 이벤트 큐 행, 이번 주기가
+  모은 보드 활동, 행 없이 도는 실행(`Periodic_tick`, deferred runtime suffix)이다.
+  `Owner` 가 두 줄의 턴을 직접 쥔다. 채팅은 `operation_runner` 의 실행기로, 자율 턴은 heartbeat 가
+  `run_autonomous_turn` 으로 맡긴 턴으로 시작한다. 다른 줄을 위해 돌고 있는 턴을 끊지 않는다.
+  행을 하나도 admit 하지 못한 자율 턴도 자율 줄의 차례로 친다. 직전 줄은 `Owner` 메모리에만 있고
+  재시작하면 어느 줄에도 빚이 없다. Maintenance lane 은 어느 줄에도 속하지 않는다.
   → [Keeper_owner](../../lib/keeper/keeper_owner.mli)
 
 **Cancelled Chat Terminal Retention (취소된 채팅 종단 보존)**

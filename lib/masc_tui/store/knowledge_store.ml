@@ -2157,15 +2157,20 @@ let wiki_page_links t (detail : Wire_knowledge.wiki_page_detail) =
 (* Rows a retained image takes under its label, as in the chat transcript. *)
 let wiki_image_rows = 6
 
-let wiki_page_embeds_artifact (detail : Wire_knowledge.wiki_page_detail) =
+(* An embed without its own label is named by the artifact's title. A missing
+   artifact is not in the list, so its title cannot be read there. *)
+let wiki_page_names_artifacts_by_title (detail : Wire_knowledge.wiki_page_detail) =
   List.exists
     (fun (embed : Wire_knowledge.wiki_embed) ->
-      match embed.target with
-      | Wire_knowledge.Embed_artifact _ -> true
-      | Wire_knowledge.Embed_wiki _
-      | Wire_knowledge.Embed_media _
-      | Wire_knowledge.Embed_invalid
-      | Wire_knowledge.Embed_unsupported ->
+      match (embed.target, embed.label) with
+      | Wire_knowledge.Embed_artifact { exists = Some true | None; _ }, None -> true
+      | Wire_knowledge.Embed_artifact { exists = Some false; _ }, None
+      | Wire_knowledge.Embed_artifact _, Some _
+      | ( ( Wire_knowledge.Embed_wiki _
+          | Wire_knowledge.Embed_media _
+          | Wire_knowledge.Embed_invalid
+          | Wire_knowledge.Embed_unsupported ),
+          (Some _ | None) ) ->
           false)
     detail.embeds
 

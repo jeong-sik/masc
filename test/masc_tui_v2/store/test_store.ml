@@ -9488,7 +9488,8 @@ let test_sandbox_infra_probe_reads_selected_detail_with_fleet () =
 
 (* An artifact embed with no label is named by the artifact's title, which
    only the artifact list carries. A page with one asks for that list when it
-   lands, unless the list is held fresh. *)
+   lands, unless the list is held fresh. An embed with its own label, or of a
+   missing artifact, does not need the list. *)
 let test_wiki_artifact_embed_reads_the_artifact_list () =
   let artifact_id = "artifact-0123456789abcdef0123456789abcdef" in
   let summary : Wire_knowledge.wiki_page_summary =
@@ -9545,9 +9546,9 @@ let test_wiki_artifact_embed_reads_the_artifact_list () =
         };
     }
   in
-  let artifact_embed label : Wire_knowledge.wiki_embed =
+  let artifact_embed ?(exists = Some true) label : Wire_knowledge.wiki_embed =
     {
-      target = Wire_knowledge.Embed_artifact { id = artifact_id; exists = Some true };
+      target = Wire_knowledge.Embed_artifact { id = artifact_id; exists };
       label;
       syntax = Wire_knowledge.Embed_obsidian;
       raw = "![[artifact:" ^ artifact_id ^ "]]";
@@ -9629,6 +9630,14 @@ let test_wiki_artifact_embed_reads_the_artifact_list () =
   Alcotest.(check bool)
     "another page landing asks for neither the selected page nor the list" false
     (asks_for_a_page cmds_other || asks_for_artifacts cmds_other);
+  let _, cmds_labelled = page_lands on_wiki_tab (detail [ artifact_embed (Some "bench") ]) in
+  Alcotest.(check bool) "an artifact embed with its own label does not" false
+    (asks_for_artifacts cmds_labelled);
+  let _, cmds_missing =
+    page_lands on_wiki_tab (detail [ artifact_embed ~exists:(Some false) None ])
+  in
+  Alcotest.(check bool) "an embed of a missing artifact does not" false
+    (asks_for_artifacts cmds_missing);
   let _, cmds_plain = page_lands on_wiki_tab (detail []) in
   Alcotest.(check bool) "a page without an artifact embed does not" false
     (asks_for_artifacts cmds_plain);

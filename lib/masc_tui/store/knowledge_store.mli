@@ -664,8 +664,10 @@ val wiki_page_links : t -> Wire_knowledge.wiki_page_detail -> (string * string) 
     the hyperlink the Markdown renderer gives the link. A page embed of such a
     page counts too, as the link {!wiki_markdown_embeds} draws for it. *)
 
-val wiki_page_embeds_artifact : Wire_knowledge.wiki_page_detail -> bool
-(** The page embeds an artifact, whose title only the artifact list carries. *)
+val wiki_page_names_artifacts_by_title : Wire_knowledge.wiki_page_detail -> bool
+(** The page embeds an artifact without its own label that the store did not
+    report missing. {!wiki_markdown_embeds} names it by its title, which only
+    the artifact list carries. *)
 
 val wiki_markdown_embeds :
   lang:Say.lang -> t -> Wire_knowledge.wiki_page_detail -> Masc_tui_ui.Markdown.embed list

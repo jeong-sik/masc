@@ -39,8 +39,8 @@ val hydrate_chat_tool_results :
 
 val selected_wiki_page_fetch : Model.t -> Cmd.t list
 (** The selected Wiki page's GET when the Wiki tab is on screen and the page
-    body is not held fresh, and the artifact list's GET when that page embeds
-    an artifact and the list is not held fresh. The Wiki tab's fetch list can
+    body is not held fresh, and the artifact list's GET when that page names
+    an artifact by its title and the list is not held fresh. The Wiki tab's fetch list can
     only name a page once the index has landed, so the index reply asks for
     this; the selected page's reply asks for it to read the artifact list. *)
 

@@ -1,5 +1,61 @@
 ## [Unreleased]
 
+## [0.83.9] - 2026-11-28
+
+### Added
+
+- The TUI draws a CSS `#RRGGBB` literal on the color it names, in Markdown inline code whose whole text is one literal and in `css` fences, and in diff and file views of CSS. The text itself is unchanged, so search and copying see the same characters (#55168).
+- Dashboard Markdown shows a color chip before a CSS `#RRGGBB` literal, in inline code whose whole text is one literal and in `css` fences. The chip has no text, so copying and find in page are unchanged (#55169).
+- Add video attachment storage, RFC 9110 Range streaming, ffmpeg poster thumbnails, and structured chart/Pele chat blocks (#55344)
+- Fix Dashboard AlphaTex score rendering with built-in synth playback and add MIDI, WAV, and video chat players plus Pele chart support (#55344)
+- Add Pele chart palette and structured chart format, expanded TUI AlphaTex/Pele rendering, and local chat media playback via /play and /stop (#55344)
+- The dashboard Wiki page view lists the page headings in a table of contents. A click scrolls the body to that heading, and a heading inside a closed `<details>` is opened first (#55368).
+- **dashboard**: On the account server, Runtime → Quotas lists the subscriptions a signed-in person may connect, from `GET /api/v1/auth/integrations`, with a button for each way the server offers (login through the official client, API key) and the refusal of a provider whose calls the server refuses. The list opens by itself while the person has no account, and the API key form picks the provider from the key-capable integrations instead of a free-text id (#55422, Refs #55405).
+
+### Changed
+
+- Dashboard Runtime Quotas tab replaces ambiguous `Tier 1 / Tier 2 / Tier 3` labels with clear status groups (`주의 필요`, `정상 활성 구독`, `사용량 미보고`) and adds filter, sort, search, 24h per-scope call/token stats, window duration analysis measured to the last exhausted observation, and an inspect detail drawer (#55166).
+- The TUI Wiki card is laid out in one place (`Wiki_card_layout`) for drawing, the max scroll and `<`/`>` link steps, so a layout change can no longer scroll a picked link out of the drawn rows (#55232).
+- `POST /api/v1/keepers/ask-answer` commits the Keeper's queue pointer before it records the answer, under the Keeper's queue owner lock. A recorded answer is a plain 200 without a `delivered` flag; a second answer is 409 and no longer re-sends the first; while a shutdown holds the Keeper's intake the route answers 503 `keeper_shutting_down` and the question stays open (#55262).
+- The dashboard keeps an ask answer draft open and says the Keeper is shutting down when the server refuses the answer with 503 `keeper_shutting_down`; the "recorded, delivery pending recovery" notice is removed (#55264).
+- `masc_schedule_create` and `masc_schedule_update` now take a Keeper wake only: `keeper_name`
+  and `message` are required, and `installation_id` and `action` are no longer fields of
+  them. A Lane action is scheduled with the new `masc_schedule_lane_act_create` and replaced
+  with `masc_schedule_lane_act_update`, over MCP or `POST /api/v1/tools/<name>`. One pair
+  used to take either kind, so every caller was offered the fields of both. Over
+  2026-10-28..11-27 the one-of rule refused 300 calls carrying a Lane field such as
+  `installation_id = "x"`, 296 of them in two episodes (10-30..11-01 and 11-20..22) and in
+  chains of up to 29 calls, and all 93 Lane action schedules Keepers stored named an
+  installation that was not declared. On the other 25 days the rule refused 214 calls, 197
+  of which lacked `keeper_name` or `message`; those are now refused by the missing field's
+  name. A call
+  that sends `installation_id` and `action` to the wake pair, over MCP or HTTP, is now
+  refused and must move to the new tools; stored schedules are unchanged (#55363).
+- Dashboard Markdown table cells wrap only between words, Korean between eojeol, and a table whose words do not fit scrolls sideways in its own box. On the 55 workspace wiki tables at 560px, words broken across lines went from 126 to 25 (#55369).
+
+### Removed
+
+- The `wkbl-score-runs` Lane Add-on moved to the WKBL repository as `lane-addons/wkbl-score-runs`. An installation whose `manifest_path` names this repository's `addons/wkbl-score-runs/lane.toml` must name the WKBL copy instead (#55402).
+
+### Fixed
+
+- Answers that a Keeper already consumed are no longer delivered again when reaction-ledger day files leave the retention window or the ledger generation changes; the minute-tick ask answer recovery and its ledger reads are removed (#55263).
+- The ACP lane now waits up to 3s (polling every 50ms) for the end-of-turn record that kimi writes after its end_turn response, so prompts that fail on the weekly quota are reported as Host_turn_failed with the real cause instead of surfacing as empty_response with no failure record (#55375)
+- The TUI again refuses a chat image path under `/api/v1/media/` whose token is not a lowercase SHA-256 or `att_` id. One function now names the route of a served image path, and the duplicate `Wire_fleet.media_path_prefix` is removed (#55391).
+- **blob**: 본문에 실려 간 도구 결과(envelope)가 가리키는 manifest 를 tool blob sweep 이 산 참조로 세요. 전에는 그 결과가 기록에 남아 있어도 manifest 와 manifest 만 아는 artifact 를 아무도 붙잡지 않았어요. 세 곳에서 읽어요: 대화 기록의 결과 글, 압축 보관소(`<keeper>.compaction.db`)의 결과 글, 도구 원장 행의 `artifact_refs`(원장은 4,000 B 넘는 출력을 줄여 쓰기 때문에 줄이기 전 글에서 manifest 를 읽어 행에 적어요). envelope 가 store 에 없는 manifest 를 가리키거나 manifest 자리의 참조가 깨져 있으면 scan 이 삭제 없이 멈춰요. marker 가 그럴 때와 같은 규칙이에요 (#55394, Refs #55389)
+- Cost aggregation no longer double-counts: model-level, time-window, and cost/latency API metrics now share Model_inference_metrics_entry.complete_sum, which returns None when any input is unreported and preserves reported zeros as values (#55399)
+- `test_encoded_pixel_snapshot` (test/test_msx_routes.ml) no longer fails on the pinned ocaml-msx core (581da90). Two causes are fixed: (1) the synthetic boot ROM now routes page 1 to slot 2 itself (LD A,0x08; OUT (0xA8),A before JP 4010) - the pinned core no longer forces ppi_a in load_cartridge, so without this the cartridge never ran and the frame stayed blanked (all-zero rgb, GRAPHIC1), making every tick read retained (runs 46086810409, 46088129522, 46089075533, 46090234412); (2) the cartridge no longer polls the VBlank flag (flaky under CI) but scans the keyboard matrix on the core port contract (OUT (0xAA) (0x50|row), IN A,(0xA9), active low) and toggles VDP R#7 once per edge-detected key press, so one Lane.press deterministically changes pixels (runs 46077144207, 46082771264, 46084052839). Verified against both 581da90 and 3143a55 with a standalone repro (#55403).
+- **server**: Both servers apply `<base>/.masc/config/runtime.toml` before they bind their listeners, so `[transport] https_port` and the h2 window sizes of the file reach the TLS and HTTP listeners. Before, the file was applied only when the engine started, after the account server had bound the TLS port from the environment or the default 8938: an account server whose file said `https_port = 0` still took 8938 from a single-user server on the same host (#55420, Refs #55405).
+- **dashboard**: With no `MASC_ASSETS_DIR` and no candidate `assets` directory on disk, the server has no dashboard asset root instead of the first candidate. A binary installed in `~/.local/bin` and started from `$HOME` used to read `/Users/assets`, and `/dashboard` answered 503 with a read failure of that path; it now answers 503 because the dashboard asset root is unavailable, and reads no path (#55421, Refs #55405).
+
+### Documentation
+
+- **accounts**: The account server guide describes `/dashboard` on the account server, where the server reads the dashboard bundle (`MASC_ASSETS_DIR` and the candidate directories) and which TLS port it binds (`[transport] https_port`, `MASC_HTTPS_PORT`), and drops two lines that said the dashboard does not reach the account server and that no screen changes a person (#55424, Refs #55405).
+
+### Internal
+
+- Intake re-reads an ask under the Keeper queue owner lock before it acknowledges the ask's pointer as terminal, so an answer recorded in between is observed instead of dropped (#55261).
+
 ## [0.83.8] - 2026-11-27
 
 ### Added

@@ -21,6 +21,7 @@ import {
   revokeComposerPreviews,
   type ComposerAttachmentItem,
 } from '../../components/attachments'
+import { BoardTypedMediaList } from '../../components/attachments/board-typed-media'
 import { MarkdownContent } from '../../components/common/markdown-renderer'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { authSession, canUseSingleUserTokenRead, currentSessionEpoch, isEpochCurrent } from '../../core/auth'
@@ -1406,6 +1407,7 @@ export function BoardTab(props: WorkspaceViewProps) {
             ${activePost.attachments.length > 0 && html`
               <${AttachmentGallery} attachments=${activePost.attachments} workspaceEpoch=${currentSessionEpoch()} />
             `}
+            <${BoardTypedMediaList} media=${activePost.typedMedia} workspaceEpoch=${currentSessionEpoch()} />
           </article>
 
           <${ReactionBar}

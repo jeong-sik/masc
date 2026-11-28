@@ -144,7 +144,7 @@ describe('workspaces/knowledge', () => {
       id: 'p-old', title: 'Old Spec', body: 'v1', author: 'sangsu', hearth: 'arch', postKind: 'direct',
       visibility: 'internal', pinned: false, votes: 2, currentVote: null, commentCount: 0,
       createdAt: '2026-11-23T00:00:00Z', updatedAt: '2026-11-23T00:00:00Z', tags: [],
-      reactions: [], supportedReactionEmojis: ['👍', '🔥', '👀'], attachments: [],
+      reactions: [], supportedReactionEmojis: ['👍', '🔥', '👀'], attachments: [], typedMedia: [],
       closed: { closedBy: 'sangsu', closedAt: '2026-11-24T00:00:00Z', successorId: 'p-new', summary: 'Superseded by v2' },
       isSignal: true,
     }

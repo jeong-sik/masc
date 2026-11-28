@@ -55,8 +55,8 @@ val parse_args : Yojson.Safe.t -> (unresolved list, error) result
     as a video (the element sniffs the format, since no media type is stored
     per hash); [external_link] stays a download. [file], [audio], [score] and
     [midi] carry no per-kind server behaviour: they are stored and served like
-    any artifact. The dashboard offers a stored one as a download; nothing
-    plays or draws them. *)
+    any artifact. The dashboard Board screen plays [audio] and [midi] of a
+    post; it does not draw [file] or [score]. *)
 
 val resolve :
   base_path:string ->

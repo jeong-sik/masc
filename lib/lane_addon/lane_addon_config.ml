@@ -3,6 +3,7 @@ let one_exact_at_a_time = 1
 let exact_in_flight count = if count >= one_exact_at_a_time then Some count else None
 
 type package_source = Carried of Lane_addon_carried.id | Manifest_path
+type authority = Operator_marked | Unmarked
 
 type declaration = {
   id : string;
@@ -16,6 +17,7 @@ type declaration = {
   source_revision : string;
   source_path : string;
   max_exact_in_flight : exact_in_flight;
+  authority : authority;
 }
 
 type issue = { source_path : string; id : string option; message : string }
@@ -149,7 +151,7 @@ let package_source_of_fields fields =
 
 let decode ~packages ~manifest_scope ~source_path ~source_revision ~id fields =
   let allowed = ["id"; "enabled"; "run_id"; "package"; "manifest_path"; "binding"; "tool_hooks"; "exact_outputs";
-    "max_exact_in_flight"] in
+    "max_exact_in_flight"; "operator_authority"] in
   let* () = match List.find_opt (fun (key, _) -> not (List.mem key allowed)) fields with
     | None -> Ok () | Some (key, _) -> Error ("unknown declaration field: " ^ key) in
   let* enabled = match List.assoc_opt "enabled" fields with
@@ -168,6 +170,14 @@ let decode ~packages ~manifest_scope ~source_path ~source_revision ~id fields =
     | Some (Otoml.TomlOffsetDateTime _) | Some (Otoml.TomlLocalDateTime _)
     | Some (Otoml.TomlLocalDate _) | Some (Otoml.TomlLocalTime _) | Some (Otoml.TomlArray _)
     | Some (Otoml.TomlTable _) | Some (Otoml.TomlInlineTable _) | Some (Otoml.TomlTableArray _) -> refused in
+  let* authority = match List.assoc_opt "operator_authority" fields with
+    | None | Some (Otoml.TomlBoolean false) -> Ok Unmarked
+    | Some (Otoml.TomlBoolean true) -> Ok Operator_marked
+    | Some (Otoml.TomlString _) | Some (Otoml.TomlInteger _) | Some (Otoml.TomlFloat _)
+    | Some (Otoml.TomlOffsetDateTime _) | Some (Otoml.TomlLocalDateTime _)
+    | Some (Otoml.TomlLocalDate _) | Some (Otoml.TomlLocalTime _) | Some (Otoml.TomlArray _)
+    | Some (Otoml.TomlTable _) | Some (Otoml.TomlInlineTable _) | Some (Otoml.TomlTableArray _) ->
+        Error "operator_authority requires a boolean" in
   let* run_id = text fields "run_id" in
   let directory = Filename.dirname source_path in
   (* A carried package resolves only to the folder holding exactly this
@@ -241,7 +251,7 @@ let decode ~packages ~manifest_scope ~source_path ~source_revision ~id fields =
   in
   let revision = Agent_core_sha256.(to_hex (digest_string canonical)) in
   Ok { id; enabled; run_id; package_source; manifest_path; package; binding; revision; source_revision; source_path;
-       max_exact_in_flight }
+       max_exact_in_flight; authority }
 
 let parse_declaration ~packages ~manifest_scope ~source_path bytes =
   let failure ?id ~unreadable message =

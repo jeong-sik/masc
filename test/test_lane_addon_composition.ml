@@ -126,15 +126,15 @@ memory_bytes=67108864
 pids=16
 max_reply_bytes=%d
 |} max_reply_bytes ^ outputs); path
-let declare ?(run="world") ?(value="initial") directory manifest id sources =
+let declare ?(run="world") ?(value="initial") ?(operator_authority=false) directory manifest id sources =
   let path = Filename.concat directory (id ^ ".toml") in
   write path (Printf.sprintf {|id=%S
-run_id=%S
+%srun_id=%S
 manifest_path=%S
 [binding]
 value=%S
 sources=%s
-|} id run manifest value sources); path
+|} id (if operator_authority then "operator_authority=true\n" else "") run manifest value sources); path
 let edge ?output_id id = Printf.sprintf {|[{source_id="upstream",kind="lane_output",installation_id=%S,selection="latest_completed"%s}]|}
   id (Option.fold ~none:"" ~some:(Printf.sprintf ",output_id=%S") output_id)
 let reconcile config directory = let _status = unwrap (Runtime.reconcile_configuration ~config ~directory) in ()
@@ -1275,7 +1275,8 @@ let test_document_reader_follows_its_named_browser () =
     let before = page_input () in
     check bool "without its browser the page is unavailable" true
       (member "complete" before = `Bool false && list "observations" before = []);
-    let browser_declaration = declare ~run:"browsers" directory (browser_manifest root) "browser" "[]" in
+    let browser_declaration =
+      declare ~operator_authority:true ~run:"browsers" directory (browser_manifest root) "browser" "[]" in
     reconcile config directory;
     let browser = active config "browser" |> text "instance_id" in
     await clock (fun () -> sequence reader = 2);

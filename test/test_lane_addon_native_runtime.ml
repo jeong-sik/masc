@@ -127,6 +127,7 @@ let native_installation_with_slot seed_slot () = with_fixture (fun clock root co
   let declaration = Filename.concat directory "configured.toml" in
   let configure enabled = write declaration (Printf.sprintf {|id = "configured-native"
 enabled = %b
+operator_authority = true
 run_id = "native-world"
 manifest_path = %S
 [binding]
@@ -328,6 +329,7 @@ let shutdown_detach_lets_the_next_server_attach () = with_fixture (fun clock roo
   let directory = Filename.concat root "declarations" in Unix.mkdir directory 0o700;
   let configure enabled = write (Filename.concat directory "configured.toml") (Printf.sprintf {|id = "configured-native"
 enabled = %b
+operator_authority = true
 run_id = "native-world"
 manifest_path = %S
 [binding]

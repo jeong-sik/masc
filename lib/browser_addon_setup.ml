@@ -188,29 +188,39 @@ let same_file a b =
   | a, b -> String.equal a b
   | exception (Unix.Unix_error _ | Sys_error _) -> false
 
-let declaration_text ~backend ~manifest_path ~package_directory =
+let declaration_text ~backend ~(package : Lane_addon_types.package) ~manifest_path ~package_directory =
+  (* RFC lane-declaration-operator-authority: reconcile runs a host_process
+     package only for a declaration that carries the operator's line. *)
+  let authority = match package.execution with
+    | Lane_addon_types.Host_process _ ->
+      [ "# operator_authority lets this host_process Add-on run. Only the operator"
+      ; "# can save that line."
+      ; "operator_authority = true" ]
+    | Lane_addon_types.Container _ -> [] in
   String.concat "\n"
-    [ "# Declared by masc browser-lane-setup. manifest_path names the browser Add-on"
-    ; "# package of the " ^ Browser_lane.Backend.to_wire backend ^ " source that masc writes to"
-    ; "# " ^ package_directory ^ "; setup and install-local-build.sh rewrite that"
-    ; "# package when masc is upgraded, so this file does not change. Set"
-    ; "# enabled = false to keep the Add-on detached."
-    ; Toml_line_editor.scalar_line ~key:"id" ~value:(package_name backend)
-    ; "enabled = true"
-    ; Toml_line_editor.scalar_line ~key:"run_id" ~value:(package_name backend)
-    ; Toml_line_editor.scalar_line ~key:"manifest_path" ~value:manifest_path
-    ; ""
-    ; "[binding]"
-    ; "sources = []"
-    ; ""
-    ]
+    ([ "# Declared by masc browser-lane-setup. manifest_path names the browser Add-on"
+     ; "# package of the " ^ Browser_lane.Backend.to_wire backend ^ " source that masc writes to"
+     ; "# " ^ package_directory ^ "; setup and install-local-build.sh rewrite that"
+     ; "# package when masc is upgraded, so this file does not change. Set"
+     ; "# enabled = false to keep the Add-on detached."
+     ; Toml_line_editor.scalar_line ~key:"id" ~value:(package_name backend)
+     ; "enabled = true"
+     ]
+     @ authority
+     @ [ Toml_line_editor.scalar_line ~key:"run_id" ~value:(package_name backend)
+       ; Toml_line_editor.scalar_line ~key:"manifest_path" ~value:manifest_path
+       ; ""
+       ; "[binding]"
+       ; "sources = []"
+       ; ""
+       ])
 
-let declare ~backend ~packages ~directory ~manifest_path ~package_directory =
+let declare ~backend ~package ~packages ~directory ~manifest_path ~package_directory =
   let request =
     `Assoc
       [ "mode", `String "create"
       ; "file_name", `String (declaration_file_name backend)
-      ; "source_text", `String (declaration_text ~backend ~manifest_path ~package_directory)
+      ; "source_text", `String (declaration_text ~backend ~package ~manifest_path ~package_directory)
       ]
   in
   let refused (error : Lane_addon_declaration.error) = Declaration_refused error.message in
@@ -327,7 +337,7 @@ let apply_package plan (backend, files) =
        with
        | Some issue ->
          Error (Declaration_unloadable { path = issue.source_path; reason = issue.message })
-       | None -> declare ~backend ~packages ~directory:plan.lane_directory ~manifest_path ~package_directory:directory)
+       | None -> declare ~backend ~package ~packages ~directory:plan.lane_directory ~manifest_path ~package_directory:directory)
   in
   Ok
     { backend

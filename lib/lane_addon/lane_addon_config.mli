@@ -18,6 +18,16 @@ type package_source =
       (** [package = "<name>"]: the folder of the package this server carries. *)
   | Manifest_path  (** [manifest_path]: a package the operator placed. *)
 
+(** RFC lane-declaration-operator-authority 3.1: whether the declaration's
+    bytes carry operator authority. The save path refuses
+    [operator_authority = true] from a Keeper or an unauthenticated caller, so
+    only the operator's own edits and operator saves write it. *)
+type authority =
+  | Operator_marked  (** [operator_authority = true]. *)
+  | Unmarked
+      (** No such line, or [false]. Anyone allowed to save the declaration's
+          visibility may have written these bytes. *)
+
 type declaration = {
   id : string;
   enabled : bool;
@@ -34,6 +44,9 @@ type declaration = {
   max_exact_in_flight : exact_in_flight;
   (** {!one_exact_at_a_time} when the declaration has no such key. It is not a
       worker input, so it is outside [revision]. *)
+  authority : authority;
+  (** Outside [revision]: it changes what the worker may do, not what it runs.
+      Reconcile compares a running worker's authority on its own. *)
 }
 
 type issue = { source_path : string; id : string option; message : string }

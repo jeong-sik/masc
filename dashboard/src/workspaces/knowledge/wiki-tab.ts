@@ -193,8 +193,15 @@ type WikiEditorViewMode = 'write' | 'split' | 'preview'
 
 const SPLIT_PREVIEW_DEBOUNCE_MS = 150
 
+function wikiIndexQuery(sort: string, tag: string, source: string): string {
+  const params = new URLSearchParams({ sort })
+  if (tag) params.set('tag', tag)
+  if (source) params.set('source', source)
+  return params.toString()
+}
+
 /** Index query for every page: the embed picker offers all pages even while a tag or source filter narrows the list. */
-const ALL_PAGES_INDEX_QUERY = 'sort=updated'
+const ALL_PAGES_INDEX_QUERY = wikiIndexQuery('updated', '', '')
 
 const NO_ALL_PAGES_MESSAGE = '전체 위키 목록을 받지 못했습니다.'
 
@@ -211,12 +218,6 @@ function readWikiIndex(query: string, reason: 'mount' | 'manual'): Promise<Obser
     }),
     { ttlMs: 12_000, topics: ['wiki', 'wiki_updated'], reason },
   )
-}
-
-function shownIndexEmbedPages(index: WikiIndexData | null, loadError: string | null): WikiEmbedPages {
-  if (index !== null) return { kind: 'ready', pages: index.pages }
-  if (loadError !== null) return { kind: 'failed', message: loadError }
-  return { kind: 'loading' }
 }
 
 function embedPagesOf(obs: Observed<WikiIndexData>): WikiEmbedPages {
@@ -337,10 +338,7 @@ export function WikiTab(props: WorkspaceViewProps) {
     const startEpoch = currentSessionEpoch()
     setLoading(true)
     setLoadError(null)
-    const params = new URLSearchParams({ sort })
-    if (tagFilter) params.set('tag', tagFilter)
-    if (sourceFilter) params.set('source', sourceFilter)
-    const obs = await readWikiIndex(params.toString(), reason)
+    const obs = await readWikiIndex(wikiIndexQuery(sort, tagFilter, sourceFilter), reason)
     if (!mountedRef.current || indexSeqRef.current !== seq || !isEpochCurrent(startEpoch)) return
     setLoading(false)
     if (obs.kind === 'value') {
@@ -362,9 +360,13 @@ export function WikiTab(props: WorkspaceViewProps) {
     void loadIndex('mount')
   }, [loadIndex])
 
-  // A filtered index lists only some pages, so the picker reads the index of
-  // every page. Without a filter the index on screen already lists every page.
+  // The picker offers every page. A filtered index lists only some pages, so
+  // under a filter the picker reads the index of every page; without one the
+  // index on screen lists every page and the picker uses the same query. The
+  // picker renders that query's cache entry, so a read that fails or ends
+  // absent reaches it, and it never shows an index of another query.
   const pickerReadsAllPages = tagFilter !== '' || sourceFilter !== ''
+  const pickerIndexQuery = pickerReadsAllPages ? ALL_PAGES_INDEX_QUERY : wikiIndexQuery(sort, '', '')
 
   const loadPickerPages = useCallback((reason: 'mount' | 'manual') => {
     if (pickerReadsAllPages) {
@@ -618,14 +620,6 @@ export function WikiTab(props: WorkspaceViewProps) {
   }, [casConflict])
 
   const displayedPages = wikiIndex ? wikiIndex.pages : []
-  // The picker renders the cache entry, so a read that fails or ends after
-  // another read of the same index still reaches it.
-  const allPagesObs = editing && pickerReadsAllPages
-    ? resourceCache.observe<WikiIndexData>(wikiIndexKey(ALL_PAGES_INDEX_QUERY)).value
-    : null
-  const pickerPages = allPagesObs !== null
-    ? embedPagesOf(allPagesObs)
-    : shownIndexEmbedPages(wikiIndex, loadError)
 
   const masterPane = html`
     <div class="kn-pane-col">
@@ -1134,7 +1128,7 @@ export function WikiTab(props: WorkspaceViewProps) {
                 ${mediaComposer.uploading ? '업로드 중…' : '이미지 첨부'}
               </button>
               <${WikiEmbedPicker}
-                wikiPages=${pickerPages}
+                wikiPages=${embedPagesOf(resourceCache.observe<WikiIndexData>(wikiIndexKey(pickerIndexQuery)).value)}
                 onLoadWikiPages=${loadPickerPages}
                 currentSlug=${creatingNew ? null : editSlug}
                 disabled=${saving}

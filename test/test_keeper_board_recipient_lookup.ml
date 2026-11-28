@@ -328,8 +328,9 @@ let broadcast_receivers config ~keepers name =
    Keeper. [aliased] lists only an alias, so its own name is not one of its
    addresses: [claimer] lists that name, and both paths deliver it to
    [claimer]. [orphan] lists only an alias and nobody lists its name, so both
-   paths leave [@orphan] undelivered. The expected Keepers are written out, so
-   the two paths agreeing on a wrong Keeper still fails. *)
+   paths leave [@orphan] undelivered. A name written in capitals is the same
+   address. The expected Keepers are written out, so the two paths agreeing on
+   a wrong Keeper still fails. *)
 let test_a_broadcast_reaches_the_keeper_the_board_routes_to config =
   register_keeper config "plain";
   register_keeper config ~mention_targets:[ "listed"; "listed-alias" ] "listed";
@@ -350,10 +351,13 @@ let test_a_broadcast_reaches_the_keeper_the_board_routes_to config =
          expected
          (broadcast_receivers config ~keepers name))
     [ "plain", [ "plain" ]
+    ; "PLAIN", [ "plain" ]
     ; "listed", [ "listed" ]
     ; "listed-alias", [ "listed" ]
+    ; "Listed-Alias", [ "listed" ]
     ; "only-alias", [ "aliased" ]
     ; "aliased", [ "claimer" ]
+    ; "Aliased", [ "claimer" ]
     ; "orphan", []
     ; "nobody", []
     ]

@@ -2,7 +2,8 @@
    Keeper ([Keeper_lane_mentions.effective_target_ids]): its [mention_targets]
    when it has any, else its own name.  The lookup asks the same function, so a
    name it declares is a name the router delivers on.  The broadcast path asks
-   [answers] before it takes a Keeper's own name, so it reaches the same Keeper. *)
+   [answers] before it takes a Keeper's own name, so it reaches a Keeper the
+   router delivers that name to. *)
 let answers (meta : Keeper_meta_contract.keeper_meta) id =
   List.exists
     (Keeper_identity.Keeper_id.equal id)

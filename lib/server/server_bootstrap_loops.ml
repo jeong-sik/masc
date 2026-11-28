@@ -169,24 +169,27 @@ let broadcast_mention_wakeup_action = function
   | Some target when String.trim target <> "" -> `Wake_keeper target
   | Some _ | None -> `Suppress_no_target
 
-(* A mention reaches the Keeper the Board would deliver the same name to. The
-   file under the written name is that Keeper's only when it answers to the
-   name ([Keeper_board_recipient_lookup.answers]): a Keeper whose
-   [mention_targets] leave its own name out is looked up among the aliases
-   like any other name. *)
+(* A mention reaches a Keeper the Board router delivers the same name to. The
+   written name is folded to its id first, as the Board lookup folds it, and a
+   Keeper name is that lower-case id. The settings under that name are taken
+   only when they belong to that Keeper and it answers to the name
+   ([Keeper_board_recipient_lookup.answers]). A Keeper whose [mention_targets]
+   leave its own name out is looked up among the aliases like any other name. *)
 let resolve_broadcast_mention_target ~config target =
-  let answers_to_target meta =
-    match Keeper_identity.Keeper_id.of_string target with
-    | Some id -> Keeper_board_recipient_lookup.answers meta id
-    | None -> false
-  in
-  match Keeper_meta_store.read_effective_meta config target with
-  | Error detail -> Error detail
-  | Ok (Some meta) when answers_to_target meta -> Ok (Some (target, meta))
-  | Ok (Some _ | None) ->
-    Keeper_meta_store.persisted_keeper_for_mention_target
-      config
-      ~mention_target:target
+  match Keeper_identity.Keeper_id.of_string target with
+  | None -> Ok None
+  | Some id ->
+    let name = Keeper_identity.Keeper_id.to_string id in
+    (match Keeper_meta_store.read_effective_meta config name with
+     | Error detail -> Error detail
+     | Ok (Some meta)
+       when String.equal meta.Keeper_meta_contract.name name
+            && Keeper_board_recipient_lookup.answers meta id ->
+       Ok (Some (name, meta))
+     | Ok (Some _ | None) ->
+       Keeper_meta_store.persisted_keeper_for_mention_target
+         config
+         ~mention_target:name)
 
 (* Who wrote a workspace message, as the recipient's transcript records it.
    A sender the Keeper registry holds under exactly this name is that Keeper;

@@ -224,8 +224,10 @@ let test_configured_mention_alias_resolves_and_stamps_feed_target () =
     let mentions =
       List.map Keeper_identity.Keeper_id.to_string message.mentions
     in
-    check bool "persisted row carries configured feed target" true
-      (List.mem delivery_target mentions)
+    (* The row carries the Keeper's addresses. Its own name is not one of them,
+       because the list leaves it out. *)
+    check (list string) "persisted row carries exactly the configured feed target"
+      [ delivery_target ] mentions
 ;;
 
 let test_canonical_delivery_stamps_configured_feed_target () =

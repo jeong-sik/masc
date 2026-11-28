@@ -75,11 +75,6 @@ type t = private
     selections merged from different snapshots or mixed bound/unbound Tool
     projections. It grants no execution right. *)
 
-type partition = private
-  { instructions : selected list
-  ; compositions : selected list
-  }
-
 val resolve :
   ?descriptors:Keeper_tool_descriptor.t list ->
   snapshot:Skill_catalog_snapshot.t -> Skill_reference.t list -> (t, error) result
@@ -163,11 +158,6 @@ val error_code : error -> string
 val error_to_string : error -> string
 val core_error : error -> Agent_core.Error.t
 val of_core_error : Agent_core.Error.t -> error option
-
-val partition : t -> partition
-(** Split one exact selection by its projected surface. Malformed composition
-    declarations are frozen instruction selections with [diagnostic = Some _];
-    they are not setup failures or executable composition tools. *)
 
 val skills : t -> Keeper_skill_catalog.skill list
 

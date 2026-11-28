@@ -42,11 +42,6 @@ type t =
   ; preparation : preparation option
   }
 
-type partition =
-  { instructions : selected list
-  ; compositions : selected list
-  }
-
 (* A snapshot whose Skill configuration was rejected or unreadable holds no
    entries, so every pin would read as deleted. That is a configuration
    problem, not a stale pin, and it stops setup: the Task's procedure is not
@@ -437,20 +432,6 @@ let error_code = Keeper_task_skill_resolution_error.code
 let error_to_string = Keeper_task_skill_resolution_error.to_string
 let core_error = Keeper_task_skill_resolution_error.core_error
 let of_core_error = Keeper_task_skill_resolution_error.of_core_error
-
-let partition selection =
-  List.fold_left
-    (fun partition selected ->
-       match selected.skill.surface with
-       | Keeper_skill_catalog.Instruction ->
-         { partition with instructions = selected :: partition.instructions })
-    { instructions = []; compositions = [] }
-    selection.selected
-  |> fun partition ->
-  { instructions = List.rev partition.instructions
-  ; compositions = List.rev partition.compositions
-  }
-;;
 
 let skills selection = List.map (fun selected -> selected.skill) selection.selected
 

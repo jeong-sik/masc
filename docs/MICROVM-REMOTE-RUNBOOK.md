@@ -150,25 +150,10 @@ microVM Keeper 를 돌리지 않는 workspace 는 shim 이 필요 없다. 다시
 `masc-exec-shim` 을 지우고 설치한다.
 checkout 에서 고친 서버·shim 을 microVM 에 배포할 때는 옵션 없이
 `scripts/install-local-build.sh` 를 돌린다. 위에 적은 대로 신원이 다른 shim 을 다시 빌드한다.
-`--refresh-guest-shim` 은 이미 있는 릴리즈 shim 을 그 릴리즈의 자산으로 맞춘다.
-빌드한 서버가 그 릴리즈와 같은 소스일 때만 shim 을 바꾼다. checkout 빌드는 릴리즈를 읽으면
-아래 표의 소스 신원 행에서 멈추고, 릴리즈를 못 읽으면 WARN 한 줄 뒤 shim 을 둔 채 설치를 계속한다.
-빌드가 끝났으면 `--skip-build` 도 붙인다. 새로 놓지는 않는다.
-이 옵션을 주고 workspace 에 바이너리와 sidecar 가 둘 다 있으면, 빌드한
-서버가 말하는 버전의 릴리즈에서 같은 자산을 받아 `SHA256SUMS` 와 맞춰 보고 두 파일을
-바꾼다. 어느 자산(arm64, amd64)인지는 sidecar 에 적힌 이름에서 읽는다.
-아래 표는 `--refresh-guest-shim` 을 준 경우다.
-
-| 경우 | 하는 일 |
-|---|---|
-| shim 이 없다 | 아무것도 안 한다 |
-| shim 이 이미 그 릴리즈의 것 | 체크섬은 조회하고, 바이너리는 다시 받지 않는다 |
-| sidecar 가 없다 (소스로 빌드한 shim) | 이 옵션은 건드리지 않는다. 기본 설치가 다시 빌드한다(아래 「직접 빌드」) |
-| sidecar 에 릴리즈 자산 이름이 없다 | shim 을 그대로 두고 WARN 한 줄, 설치는 계속 |
-| 릴리즈를 읽을 수 없거나, 릴리즈에 그 자산이 없다 | shim 을 그대로 두고 WARN 한 줄(curl 이 말한 이유 포함), 설치는 계속. 다음 명시적 갱신 때 다시 받는다 |
-| 받은 자산이 `SHA256SUMS` 와 다르다 | 아무것도 설치하지 않고 멈춘다 |
-| 받은 자산이나 이미 깔린 그 릴리즈 자산이 이 빌드와 다른 소스 신원을 적었다(또는 안 적었다) | 아무것도 설치하지 않고 멈춘다. 서버가 그 shim 을 거절하기 때문이다. checkout 빌드는 릴리즈의 소스가 아니므로 늘 여기서 멈춘다. 메시지가 지금 트리로 빌드하는 명령(아래 「직접 빌드」)을 알려 준다 |
-| 빌드한 서버(`main_eio.exe`)에서 소스 신원을 하나로 읽지 못한다 | 아무것도 설치하지 않고 멈춘다 |
+빌드가 끝났으면 `--skip-build` 를 붙인다. shim 이 없는 workspace 에 새로 놓지는 않는다.
+빌드한 서버(`main_eio.exe`)에서 소스 신원을 하나로 읽지 못하면 아무것도 설치하지 않고 멈춘다.
+릴리즈 shim 을 그 릴리즈의 자산으로 되돌리는 일은 릴리즈 설치기가 한다
+(`scripts/install.sh --version vX.Y.Z --force --base-path <workspace>`).
 
 켜져 있는 게스트는 다음 요청부터 새 shim 을 쓴다. 서버는 옛 shim 이 probe 에 답한
 릴리즈와 기능 목록을 다시 띄울 때까지 들고 있다.
@@ -205,8 +190,7 @@ shim(0.73.1 이하 릴리즈, 이 변경 전 checkout 빌드)은 값이 없다.
 microsandbox) 모두에서 그 게스트를 건드리기 전에 난다.
 릴리즈 서버는 같은 태그의 자산이 맞는다(`scripts/install.sh --version vX.Y.Z
 --force --base-path <workspace>`). checkout 으로 빌드한 서버는 어떤 릴리즈 자산과도 맞지 않으니, 같은
-checkout 에서 shim 을 빌드한다. `install-local-build.sh --refresh-guest-shim` 도
-이 경우 릴리즈 shim 을 깔지 않고 멈춘다. 그 옵션 없이 돌린 `install-local-build.sh` 는
+checkout 에서 shim 을 빌드한다. `install-local-build.sh` 는
 작업 공간 shim 의 신원이 다르면 sidecar 가 있든 없든 아래 빌드를 대신 한다. 아키텍처는 옛 shim 의
 ELF 헤더에서 읽는다. 옛 shim 은 옆에 `masc-exec-shim.previous` 로 남는다. 이 파일은
 마지막으로 바꾼 shim 하나만 담고, 다음 빌드가 덮어쓴다.

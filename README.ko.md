@@ -175,7 +175,6 @@ scripts/install-local-build.sh --base-path "$HOME/MASC"
 소스 신원을 적었으면, 릴리즈가 놓은 shim 이어도 서버를 바꾸기 전에 같은 체크아웃에서 다시
 빌드합니다(Docker 필요). 빌드가 실패하면 아무것도 설치하지 않습니다. microVM Keeper 를
 돌리지 않는 작업 공간은 shim 이 필요 없으니, 그때는 `masc-exec-shim` 을 지우고 다시 설치합니다.
-`--refresh-guest-shim` 은 기존 릴리즈 shim 을 빌드가 말하는 릴리즈의 자산으로 바꿉니다.
 아무것도 바꾸기 전에 새 빌드로 작업 공간의 `runtime.toml`을 검사합니다.
 경로가 해석되고 아직 존재하지 않는다고 확인되면 새 작업 공간으로 취급하고 검사는
 미실행으로 표시합니다. 경로를 해석하거나 관측할 수 없으면 교체 전에

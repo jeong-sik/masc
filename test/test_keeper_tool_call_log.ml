@@ -2231,6 +2231,55 @@ let test_output_blob_marker_normalized () =
        | _ -> Alcotest.fail "missing/unexpected output field")
     | _ -> Alcotest.fail "expected exactly one entry")
 
+(* A result that went to the model inline is logged as its envelope text.
+   Past [max_output_len] the log rewrites that text, which is then no longer
+   the envelope a reader of references recognises. The row names the manifest
+   in [artifact_refs], read before the cut, for a short envelope and a long
+   one alike. *)
+let test_inline_result_manifest_is_named_on_the_row () =
+  with_tmp_log (fun () ->
+    let manifest =
+      artifact_ref_exn
+        ~sha256:(String.make 64 'c')
+        ~bytes:128
+        ~mime:Tool_output.artifact_manifest_mime
+        ~preview:""
+    in
+    let envelope structured_content =
+      Tool_output.artifact_result_envelope_to_json
+        ~artifact_manifest:manifest
+        ~structured_content
+        ()
+      |> Yojson.Safe.to_string
+    in
+    let short = envelope (`Assoc [ "status", `String "ok" ]) in
+    let long =
+      envelope
+        (`Assoc
+          [ "stdout", `String (String.make (2 * Keeper_tool_call_log.max_output_len) 'o') ])
+    in
+    Alcotest.(check bool)
+      "the long envelope is past the log's output bound"
+      true
+      (String.length long > Keeper_tool_call_log.max_output_len);
+    List.iter
+      (fun (label, output_text) ->
+         Keeper_tool_call_log.log_call
+           ~keeper_name:"k" ~tool_name:"tool_inline_result"
+           ~input:(`Assoc []) ~output_text
+           ~wire_outcome:Tool_result.Ok ~duration_ms:1.0 ();
+         match read_recent ~n:1 () with
+         | [ `Assoc fields ] ->
+           Alcotest.(check bool)
+             (label ^ ": the row names the manifest")
+             true
+             (match List.assoc_opt "artifact_refs" fields with
+              | Some (`List refs) ->
+                List.mem (Tool_output.normalized_artifact_ref_to_json manifest) refs
+              | Some _ | None -> false)
+         | _ -> Alcotest.failf "%s: expected one row" label)
+      [ "short envelope", short; "long envelope", long ])
+
 (* Inline outputs (below the externalization threshold) must stay as
    plain JSON strings so legacy jq pipelines and the UI's string-render
    path keep working. *)
@@ -3735,6 +3784,8 @@ let () =
     ; ( "blob_normalize",
         [ eio_test "blob marker persists as structured _blob object"
             test_output_blob_marker_normalized
+        ; eio_test "an inline result's manifest is named on the row"
+            test_inline_result_manifest_is_named_on_the_row
         ; eio_test "inline string output stays a JSON string"
             test_output_inline_string_preserved
         ; eio_test "large output records preview truncation"

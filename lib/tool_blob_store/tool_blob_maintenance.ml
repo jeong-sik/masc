@@ -303,9 +303,32 @@ let add_references
   =
   match Tool_output.decode_from_agent_core text with
   | Tool_output.Not_marker ->
-    (match Tool_output.decode_structured_handle text with
-     | Tool_output.Not_marker -> Ok references
-     | Tool_output.Invalid_marker { detail } ->
+    (match Tool_output.decode_structured_reference text with
+     | Tool_output.No_structured_reference -> Ok references
+     (* A result that went to a model inline is stored as this text. The
+        manifest it names is a live reference like a bare marker's, and the
+        manifest expansion reaches the result's artifacts from it. *)
+     | Tool_output.Result_envelope_manifest reference ->
+       Ok (Live_reference_set.add (Artifact reference) references)
+     (* The envelope's manifest field holds a [_blob] that does not decode.
+        It is handled as that object is handled when a record stores it
+        outside a string. *)
+     | Tool_output.Invalid_result_envelope_manifest { detail; artifact_manifest_fields } ->
+       (match mode with
+        | Strict_structured ->
+          Error (Malformed_structured_artifact_reference { path; line; detail })
+        | Resilient_structured callbacks ->
+          let references, fields_to_scan =
+            pin_malformed_blob_assoc
+              ~callbacks
+              ~path
+              ~line
+              ~detail
+              references
+              artifact_manifest_fields
+          in
+          scan_fields_resilient references fields_to_scan)
+     | Tool_output.Invalid_structured_handle { detail } ->
        (match mode with
         | Strict_structured ->
           Error (Malformed_structured_artifact_reference { path; line; detail })
@@ -319,7 +342,7 @@ let add_references
            | _ | exception Yojson.Json_error _ ->
              callbacks.warn (Unpinnable_malformed_blob_ref { path; line; detail });
              Ok references))
-     | Tool_output.Decoded reference ->
+     | Tool_output.Structured_handle reference ->
        let canonical =
          Tool_output.encode_structured_handle (Tool_output.Stored reference)
        in

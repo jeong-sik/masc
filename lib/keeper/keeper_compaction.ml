@@ -874,17 +874,32 @@ let history_tool_payload_key fields =
 let rec extract_blob_refs_from_json ~history_media ~seen ~acc_rev (json : Yojson.Safe.t) =
   match json with
   | `String text ->
-    (match Tool_output.decode_any_handle text with
-     | Tool_output.Not_marker -> ()
-     | Tool_output.Decoded ref_ ->
-       let key = "s:" ^ ref_.sha256 ^ ":" ^ ref_.mime ^ ":" ^ text in
+    let keep_text (ref_ : Tool_output.artifact_ref) =
+      let key = "s:" ^ ref_.sha256 ^ ":" ^ ref_.mime ^ ":" ^ text in
+      if not (Hashtbl.mem seen key)
+      then (
+        Hashtbl.add seen key ();
+        acc_rev := `String text :: !acc_rev)
+    in
+    (* Preserve invalid markers so Tool_blob_maintenance still fails closed. *)
+    let keep_invalid () = acc_rev := `String text :: !acc_rev in
+    (match Tool_output.decode_structured_reference text with
+     | Tool_output.Structured_handle ref_ -> keep_text ref_
+     | Tool_output.Invalid_structured_handle _
+     | Tool_output.Invalid_result_envelope_manifest _ -> keep_invalid ()
+     | Tool_output.Result_envelope_manifest ref_ ->
+       (* A result that went to a model inline is archived as its envelope
+          text. The sweep needs the manifest it names, not the text. *)
+       let key = "a:" ^ ref_.sha256 ^ ":" ^ ref_.mime in
        if not (Hashtbl.mem seen key)
        then (
          Hashtbl.add seen key ();
-         acc_rev := `String text :: !acc_rev)
-     | Tool_output.Invalid_marker _ ->
-       (* Preserve invalid markers so Tool_blob_maintenance still fails closed. *)
-       acc_rev := `String text :: !acc_rev)
+         acc_rev := Tool_output.normalized_artifact_ref_to_json ref_ :: !acc_rev)
+     | Tool_output.No_structured_reference ->
+       (match Tool_output.decode_from_agent_core text with
+        | Tool_output.Not_marker -> ()
+        | Tool_output.Decoded ref_ -> keep_text ref_
+        | Tool_output.Invalid_marker _ -> keep_invalid ()))
   | `Assoc fields ->
     (match Tool_output.normalized_artifact_ref_of_json json with
      | Tool_output.Decoded_normalized_artifact_ref ref_ ->

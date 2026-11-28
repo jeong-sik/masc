@@ -241,7 +241,9 @@ if [ -n "$from_ref" ]; then
 fi
 
 # Each step reports its wall-clock seconds, so a slow install names the step
-# that took the time. Bash's SECONDS counts whole seconds.
+# that took the time. Bash's SECONDS counts whole seconds from this process's
+# start, which is after the install lock was taken. A step that exits early
+# prints no line.
 step_started=$SECONDS
 step_done() {
   echo "install-local-build: $1 took $((SECONDS - step_started))s"
@@ -418,7 +420,7 @@ PY
       ;;
   esac
 fi
-step_done "runtime.toml check"
+step_done "preflight checks"
 
 # The deployment preflight pair goes with the server, not behind it. The gate
 # resolves its helper beside itself first (check-runtime-deployment-preflight.sh
@@ -669,7 +671,7 @@ checkout_guest_shim() (
   echo "installed the $guest_arch guest exec shim built from $repo into $shim_dir (source identity $required_source; the previous one is kept as $previous).$sidecar_note The running server refuses it until masc restart."
 )
 checkout_guest_shim
-step_done "exec shim check"
+step_done "exec shim check or rebuild"
 
 mkdir -p "$prefix"
 install -m 755 "$build_dir/main_eio.exe" "$prefix/masc"
@@ -726,8 +728,8 @@ if [ "$workspace_kind" = directory ]; then
   # shellcheck source=lib/install-workspace-dashboard.sh
   . "$repo/scripts/lib/install-workspace-dashboard.sh"
   install_workspace_dashboard "$repo/assets/dashboard" "$workspace_root"
+  step_done "dashboard bundle"
 fi
-step_done "dashboard bundle"
 
 # The masc just installed writes the browser Add-on package it carries into
 # the workspace and declares it when the workspace has none, so the server

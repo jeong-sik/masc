@@ -1,5 +1,67 @@
 ## [Unreleased]
 
+## [0.83.10] - 2026-11-28
+
+### Upgrade notes
+
+- A binary from before #55428 does not read an authorization log that holds a grant: it refuses the record as an unknown event of the Admin assignment. Roll back past #55428 only on a log with no grant in it (#55428).
+
+### Added
+
+- Add zero-rerender resizable `SplitHandle` panes (QuickPeekDrawer, Keepers roster, Runtime Skills), collapsible `StructuredPayloadView` JSON/text viewer, extreme-size overflow guards, Keeper company/group organizer bar, and hierarchical parallel/async tool views (#55334).
+- Typed wiki embeds (`![[wiki:...]]`, `![[artifact:...]]`, `![[media:...]]`) with `Wiki_link`, `Wiki_graph` embed backlinks, `Wiki_lint` embed findings, `Media_ref_scan` media scanning, and `Published_artifact` `media_refs` tracking (#55358).
+- Dashboard markdown rich embed runtime with a 64 MiB LRU `objectURL` cache, `MarkdownImageLightbox`, cached `![[wiki:...]]`/`![[artifact:...]]` preview cards, and sandboxed `<iframe sandbox="">` HTML artifact pre-hydration for `/api/v1/attachments/*` and `/api/v1/media/*` (#55359).
+- Workspace media composer hook (`useWorkspaceMediaComposer`) delegating uploads to `POST /api/v1/attachments`, wired into `WikiTab` (Write/Split/Preview editor with `WikiEmbedPicker`) and `TasksTab` task description authoring (#55360).
+- The TUI wiki card draws the embeds the server lists for a page. Image embeds (`![[media:…]]`, Markdown images of `/api/v1/media/` and `/api/v1/attachments/att_…`) draw as retained images in kitty and half-block modes and as their label otherwise. Embeds of listed pages become links that `<` `>`, Enter and Esc treat like body links. Artifact embeds, embeds of missing targets and images whose attachment record the server could not read are muted notes, and embeds inside code stay code (#55398).
+- **auth**: An Admin makes a Member an Admin. The Admin assignment record has a second event, `{"event":"granted","user_id":...}`, and `POST /api/v1/auth/members/<user_id>/grant-admin` commits it for an Admin's browser session with the CSRF and same-origin checks of the other member routes. It answers 200 `{"user_id":...,"role":"admin"}`, 404 for no such person, and 409 for a disabled or held person or an Admin already. Before, only an Admin invitation made an Admin, and an invitation binds a new identity, so a person who joined as a Member stayed one (#55428, Refs #55405).
+- **dashboard**: Account → Members shows Make Admin on an active Member with no held change, which calls `POST /api/v1/auth/members/<user_id>/grant-admin`. The account server guide says which record makes each role and how an Admin changes it (#55429, Refs #55405).
+- `addons/output-statistics/lane.host.toml` runs the output-statistics worker as a host process, without a Docker image, container isolation or resource limits. MASC refuses it when a Keeper or an unauthenticated caller saves or attaches the declaration, so the operator writes it as a configuration file. A config test fails unless it differs from `lane.toml` only in the `image`/`runtime` line and the container limits (#55437).
+- The TUI keeper context inspector has a Prompt Blocks subtab. It lists the
+  selected turn's prompt blocks in assembly order with their size, share and
+  change against the previous turn, and shows a block's text from the
+  keeper's last prompt capture when the capture holds that block with the
+  same sha256, so an unchanged block reads on earlier turns too and a
+  changed one never reads another turn's text. On the capture's own turn a
+  block with another sha256 shows the server's copy, marked as such: secrets
+  redacted and connector personal memory taken out. The block list and the
+  text take focus separately, like Exact Input. It is an admin read (#55458).
+
+### Changed
+
+- A whole scope of retained original requests is read in one read, not one record at a time. A review wake reads the scope six times per submission, and each single-record read listed two directories four times (#55297).
+- **keeper**: 출력이 레인의 본문 한도를 넘은 `Execute` 결과가 참조 한 줄 대신 결과 본문(성공 여부, 종료 상태, 실행 위치, 출력 참조 셋과 미리보기)으로 가요. 7일(11-21~27)에 참조만 받은 결과가 2,238건이었고 62% 는 같은 턴에서 다시 읽지 않았어요. 저장된 manifest 로 다시 만들면 모두 가장 낮은 한도(16,384 B)에 들어가요(p50 5,121 B, 최대 13,593 B). stdout 과 출력이 같은 바이트면 stdout 참조의 미리보기는 비어 있어요. 도구 원장의 그 행에 `route_evidence.status` 가 생기고, `output` 은 참조 대신 잘린 묶음 글이에요. `Execute`·`keeper_artifact_read` 설명이 바뀌어 배포 뒤 Keeper 마다 프롬프트 캐시가 한 번 다시 쓰여요. #55401 이 먼저 병합돼야 끝난 턴에서 이 결과가 marker 로 줄어요 (#55415, Fixes #55389)
+- **keeper**: `keeper_skill` reads a Skill by the name its Available list prints. A row of the list is the name and its description, where it was `{source_id, package_id, name}` and the description; a stored 65-row schema goes from 31,993 to 26,041 bytes. `identity.source_id` and `identity.package_id` are optional: a field the call writes is still matched exactly and refused on a mismatch, and a name the list holds twice is refused with the references to choose from. A refusal prints the references carried under that name, or the carried names when no Skill has it, where it printed every carried reference (49 of the 56 refusals on 2026-11-21..27, 13,551 bytes at the median). In 47 of those 49 the name was in the Keeper's own list and `source_id` or `package_id` differed. A description that spans lines is printed on its row, so no later line reads as a row of its own. A call that passes the whole reference reads as before (#55447).
+
+### Fixed
+
+- The Keepers roster keeps its count on the title line: a re-read that comes back within 3s says nothing, one that stays out shows a small spinner beside the count instead of the "지연됨" pill that cut the title, and the personal roster shows the session's role on a line of its own (#55097).
+- Infra sandbox probe and file-change stamps are on the viewer's clock, where they were UTC with nothing saying so (#55100).
+- The "MASC 서버에 연결할 수 없습니다" gate tries again every 5s on its own, and its button reads "연결 중…" while a pressed try is out (#55101).
+- Pulse, Tasks, Goals, Inbox and Memory show their "지연됨" and "마지막 조회" pills only for a re-read that stays out 3s or longer, where the pills flashed with every re-read (#55102).
+- A chart's time axis and its legend write a time one way, the date year first and the time on the 24-hour clock: a tick reads "13:20" over "2026-11-27" where it read "1:20pm" over "11/27/26", and midnight reads "00:00" (#55133).
+- A chart legend value has thousands grouped and no closing zeros: "18.9 %" and "1,234,567" where it read "18.90 %" and "1234567" (#55135).
+- Texts that are read no longer use the colour of disabled controls: empty-state sentences ("없음", "… 불러오는 중…"), the time of a chat message, the nav shortcut hints, "미보고", "비활성" and a Pulse KPI without a value. On the dark theme they read 5.83:1 where they read 3.04:1 (#55164).
+- A Keeper on the Muse runtime can call its own MASC tools that Muse labels by what they do: `Read`, `Write`, `Grep`, `keeper_artifact_read`, `keeper_capability_search`, `keeper_memory_search` and `masc_board_search`. MASC used to refuse these calls' permission requests, so they never ran and the chat showed a failed built-in tool row instead (#55186).
+- Every Codex app-server client MASC starts (Keeper, Fusion, capability and
+  dashboard probes, verification) now passes `-c features.apps=false`, so a
+  ChatGPT login no longer loads the account's connected apps (`codex_apps`:
+  GitHub, Slack, ...) as tools that bypass MASC tool gates and the Keeper's own
+  GitHub identity. Codex plugins are unchanged (#55238).
+- Attachment GC reachability (`Tool_blob_sweep.scan_attachment_reachability`) now scans wiki pages, tasks, goals, and `Published_artifact_store` body blobs fail-closed so referenced workspace attachments are retained, including blobs named only by the bare `/api/v1/media/<sha256>` URL or `![[media:<sha256>]]` embed (#55358).
+- Markdown workspace media images now mount `.masc-media-slot` placeholders before authenticated fetch hydration, eliminating unauthenticated 401 requests in single-user Bearer mode (#55359).
+- Preload the lazy `WikiTab` chunk in `wiki-tab.test.ts` so cold test runs do not race against `<Suspense fallback={null}>` (#55360).
+- **keeper**: 끝난 턴의 도구 결과를 marker 로 바꾸는 강등이 약 16 KB 아래 결과에서도 다시 들어요. #54361(11-22)이 blob 미리보기를 200 B 에서 4 KiB 로 올린 뒤 결과 marker 도 그 미리보기를 실어서, marker 가 본문보다 작아지지 않는 결과는 요청에 그대로 남았어요. 저장된 요청 7일치(11-21~27)에 그런 결과가 299,623번 실렸어요(2,048~4,096 B 151,735번·360 MB, 4,097~16,383 B 147,888번·785 MB). 서로 다른 결과로는 5,957개 이하이고, 실린 횟수의 약 89% 는 한 Keeper 의 긴 턴 한 건이에요. 결과 marker 는 이제 본문 앞 200 B 를 미리보기로 실어요. 호출 인자와 공식 클라이언트 호스트의 도구 영수증은 그대로예요. 요청에 `_blob` 인자가 19~108개씩 실리던 날(11-17~21)에 모델이 그 모양으로 호출한 기록이 하루 32~1,433건 있었어요(#55372). 영수증은 vendor 턴이 받지 못한 결과라서 머리와 꼬리 미리보기를 그대로 둬요. 크기 거절 뒤 재전송에서 모델이 아직 못 읽은 결과도 앞 200 B 만 보이는 것은 #55412 에 남겼어요. 배포 뒤 요청을 새로 조립하는 레인은 Keeper 마다 프롬프트 캐시가 한 번 다시 쓰여요 (#55401, Fixes #55296)
+- **keeper**: 「결과 + manifest 참조」 묶음으로 간 도구 결과의 답 지문을 묶음 안의 결과에서 읽어요. 묶음 안의 manifest 주소는 실행 시간 때문에 실행마다 달라서, 같은 결과가 반복 호출 감지에서 다른 결과로 보였어요. 지금은 답을 읽는 도구 중에 묶음으로 가는 것이 없어서 운영에서 달라지는 것은 없고, `Execute` 를 묶음으로 보내는 #55415 가 이 변경을 써요 (#55414, Refs #55389)
+- **dashboard**: Account → Members no longer makes a Member an Admin on one click. Make Admin opens a confirmation that says what the new Admin can do, and only Confirm Make Admin sends `POST /api/v1/auth/members/<user_id>/grant-admin`. The row holds one open confirmation, so opening Make Admin, Revoke Admin or Delete closes the one that was open (#55450, Refs #55405).
+- **dashboard**: The dashboard type-check passes again on `main`. The Quotas scope view no longer compares an assignment target against `single_runtime`, a kind the server does not send and the type no longer holds; a keeper on a bare runtime is matched through its lane as before (#55452).
+- The wiki editor's embed picker shows a list read that ended without a list (failed, absent, or superseded) with a retry button instead of an empty list, reads every wiki page again under a tag or source filter, and never offers the pages of a filtered index as every page (#55455).
+- The TUI test store is green again: switching Work sub-tabs selects the first
+  Harness verdict again, so Harness `[n]`/`[y]` overrule opens on entry instead
+  of warning that no verdict is linked; `[N]` in a zoomed Artifact with an
+  active search steps to the previous match even while the approval strip is
+  showing (Alt+N and an empty search still fast-deny); and an HTTP error body
+  whose Bearer token is wrapped in ANSI escapes is redacted in the error detail (#55464).
+
 ## [0.83.9] - 2026-11-28
 
 ### Added

@@ -2,14 +2,15 @@
  * One prompt of the catalog: the text in force, how it differs from the file,
  * and an editor for its override.
  *
- * The draft is the parent's (`draft`, `onDraft`), so picking another prompt
- * and coming back keeps what was typed. Saving sends the draft as the
- * override and, once the server applies it, the draft is gone. Clearing drops
- * the override so the file text is in force again; a draft the operator has
- * not saved stays. The editor is read-only while a request is in flight, so
- * nothing typed after the click is lost when the answer comes back. The
- * server checks the template variables and answers with the text now in
- * force, or with the reason it refused.
+ * The draft and the request in flight are the parent's (`draft`, `write`),
+ * keyed by prompt, because picking another prompt unmounts this component.
+ * Coming back keeps what was typed, keeps the editor read-only while that
+ * prompt's request is in flight, and shows the reason the server refused it.
+ * Saving sends the draft as the override and, once the server applies it, the
+ * parent drops the draft. Clearing drops the override so the file text is in
+ * force again; a draft the operator has not saved stays. The server checks
+ * the template variables and answers with the text now in force, or with the
+ * reason it refused.
  */
 
 import { html } from 'htm/preact'
@@ -21,14 +22,21 @@ import type { PromptEntry, PromptOverrideRequest } from './prompts-wire'
 
 type DetailView = 'text' | 'compare' | 'edit'
 
+/** A request for one prompt: in flight, or refused with the server's reason. */
+export type PromptWrite =
+  | { readonly kind: 'sending' }
+  | { readonly kind: 'refused'; readonly why: string }
+
 export interface PromptDetailProps {
   readonly entry: PromptEntry
   readonly canEdit: boolean
   /** What was typed for this key and not saved, `undefined` for nothing. */
   readonly draft: string | undefined
   readonly onDraft: (key: string, text: string | undefined) => void
-  /** Sends the request; resolves to `null` when the server applied it, or to why it did not. */
-  readonly onSend: (request: PromptOverrideRequest) => Promise<string | null>
+  /** This prompt's request in flight or last refusal, `undefined` for neither. */
+  readonly write: PromptWrite | undefined
+  /** Sends the request; resolves to `true` when the server applied it. */
+  readonly onSend: (request: PromptOverrideRequest) => Promise<boolean>
 }
 
 const preStyle = {
@@ -58,10 +66,12 @@ function overridePatch(entry: PromptEntry): string | null {
   )
 }
 
-export function PromptDetail({ entry, canEdit, draft, onDraft, onSend }: PromptDetailProps) {
-  const [chosenView, setView] = useState<DetailView>(draft !== undefined && canEdit ? 'edit' : 'text')
-  const [busy, setBusy] = useState(false)
-  const [refusal, setRefusal] = useState<string | null>(null)
+export function PromptDetail({ entry, canEdit, draft, onDraft, write, onSend }: PromptDetailProps) {
+  const [chosenView, setView] = useState<DetailView>(
+    (draft !== undefined || write !== undefined) && canEdit ? 'edit' : 'text',
+  )
+  const busy = write?.kind === 'sending'
+  const refusal = write?.kind === 'refused' ? write.why : null
   const patch = overridePatch(entry)
   // A view the entry can no longer show (the override is gone, or the session
   // lost admin) falls back to the text in force.
@@ -71,17 +81,9 @@ export function PromptDetail({ entry, canEdit, draft, onDraft, onSend }: PromptD
   const dirty = draft !== undefined && draft !== entry.effective
 
   const send = async (request: PromptOverrideRequest) => {
-    setBusy(true)
-    setRefusal(null)
-    const why = await onSend(request)
-    setBusy(false)
-    if (why !== null) {
-      setRefusal(why)
-      return
-    }
+    if (!(await onSend(request))) return
     switch (request.action) {
       case 'set':
-        onDraft(entry.key, undefined)
         setView('text')
         return
       case 'clear':

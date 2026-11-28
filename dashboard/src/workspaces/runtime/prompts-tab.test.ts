@@ -4,6 +4,7 @@ import { html } from 'htm/preact'
 import { render } from 'preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { authSession, resetAuthStateForTests, resourceCache } from '../../core'
+import { resetShellStateForTests, shellToasts } from '../../shell/shell-state'
 import { RuntimeWorkspace } from './index'
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -86,6 +87,7 @@ describe('Runtime → Prompts', () => {
       workspaceId: 'default',
     }
     resourceCache.clearAll()
+    resetShellStateForTests()
     container = document.createElement('div')
     document.body.appendChild(container)
   })
@@ -175,6 +177,51 @@ describe('Runtime → Prompts', () => {
     expect(container.querySelector<HTMLTextAreaElement>('textarea')?.readOnly).toBe(true)
     release(applied('keeper.worldview', 'override'))
     await vi.waitFor(() => expect(container.querySelector('textarea')).toBeNull())
+  })
+
+  it('keeps a prompt read-only while its save is in flight, after another prompt is picked and back', async () => {
+    let release: (r: Response) => void = () => {}
+    const server = serve(
+      [prompt('keeper.worldview'), prompt('keeper.identity')],
+      () => new Promise<Response>(resolve => { release = resolve }),
+    )
+    mount()
+    await pick('keeper.worldview')
+    click('[data-view="edit"]')
+    await flushUi()
+    await type('first')
+    click('[data-testid="prompt-save"]')
+    await vi.waitFor(() => expect(server.posts).toHaveLength(1))
+    await pick('keeper.identity')
+    await pick('keeper.worldview')
+    expect(container.querySelector<HTMLTextAreaElement>('textarea')?.readOnly).toBe(true)
+    expect(container.querySelector<HTMLButtonElement>('[data-testid="prompt-save"]')?.disabled).toBe(true)
+    release(applied('keeper.worldview', 'override'))
+    await vi.waitFor(() => expect(server.catalogReads()).toBe(2))
+    expect(container.querySelector<HTMLTextAreaElement>('textarea')?.readOnly).toBe(false)
+    expect(Array.from(container.querySelectorAll('[role="listitem"]')).some(n => n.textContent?.includes('저장 안 함'))).toBe(false)
+    expect(server.posts).toEqual([{ url: '/api/v1/prompts', body: { action: 'set', key: 'keeper.worldview', value: 'first' } }])
+  })
+
+  it('tells a refusal that arrives while another prompt is open, and shows it again on return', async () => {
+    let release: (r: Response) => void = () => {}
+    serve(
+      [prompt('keeper.worldview'), prompt('keeper.identity')],
+      () => new Promise<Response>(resolve => { release = resolve }),
+    )
+    mount()
+    await pick('keeper.worldview')
+    click('[data-view="edit"]')
+    await flushUi()
+    await type('<world>{{goal}}</world>')
+    click('[data-testid="prompt-save"]')
+    await pick('keeper.identity')
+    release(jsonResponse({ ok: false, error: 'SERVER-REASON' }, 400))
+    await vi.waitFor(() =>
+      expect(shellToasts.value.some(t => t.tone === 'error' && t.message.includes('keeper.worldview') && t.message.includes('SERVER-REASON'))).toBe(true))
+    await pick('keeper.worldview')
+    expect(container.querySelector('[data-testid="prompt-refusal"]')?.textContent).toContain('SERVER-REASON')
+    expect(container.querySelector<HTMLTextAreaElement>('textarea')?.value).toBe('<world>{{goal}}</world>')
   })
 
   it('keeps a draft when another prompt is picked and back again', async () => {

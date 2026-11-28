@@ -15,17 +15,21 @@
  * - Transport decodes only a 2xx answer, so an answer that fails to decode is
  *   a change the server already made: the catalog is read again and the
  *   operator is told the answer was unreadable, not that the change failed.
+ * - Drafts and requests are kept per prompt here, not in the detail, because
+ *   picking another prompt unmounts the detail. A request answered while its
+ *   prompt is not on screen still drops the right draft, and a refusal for it
+ *   is also told in a toast.
  */
 
 import { html } from 'htm/preact'
-import { useEffect, useMemo, useState } from 'preact/hooks'
+import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { apiGet, apiMutate, authSession, resourceCache, sessionEpoch } from '../../core'
 import { MasterDetail } from '../../components/primitives/master-detail'
 import { RefreshButton } from '../../components/primitives'
 import { isAdminLockedForSession } from '../../routes/router'
 import { pushShellToast } from '../../shell/shell-state'
 import { Chip, SourceChip } from './prompt-chip'
-import { PromptDetail } from './prompt-detail'
+import { PromptDetail, type PromptWrite } from './prompt-detail'
 import {
   decodeOverrideApplied,
   decodePromptCatalog,
@@ -92,6 +96,10 @@ export function PromptsTab(_props: WorkspaceViewProps) {
   const [onlyOverrides, setOnlyOverrides] = useState(false)
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
   const [drafts, setDrafts] = useState<ReadonlyMap<string, string>>(new Map())
+  const [writes, setWrites] = useState<ReadonlyMap<string, PromptWrite>>(new Map())
+  // Read when an answer arrives, after the render that sent the request.
+  const shownKey = useRef<string | null>(null)
+  shownKey.current = selectedKey
 
   useEffect(() => {
     void loadPromptCatalog('mount')
@@ -122,14 +130,38 @@ export function PromptsTab(_props: WorkspaceViewProps) {
     })
   }
 
+  const setWrite = (key: string, write: PromptWrite | undefined) => {
+    setWrites(prev => {
+      const next = new Map(prev)
+      if (write === undefined) next.delete(key)
+      else next.set(key, write)
+      return next
+    })
+  }
+
+  /** Resolves to `null` when the server applied the request, or to why it did not. */
   const send = async (request: PromptOverrideRequest): Promise<string | null> => {
+    setWrite(request.key, { kind: 'sending' })
     const res = await apiMutate<OverrideApplied>('POST', '/api/v1/prompts', request, { decode: decodeOverrideApplied })
-    if (!res.ok && res.error.kind !== 'decode') return res.error.message
+    if (!res.ok && res.error.kind !== 'decode') {
+      setWrite(request.key, { kind: 'refused', why: res.error.message })
+      return res.error.message
+    }
+    setWrite(request.key, undefined)
+    if (request.action === 'set') setDraft(request.key, undefined)
     if (res.ok) pushShellToast(appliedToast(request, res.value), 'success')
     else pushShellToast(`${request.key}: 서버가 요청을 받았지만 답을 읽지 못했어요 (${res.error.message}). 목록을 다시 읽어요.`, 'warning')
     resourceCache.invalidateTopic('prompts')
     void loadPromptCatalog('manual')
     return null
+  }
+
+  const sendFromDetail = async (request: PromptOverrideRequest): Promise<boolean> => {
+    const why = await send(request)
+    if (why !== null && shownKey.current !== request.key) {
+      pushShellToast(`${request.key}: 저장하지 못했어요: ${why}`, 'error')
+    }
+    return why === null
   }
 
   const clearHeldBack = async (key: string) => {
@@ -222,7 +254,8 @@ export function PromptsTab(_props: WorkspaceViewProps) {
         canEdit=${canEdit}
         draft=${drafts.get(selected.key)}
         onDraft=${setDraft}
-        onSend=${send}
+        write=${writes.get(selected.key)}
+        onSend=${sendFromDetail}
       />`
 
   return html`

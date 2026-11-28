@@ -1,6 +1,8 @@
 id = "fusion-result-statistics"
 run_id = "fusion-report"
 manifest_path = "../../../addons/output-statistics/lane.toml"
+# The installation operator must save this declaration when it inherits Keeper visibility.
+operator_authority = true
 
 [binding]
 [[binding.sources]]

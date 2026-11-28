@@ -13,6 +13,12 @@ and retained result are present. A selected `result` port also works, carrying
 the producer's whole coverage. A status-only source yields an incomplete report
 until evidence is present. Multiple runs produce independent reports.
 
+The report inherits Keeper-only visibility when it reads the native Fusion
+producer. An operator must save the report declaration with its top-level
+`operator_authority = true` line. The report keeps the Fusion owner's read
+scope. The Fusion producer can be unmarked when it reads that Keeper's run
+directly and its remaining configuration permits Keeper authority.
+
 The Markdown body contains copied Board evidence, treated as untrusted source
 text. It is not a new judge decision. Typed fields retain `run_status`,
 `input_complete`, producer configuration/package revisions and observation

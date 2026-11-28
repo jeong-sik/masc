@@ -1,0 +1,20 @@
+; AG-UI frames the server encoder writes, for native client decode tests
+; (RFC-native-keeper-chat-clients D1). `dune runtest` fails when the encoder's
+; output differs from the committed files; `dune promote` accepts a change.
+
+(rule
+ (with-stdout-to
+  agui_frames.json.gen
+  (run %{exe:../../../test/keeper_chat_wire/emit_agui_fixtures.exe} json)))
+
+(rule
+ (with-stdout-to
+  agui_frames.sse.gen
+  (run %{exe:../../../test/keeper_chat_wire/emit_agui_fixtures.exe} sse)))
+
+(rule
+ (alias runtest)
+ (action
+  (progn
+   (diff agui_frames.json agui_frames.json.gen)
+   (diff agui_frames.sse agui_frames.sse.gen))))

@@ -1,0 +1,233 @@
+[
+  {
+    "case": "run_started",
+    "frame": {
+      "runId": "keeper-operation-run-op-1",
+      "threadId": "keeper:imp",
+      "timestamp": 1795821563.25,
+      "type": "RUN_STARTED"
+    }
+  },
+  {
+    "case": "run_started on the default thread (/ag-ui/events prime)",
+    "frame": {
+      "runId": "session-1",
+      "threadId": "default",
+      "timestamp": 1795821563.25,
+      "type": "RUN_STARTED"
+    }
+  },
+  {
+    "case": "run_finished",
+    "frame": {
+      "runId": "keeper-operation-run-op-1",
+      "threadId": "keeper:imp",
+      "timestamp": 1795821563.25,
+      "type": "RUN_FINISHED"
+    }
+  },
+  {
+    "case": "run_finished at a whole-second timestamp",
+    "frame": {
+      "runId": "keeper-operation-run-op-1",
+      "threadId": "keeper:imp",
+      "timestamp": 13.0,
+      "type": "RUN_FINISHED"
+    }
+  },
+  {
+    "case": "run_error with run_id and code",
+    "frame": {
+      "code": "event_error",
+      "message": "stream cut",
+      "runId": "keeper-operation-run-op-1",
+      "threadId": "keeper:imp",
+      "timestamp": 1795821563.25,
+      "type": "RUN_ERROR"
+    }
+  },
+  {
+    "case": "run_error without run_id or code",
+    "frame": {
+      "message": "provider refused",
+      "threadId": "keeper:imp",
+      "timestamp": 1795821563.25,
+      "type": "RUN_ERROR"
+    }
+  },
+  {
+    "case": "text_message_start",
+    "frame": {
+      "messageId": "m-1",
+      "role": "assistant",
+      "runId": "keeper-operation-run-op-1",
+      "threadId": "keeper:imp",
+      "timestamp": 1795821563.25,
+      "type": "TEXT_MESSAGE_START"
+    }
+  },
+  {
+    "case": "text_message_content, response observed",
+    "frame": {
+      "delta": "Hello",
+      "messageId": "m-1",
+      "runId": "keeper-operation-run-op-1",
+      "textResponse": { "content_generation": 2, "stream_scope": 7 },
+      "threadId": "keeper:imp",
+      "timestamp": 1795821563.25,
+      "type": "TEXT_MESSAGE_CONTENT"
+    }
+  },
+  {
+    "case": "text_message_content, scope only",
+    "frame": {
+      "delta": "Hello",
+      "messageId": "m-1",
+      "runId": "keeper-operation-run-op-1",
+      "textStreamScope": 7,
+      "threadId": "keeper:imp",
+      "timestamp": 1795821563.25,
+      "type": "TEXT_MESSAGE_CONTENT"
+    }
+  },
+  {
+    "case": "text_message_content, no run, message_id or scope",
+    "frame": {
+      "delta": "",
+      "threadId": "keeper:imp",
+      "timestamp": 1795821563.25,
+      "type": "TEXT_MESSAGE_CONTENT"
+    }
+  },
+  {
+    "case": "text_message_end",
+    "frame": {
+      "messageId": "m-1",
+      "runId": "keeper-operation-run-op-1",
+      "threadId": "keeper:imp",
+      "timestamp": 1795821563.25,
+      "type": "TEXT_MESSAGE_END"
+    }
+  },
+  {
+    "case": "text_message_end without message_id",
+    "frame": {
+      "runId": "keeper-operation-run-op-1",
+      "threadId": "keeper:imp",
+      "timestamp": 1795821563.25,
+      "type": "TEXT_MESSAGE_END"
+    }
+  },
+  {
+    "case": "tool_call_start",
+    "frame": {
+      "providerMessageId": "msg_01",
+      "runId": "keeper-operation-run-op-1",
+      "threadId": "keeper:imp",
+      "timestamp": 1795821563.25,
+      "toolCallBlockIndex": 1,
+      "toolCallId": "toolu_01",
+      "toolCallName": "shell",
+      "toolStreamScope": 3,
+      "type": "TOOL_CALL_START"
+    }
+  },
+  {
+    "case": "tool_call_start without tool_call_id or provider_message_id",
+    "frame": {
+      "runId": "keeper-operation-run-op-1",
+      "threadId": "keeper:imp",
+      "timestamp": 1795821563.25,
+      "toolCallBlockIndex": 1,
+      "toolCallName": "shell",
+      "toolStreamScope": 3,
+      "type": "TOOL_CALL_START"
+    }
+  },
+  {
+    "case": "tool_call_args delta",
+    "frame": {
+      "delta": "{\"cmd\":",
+      "providerMessageId": "msg_01",
+      "runId": "keeper-operation-run-op-1",
+      "threadId": "keeper:imp",
+      "timestamp": 1795821563.25,
+      "toolCallBlockIndex": 1,
+      "toolCallId": "toolu_01",
+      "toolStreamScope": 3,
+      "type": "TOOL_CALL_ARGS"
+    }
+  },
+  {
+    "case": "tool_call_args snapshot",
+    "frame": {
+      "providerMessageId": "msg_01",
+      "runId": "keeper-operation-run-op-1",
+      "snapshot": "{\"cmd\":\"ls\"}",
+      "threadId": "keeper:imp",
+      "timestamp": 1795821563.25,
+      "toolCallBlockIndex": 1,
+      "toolCallId": "toolu_01",
+      "toolStreamScope": 3,
+      "type": "TOOL_CALL_ARGS"
+    }
+  },
+  {
+    "case": "tool_call_end",
+    "frame": {
+      "providerMessageId": "msg_01",
+      "runId": "keeper-operation-run-op-1",
+      "threadId": "keeper:imp",
+      "timestamp": 1795821563.25,
+      "toolCallBlockIndex": 1,
+      "toolCallId": "toolu_01",
+      "toolStreamScope": 3,
+      "type": "TOOL_CALL_END"
+    }
+  },
+  {
+    "case": "custom with run_id and null value",
+    "frame": {
+      "name": "KEEPER_CONNECTED",
+      "runId": "keeper-operation-run-op-1",
+      "threadId": "keeper:imp",
+      "timestamp": 1795821563.25,
+      "type": "CUSTOM",
+      "value": null
+    }
+  },
+  {
+    "case": "custom before RUN_STARTED (no run_id)",
+    "frame": {
+      "name": "KEEPER_ATTACHMENT",
+      "threadId": "default",
+      "timestamp": 1795821563.25,
+      "type": "CUSTOM",
+      "value": { "attachment_id": "att_1", "role": "assistant" }
+    }
+  },
+  {
+    "case": "of_custom accepted",
+    "frame": {
+      "name": "KEEPER_CHAT_OPERATION_ACCEPTED",
+      "threadId": "default",
+      "timestamp": 1795821563.25,
+      "type": "CUSTOM",
+      "value": {
+        "operation_id": "op-1",
+        "queued_count": 0,
+        "state": "queued"
+      }
+    }
+  },
+  {
+    "case": "of_custom MASC_EVENT",
+    "frame": {
+      "name": "MASC_EVENT",
+      "threadId": "default",
+      "timestamp": 1795821563.25,
+      "type": "CUSTOM",
+      "value": { "type": "task_updated" }
+    }
+  }
+]

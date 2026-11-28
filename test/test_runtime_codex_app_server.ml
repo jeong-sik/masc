@@ -4914,7 +4914,7 @@ candidates = [%s]
                           | Ok () -> ()
                           | Error detail -> fail detail);
                          (match Keeper_owner_registry.install_from_store ~sw
-                            ~operation_runner:None ~on_turn_slot_released:None config with
+                            ~operation_runner:None config with
                           | Ok _ -> ()
                           | Error _ -> fail "production fixture Owner installation failed");
                          ignore
@@ -4984,7 +4984,7 @@ candidates = [%s]
                                 ~task_skill_selection:(Ok Keeper_task_skill_turn.empty)
                                 ~runtime_id
                                 () in
-                              let settlement = match Keeper_owner_registry.run_autonomous_if_idle
+                              let settlement = match Keeper_owner_registry.run_autonomous_turn ~input:(fun () -> Keeper_owner.No_autonomous_input)
                                   ~base_path ~keeper_name:meta.name run with
                                 | Ok (`Ran settlement) -> settlement
                                 | Ok (`Busy block) -> fail (Keeper_owner.autonomous_block_to_string block)

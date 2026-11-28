@@ -102,7 +102,7 @@ let test_a_burst_is_sent_once_after_the_interval () =
         Eio_context.with_test_env ~net:(Eio.Stdenv.net env) ~clock
           ~mono_clock:(Eio.Stdenv.mono_clock env) ~sw @@ fun () ->
         (match Keeper_owner_registry.install_from_store ~sw ~operation_runner:None
-           ~on_turn_slot_released:None config with
+           config with
          | Ok _ -> ()
          | Error err -> fail (Keeper_owner_registry.install_error_to_string err));
         let owner =

@@ -305,7 +305,6 @@ let test_current_task_projection_interleaved_release_and_read_failure () =
        Keeper_owner_registry.install_from_store
          ~sw
          ~operation_runner:None
-         ~on_turn_slot_released:None
          config
      with
      | Ok _ -> ()

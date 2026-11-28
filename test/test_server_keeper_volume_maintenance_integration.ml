@@ -180,7 +180,7 @@ let test_running_sweep_does_not_mutate_volumes () =
         ~recipient_lookup:Recipient_lookup.none_declared ());
       Eio.Switch.run (fun owners_sw ->
         (match Keeper_owner_registry.install_from_store ~sw:owners_sw
-                 ~operation_runner:None ~on_turn_slot_released:None config with
+                 ~operation_runner:None config with
          | Ok count -> check int "all fixture owners installed" 3 count
          | Error error -> fail (Keeper_owner_registry.install_error_to_string error));
         List.iter

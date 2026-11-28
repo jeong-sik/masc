@@ -1297,7 +1297,7 @@ let with_input_wait_inventory ?(install_owner=true) ?(prior_unavailable=false) f
       Fun.protect ~finally:(fun () -> Eio.Promise.resolve resolve_ended ()) (fun () ->
         Eio.Switch.run (fun owner_sw ->
           let result=Keeper_owner_registry.install_from_store ~sw:owner_sw ~operation_runner:None
-            ~on_turn_slot_released:None config in
+            config in
           Eio.Promise.resolve resolve_installed result;
           Eio.Promise.await stop)));
     match Eio.Promise.await installed with
@@ -1321,7 +1321,7 @@ let with_input_wait_inventory ?(install_owner=true) ?(prior_unavailable=false) f
     | Keeper_chat_operation_store.Input_observed reference -> reference
     | Input_unobserved | Prior_input_unavailable -> fail "fixture has no owned input" in
   let publish checkpoint =
-    let result=Keeper_owner_registry.run_autonomous_if_idle ~base_path:dir ~keeper_name (fun () ->
+    let result=Keeper_owner_registry.run_autonomous_turn ~input:(fun () -> Keeper_owner.No_autonomous_input) ~base_path:dir ~keeper_name (fun () ->
       let producer=Keeper_input_checkpoint_producer.prepare ~base_path:dir ~keeper_name ~session_dir
         ~trace_id:meta.runtime.trace_id ~source:!current
         |> Result.map_error Keeper_input_checkpoint_producer.error_to_string |> ok in
@@ -1490,7 +1490,7 @@ let test_input_response_http_accepts_only_original_wait ~commit_fault () =
       Fun.protect ~finally:(fun () -> Eio.Promise.resolve resolve_ended ()) (fun () ->
         Eio.Switch.run (fun owner_sw ->
           let result=Keeper_owner_registry.install_from_store ~sw:owner_sw ~operation_runner:None
-            ~on_turn_slot_released:None config in
+            config in
           Eio.Promise.resolve resolve_installed result;Eio.Promise.await stop)));
     match Eio.Promise.await installed with
     | Ok _ -> owner_stop:=Some (resolve_stop,ended)
@@ -1628,7 +1628,7 @@ let test_input_response_http_requires_explicit_exact_proof () =
         state (Httpun.Reqd.request reqd) (Http_reqd.of_httpun reqd) body) in
   let status,_=post fields in
   check int "unavailable Owner inventory is a service failure" 503 status;
-  Keeper_owner_registry.install_from_store ~sw ~operation_runner:None ~on_turn_slot_released:None
+  Keeper_owner_registry.install_from_store ~sw ~operation_runner:None
       (Mcp_server.workspace_config state)
     |> Result.map_error Keeper_owner_registry.install_error_to_string |> Result.get_ok |> ignore;
   let status,_=post fields in

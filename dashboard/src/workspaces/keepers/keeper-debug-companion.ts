@@ -475,8 +475,8 @@ export function KeeperDebugCompanion(props: KeeperDebugCompanionProps) {
       action: memActKind,
       observed: memActObserved,
       turnLog: memActObserved,
-      line: memActOffset.trim() === '' ? undefined : Number(memActOffset),
-      offset: memActOffset.trim() === '' ? undefined : Number(memActOffset),
+      line: memActOffset,
+      offset: memActOffset,
     })
     if (!parsedPayload.ok) {
       setMemActStatus(`오류: ${parsedPayload.error}`)

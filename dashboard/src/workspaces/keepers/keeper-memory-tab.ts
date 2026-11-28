@@ -199,10 +199,10 @@ function KeeperMemoryView(props: KeeperMemoryTabProps) {
       action: actKind,
       observed: actObserved,
       turnLog: actObserved,
-      line: actOffset.trim() === '' ? undefined : Number(actOffset),
-      offset: actOffset.trim() === '' ? undefined : Number(actOffset),
+      line: actOffset,
+      offset: actOffset,
       store: actStore,
-      at: actAt.trim() === '' ? undefined : Number(actAt),
+      at: actAt,
     })
     if (!parsedPayload.ok) {
       setActFeedback({ kind: 'error', text: parsedPayload.error })

@@ -186,10 +186,10 @@ export function MemoryTab(_props: WorkspaceViewProps) {
       action: kind,
       observed: override?.observed ?? actObserved,
       turnLog: override?.turnLog ?? actTurnLog,
-      line: override?.line ?? (actLine.trim() ? Number(actLine) : undefined),
+      line: override?.line ?? actLine,
       store: override?.store ?? actStore,
-      at: override?.at ?? (actAt.trim() ? Number(actAt) : undefined),
-      offset: override?.offset ?? (actOffset.trim() ? Number(actOffset) : undefined),
+      at: override?.at ?? actAt,
+      offset: override?.offset ?? actOffset,
     })
     if (!payloadRes.ok) {
       setActFeedback({ kind: 'err', message: payloadRes.error })

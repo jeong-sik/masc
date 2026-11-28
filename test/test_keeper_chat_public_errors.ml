@@ -7,6 +7,13 @@ module Projection = Server_keeper_chat_agui_projection
 module Replay = Server_keeper_chat_replay
 module Autonomous = Masc.Keeper_autonomous_stream
 
+(* The RUN_ERROR record of a frame, or None for every other kind. *)
+let run_error_of (event : Ag_ui.event) : Keeper_chat_wire.Keeper_chat_wire_t.run_error option =
+  match (event :> Keeper_chat_wire.Keeper_chat_wire_t.frame) with
+  | Run_error error -> Some error
+  | Run_started _ | Run_finished _ | Text_message_start _ | Text_message_content _
+  | Text_message_end _ | Tool_call_start _ | Tool_call_args _ | Tool_call_end _ | Custom _ -> None
+
 let private_secret = "orchid river seventy nine"
 let private_path = "/private/example/.masc/keepers/alpha/events"
 let private_detail = private_secret ^ " at " ^ private_path
@@ -34,9 +41,12 @@ let test_public_terminal_is_safe_and_matches_replay () =
    | [1,event] -> check string "live and replay share exact safe bytes"
        (Ag_ui.event_to_sse ~id:1 live) (Ag_ui.event_to_sse ~id:1 event)
    | _ -> fail "replay lost the actual terminal");
-  check (option string) "stable public code" (Some E.public_error_code) live.Ag_ui.code;
-  check (option string) "fixed public message" (Some E.public_error_message) live.Ag_ui.message;
-  check (option string) "actual run correlation" (Some "keeper-operation-run-public") live.Ag_ui.run_id;
+  (match run_error_of live with
+   | Some error ->
+     check (option string) "stable public code" (Some E.public_error_code) error.code;
+     check string "fixed public message" E.public_error_message error.message;
+     check (option string) "actual run correlation" (Some "keeper-operation-run-public") error.run_id
+   | None -> fail "the live terminal is not RUN_ERROR");
   assert_private_absent (Ag_ui.event_to_sse live);
   check bool "public projection never mutates the private event" true
     (E.redact_content ~redact_text:Fun.id ending = E.Event_error {message=private_detail})
@@ -107,9 +117,11 @@ let test_legacy_empty_error_has_safe_public_terminal () =
   let persisted = read_journal (L.journal_path ~base_dir:base_path ~keeper_name:"public" ~operation_id:"legacy-operation") in
   (match Replay.replay ~redact_text:Fun.id ~since_seq:(L.After_seq 0) persisted with
    | [1,event] ->
-     check bool "actual terminal fact remains RUN_ERROR" true (event.Ag_ui.event_type=Ag_ui.Run_error);
-     check (option string) "empty private diagnostic maps to safe message"
-       (Some E.public_error_message) event.message
+     (match run_error_of event with
+      | Some error ->
+        check string "empty private diagnostic maps to safe message"
+          E.public_error_message error.message
+      | None -> fail "actual terminal fact is not RUN_ERROR")
    | _ -> fail "empty diagnostic lost its valid terminal fact");
   check bool "malformed journal schema remains rejected" true
     (Result.is_error (L.journaled_event_of_json (`Assoc ["v",`Int 2;"seq",`Int 0])))

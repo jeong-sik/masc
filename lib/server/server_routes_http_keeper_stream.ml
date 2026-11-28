@@ -42,11 +42,11 @@ let operation_wire_streams : (operation_stream_key, operation_wire_stream) Hasht
 let operation_wire_streams_mu = Stdlib.Mutex.create ()
 
 let ag_ui_terminal_event (event : Ag_ui.event) =
-  match event.Ag_ui.event_type with
-  | Ag_ui.Run_finished | Ag_ui.Run_error -> true
-  | Run_started | Text_message_start | Text_message_content
-  | Text_message_end | Tool_call_start | Tool_call_args | Tool_call_end
-  | Custom -> false
+  match (event :> Keeper_chat_wire.Keeper_chat_wire_t.frame) with
+  | Run_finished _ | Run_error _ -> true
+  | Run_started _ | Text_message_start _ | Text_message_content _
+  | Text_message_end _ | Tool_call_start _ | Tool_call_args _ | Tool_call_end _
+  | Custom _ -> false
 
 let note_operation_wire_opened key =
   Stdlib.Mutex.protect operation_wire_streams_mu (fun () ->
@@ -3768,7 +3768,7 @@ let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payloa
         in
         Ag_ui.event_to_sse
           (Ag_ui.of_custom
-            ~name:"KEEPER_CHAT_OPERATION_ACCEPTED"
+            ~name:Keeper_chat_wire.Keeper_chat_wire_t.Keeper_chat_operation_accepted
             (`Assoc
                ([ "operation_id", `String operation_id
                ; "state", `String state

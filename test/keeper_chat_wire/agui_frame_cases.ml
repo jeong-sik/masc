@@ -18,6 +18,7 @@ let bare_occurrence : Ag_ui.tool_stream_occurrence =
    constructor. The PR body lists the call sites. *)
 let cases : (string * Ag_ui.event) list =
   let open Ag_ui in
+  let open Keeper_chat_wire.Keeper_chat_wire_t in
   [ ( "run_started",
       run_started ~timestamp ~thread_id:thread ~run_id:run () )
   ; ( "run_started on the default thread (/ag-ui/events prime)",
@@ -63,15 +64,15 @@ let cases : (string * Ag_ui.event) list =
       tool_call_end ~timestamp ~thread_id:thread ~run_id:run ~tool_call_id:occurrence_id
         occurrence )
   ; ( "custom with run_id and null value",
-      custom ~timestamp ~thread_id:thread ~run_id:run ~name:"KEEPER_CONNECTED" `Null )
+      custom ~timestamp ~thread_id:thread ~run_id:run ~name:Keeper_connected `Null )
   ; ( "custom before RUN_STARTED (no run_id)",
-      custom ~timestamp ~thread_id:default_thread_id ~name:"KEEPER_ATTACHMENT"
+      custom ~timestamp ~thread_id:default_thread_id ~name:Keeper_attachment
         (`Assoc [ "attachment_id", `String "att_1"; "role", `String "assistant" ]) )
   ; ( "of_custom accepted",
-      of_custom ~timestamp ~name:"KEEPER_CHAT_OPERATION_ACCEPTED"
+      of_custom ~timestamp ~name:Keeper_chat_operation_accepted
         (`Assoc [ "operation_id", `String "op-1"; "state", `String "queued"; "queued_count", `Int 0 ]) )
   ; ( "of_custom MASC_EVENT",
-      of_custom ~timestamp ~name:"MASC_EVENT" (`Assoc [ "type", `String "task_updated" ]) )
+      of_custom ~timestamp ~name:Masc_event (`Assoc [ "type", `String "task_updated" ]) )
   ]
 
 (* JSON values with object keys compared as a set. *)

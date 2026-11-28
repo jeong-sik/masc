@@ -32,8 +32,19 @@ let read_journal ~base_path ~keeper_name ~operation_id =
 let error_entries entries = List.filter (fun (entry : Journal.journaled_event) ->
   match entry.event with Events.Event_error _ -> true | _ -> false) entries
 
+(* The RUN_ERROR record of a frame, or None for every other kind. *)
+let run_error_of (event : Ag_ui.event) : Keeper_chat_wire.Keeper_chat_wire_t.run_error option =
+  match (event :> Keeper_chat_wire.Keeper_chat_wire_t.frame) with
+  | Run_error error -> Some error
+  | Run_started _ | Run_finished _ | Text_message_start _ | Text_message_content _
+  | Text_message_end _ | Tool_call_start _ | Tool_call_args _ | Tool_call_end _ | Custom _ -> None
+
+let is_run_error event = Option.is_some (run_error_of event)
+
+(* A non-terminal frame. MASC_EVENT is a name no Keeper chat path selects on,
+   so the frame stands for "any CUSTOM" and nothing else. *)
 let custom_event () =
-  Ag_ui.of_custom ~name:"TEST_EVENT" (`Assoc [ ("ok", `Bool true) ])
+  Ag_ui.of_custom ~name:Masc_event (`Assoc [ ("ok", `Bool true) ])
 
 let run_error_event () =
   Ag_ui.run_error ~thread_id:"keeper:test" ~message:"boom" ()
@@ -110,12 +121,15 @@ let test_same_request_id_keeps_keeper_wire_audiences_separate () =
     match !observed, error_entries (read_journal ~base_path ~keeper_name ~operation_id) with
     | [event], [{ Journal.seq = 0; event = Events.Event_error { message }; _ }] ->
       check string "each Keeper journal carries a safe terminal" Events.public_error_message message;
-      let expected = Ag_ui.run_error ~timestamp:event.Ag_ui.timestamp
-        ~thread_id:("keeper:" ^ keeper_name)
-        ~run_id:("keeper-operation-run-" ^ operation_id)
-        ~message ~code:Events.public_error_code () in
-      check string "wire carries only its Keeper's payload"
-        (Ag_ui.event_to_sse expected) (Ag_ui.event_to_sse event)
+      (match run_error_of event with
+       | Some actual ->
+         let expected = Ag_ui.run_error ~timestamp:actual.timestamp
+           ~thread_id:("keeper:" ^ keeper_name)
+           ~run_id:("keeper-operation-run-" ^ operation_id)
+           ~message ~code:Events.public_error_code () in
+         check string "wire carries only its Keeper's payload"
+           (Ag_ui.event_to_sse expected) (Ag_ui.event_to_sse event)
+       | None -> fail "the terminal is not RUN_ERROR")
     | _ -> fail "each Keeper must own one independent terminal and seq-zero journal")
     ["wire-alpha", alpha; "wire-beta", beta]
 
@@ -182,7 +196,9 @@ let test_same_keeper_and_request_id_keep_runtime_roots_separate () =
   List.iter (fun (base_path, observed) ->
     (match !observed with
      | [event] -> check (option string) "wire belongs to this runtime root"
-         (Some Events.public_error_message) event.Ag_ui.message
+         (Some Events.public_error_message)
+         (Option.map (fun (error : Keeper_chat_wire.Keeper_chat_wire_t.run_error) -> error.message)
+            (run_error_of event))
      | _ -> fail "each runtime root must receive one terminal");
     match error_entries (read_journal ~base_path ~keeper_name ~operation_id) with
     | [{Journal.seq=0; event=Events.Event_error {message=actual}; _}] ->
@@ -211,9 +227,7 @@ let test_settle_synthesizes_run_error_for_open_stream () =
     ~execution:(failed_execution "Keeper owner stopped the active turn");
   (match !events with
    | [ event ] ->
-     (match event.Ag_ui.event_type with
-      | Ag_ui.Run_error -> ()
-      | _ -> fail "synthesized event is not RUN_ERROR");
+     (if not (is_run_error event) then fail "synthesized event is not RUN_ERROR");
      let sse = Ag_ui.event_to_sse event in
      check bool "fixed safe message travels on the wire" true
        (Astring.String.is_infix
@@ -273,9 +287,7 @@ let test_settle_synthesizes_for_attached_client_with_no_events () =
     ~execution:(failed_execution "operation input missing");
   match !events with
   | [ event ] ->
-    (match event.Ag_ui.event_type with
-     | Ag_ui.Run_error -> ()
-     | _ -> fail "synthesized event is not RUN_ERROR")
+    (if not (is_run_error event) then fail "synthesized event is not RUN_ERROR")
   | events ->
     fail
       (Printf.sprintf "expected one synthesized event, got %d"
@@ -442,10 +454,12 @@ let test_interrupted_owner_without_subscriber_replays_failure () =
     ~operation_id:operation_id_string ~since_seq:(Journal.After_seq 1) in
   match frames with
   | [2, event] ->
-    check bool "reopening sees RUN_ERROR" true (event.Ag_ui.event_type = Ag_ui.Run_error);
-    check string "replay keeps Keeper identity" ("keeper:" ^ keeper_name) event.thread_id;
-    check (option string) "replay keeps request identity"
-      (Some ("keeper-operation-run-" ^ operation_id_string)) event.run_id
+    (match run_error_of event with
+     | Some error ->
+       check string "replay keeps Keeper identity" ("keeper:" ^ keeper_name) error.thread_id;
+       check (option string) "replay keeps request identity"
+         (Some ("keeper-operation-run-" ^ operation_id_string)) error.run_id
+     | None -> fail "reopening does not see RUN_ERROR")
   | _ -> fail "reconnect did not replay the interrupted terminal"
 
 let test_failed_continuation_after_prior_finished_segment () =
@@ -463,7 +477,7 @@ let test_failed_continuation_after_prior_finished_segment () =
     ~operation_id ~since_seq:(Journal.After_seq 1) in
   match frames with
   | [2, event] -> check bool "old finish did not hide new failure" true
-      (event.Ag_ui.event_type = Ag_ui.Run_error)
+      (is_run_error event)
   | _ -> fail "continuation failure disappeared behind its prior terminal"
 
 let test_registry_shutdown_projects_every_claimed_batch_member () =
@@ -634,7 +648,7 @@ let test_transcript_failure_preserves_journal_and_live_terminal () =
     ~execution:(failed_execution "owner shutdown");
   (match !events with
    | [event] -> check bool "transcript failure cannot hide the live terminal" true
-       (event.Ag_ui.event_type = Ag_ui.Run_error)
+       (is_run_error event)
    | _ -> fail "the healthy journal did not authorize one live terminal");
   let project () = Projection.persist ~base_path ~keeper_name operation in
   (match project () with
@@ -849,7 +863,7 @@ let test_operation_settlement_retries_and_replays_past_a_live_cursor () =
     let fallback = Stream.For_testing.operation_terminal_after_replay ~base_path ~keeper_name ~operation ~replayed in
     (match fallback with
      | Some event ->
-         check bool "the durable failure still yields RUN_ERROR" true (event.Ag_ui.event_type=Ag_ui.Run_error);
+         check bool "the durable failure still yields RUN_ERROR" true (is_run_error event);
          let wire = Ag_ui.event_to_sse event in
          check bool "the supplemental frame does not regress the cursor" false (String.starts_with ~prefix:"id:" wire)
      | None -> fail "a cursor beyond the repaired journal lost the terminal");

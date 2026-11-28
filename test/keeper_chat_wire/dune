@@ -1,7 +1,7 @@
 (library
  (name agui_frame_cases)
  (modules agui_frame_cases)
- (libraries masc.ag_ui yojson))
+ (libraries masc.ag_ui keeper_chat_wire yojson))
 
 (test
  (name test_keeper_chat_wire_ag_ui)

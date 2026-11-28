@@ -15,57 +15,21 @@ type text_response =
   | Unobserved_scope of int option
   | Observed_response of response_identity
 
-type event_type =
-  | Run_started
-  | Run_finished
-  | Run_error
-  | Text_message_start
-  | Text_message_content
-  | Text_message_end
-  | Tool_call_start
-  | Tool_call_args
-  | Tool_call_end
-  | Custom
-[@@deriving show, eq]
+type role = Keeper_chat_wire.Keeper_chat_wire_t.role =
+  | User
+  | Assistant
+  | System
+  | Tool
 
-val event_type_to_string : event_type -> string
-(** Spec-compliant uppercase string (e.g. ["RUN_STARTED"]). *)
+type custom_name = Keeper_chat_wire.Keeper_chat_wire_t.custom_name
+(** What a [CUSTOM] frame's value holds. *)
 
-(** {1 Message Role} *)
+(** {1 Event} *)
 
-type role = User | Assistant | System | Tool
-[@@deriving show, eq]
-
-val role_to_string : role -> string
-(** Spec-compliant lowercase string (e.g. ["assistant"]). *)
-
-(** {1 Event Record} *)
-
-type event = private {
-  event_type : event_type;
-  thread_id : string;
-  run_id : string option;
-  message_id : string option;
-  role : role option;
-  delta : string option;
-      (** Text chunk or tool args fragment. *)
-  tool_call_id : string option;
-  tool_call_name : string option;
-  text_response : text_response;
-      (** Complete observed response or explicitly unobserved scope; independent of tool occurrence scope. *)
-  tool_stream_scope : int option;
-  provider_message_id : string option;
-  tool_call_block_index : int option;
-  snapshot : Yojson.Safe.t option;
-      (** Accumulated tool-call arguments for [Tool_call_args]. *)
-  message : string option;
-      (** Required top-level error message for [Run_error]. *)
-  code : string option;
-      (** Optional top-level error code for [Run_error]. *)
-  custom_name : string option;
-  custom_value : Yojson.Safe.t option;
-  timestamp : float;
-}
+type event = private Keeper_chat_wire.Keeper_chat_wire_t.frame
+(** One AG-UI frame. Its type and JSON come from
+    lib/keeper_chat_wire/keeper_chat_wire.atd. Only the constructors below
+    build one; read it with [(event :> Keeper_chat_wire_t.frame)]. *)
 
 (** {1 Constructors}
 
@@ -160,7 +124,7 @@ val custom :
   ?timestamp:float ->
   thread_id:string ->
   ?run_id:string ->
-  name:string ->
+  name:custom_name ->
   Yojson.Safe.t ->
   event
 (** A [CUSTOM] frame. [name] says what the value holds. *)
@@ -168,7 +132,7 @@ val custom :
 (** {1 Serialization} *)
 
 val event_to_json : event -> Yojson.Safe.t
-(** Spec-compliant JSON with camelCase field names. *)
+(** The frame's JSON, as the generated writer writes it. *)
 
 val event_to_sse : ?id:int -> event -> string
 (** Format an event as a single SSE [data:] line followed by [\n\n]. *)
@@ -178,7 +142,7 @@ val event_to_sse : ?id:int -> event -> string
 val default_thread_id : string
 (** Thread ID used by the single-namespace MASC bridge (["default"]). *)
 
-val of_custom : ?timestamp:float -> name:string -> Yojson.Safe.t -> event
+val of_custom : ?timestamp:float -> name:custom_name -> Yojson.Safe.t -> event
 (** {!custom} on {!default_thread_id} without a run. *)
 
 (** {1 Protocol Metadata} *)

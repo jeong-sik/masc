@@ -237,8 +237,8 @@ related: []
 
 - journal 이벤트 하나가 frame 여럿이 된다. `REASONING_START`·`REASONING_MESSAGE_START`, 턴 끝·재시도 앞의 `_END` 가 그렇다. 지금 projection(`Server_keeper_chat_agui_projection.project`)은 이벤트 하나에 frame 을 많아야 하나 낸다.
 - frame 위치는 (journal seq, 순번)이다. 순번은 그 이벤트가 낸 frame 안에서 0 부터 센다. projection 은 journal 만의 함수라 live, 재생, observer 가 같은 위치를 낸다.
-- SSE `id:` 는 `<seq>.<순번>` 이다. 1.0 클라이언트는 무시한다.
-- 이어 받기: `since_seq` 는 그대로 정수 seq 다. 재생은 그 seq 의 이벤트부터(포함) 보내고, 소비자가 위치로 거른다. 묶음 중간에서 끊긴 클라이언트도 나머지 frame 을 받는다.
+- SSE `id:` 는 `<seq>:<순번>` 이다. Dashboard `parseSseEvent` 와 TUI `cmd_executor.ml` 은 두 부분을 음이 아닌 십진 정수로 엄격하게 디코드한다. 1.0 클라이언트는 이 필드를 무시한다. observer 는 정수 `seq` 와 `frame_index` 를 함께 보내고, 위치 없는 frame 은 둘 다 생략한다.
+- 이어 받기: `since_seq` 는 그대로 정수 seq 다. 재생은 그 seq 의 이벤트부터(포함) 보내고, 소비자가 위치로 거른다. 묶음 중간에서 끊긴 클라이언트도 나머지 frame 을 받는다. 포함 규칙은 chat SSE 재생에만 해당한다. journal 조회와 Dashboard·TUI 의 journal 커서, `seq_is_after` 는 기존 배타 규칙을 유지한다.
   - 재생은 열린 item 을 알아야 하므로 journal 을 처음부터 projection 하고, 앞의 frame 은 보내지 않는다.
 - 소비자 중복 제거를 seq 하나에서 (seq, 순번)으로 바꾼다. Dashboard `acknowledgeKeeperResponseSequence`(`lib/keeper-response-state.ts:46`)와 `applyKeeperStreamEvent`, observer 의 `recordObserverSeq`, TUI 의 같은 자리다.
 - 위치가 없는 frame 은 둘이다. journal 에 쓰지 못한 이벤트의 frame(지금처럼 live 로만 나간다)과 기록으로 만든 끝이다.
@@ -261,8 +261,8 @@ related: []
 
 - 옛 모양 reader 는 두지 않는다(hard cut). 아래는 CUSTOM 이름, `RUN_STARTED`, `timestamp` 를 읽는 곳을 `rg` 로 모은 목록이다. 시험 파일은 뺐다.
 - 서버: `lib/ag_ui/ag_ui.ml`·`.mli`, `lib/server/server_keeper_chat_agui_projection.ml`, `lib/server/server_routes_http_keeper_stream.ml`, `lib/server/server_keeper_chat_replay.ml`, `lib/server/server_sse_response.ml`, `lib/server/server_mcp_transport_http_agui.ml`, `lib/keeper/keeper_chat_broadcast.ml`, `lib/keeper/keeper_chat_events.mli`, `lib/keeper/keeper_chat_types.ml`, `lib/keeper_chat_operations/keeper_chat_operation.mli`.
-- Dashboard(`dashboard/src/`): `api/attachments.ts`, `api/keeper.ts`(`:417` 수락 이름 비교), `config/constants.ts`, `keeper-message.ts`, `keeper-state.ts`, `keeper-stream.ts`, `lib/keeper-chat-stream-contract.ts`, `lib/keeper-response-state.ts`, `lib/sse-event-type.ts`, `schemas/sse.ts`(`:1059` timestamp 검사), `types/core.ts`, `workspaces/keepers/keeper-chat-tab.ts`, `workspaces/keepers/keepers-api.ts`, `workspaces/keepers/types.ts`.
-- TUI: `lib/masc_tui/protocol/wire_fleet.ml`·`.mli`, `lib/masc_tui/protocol/wire_observer.ml`, `lib/masc_tui/screens_ops/keeper_dive.ml`, `lib/masc_tui/store/fleet_store.ml`·`.mli`.
+- Dashboard(`dashboard/src/`): `api/attachments.ts`, `api/keeper.ts`(수락 이름 비교와 `parseSseEvent` 위치 디코드), `config/constants.ts`, `keeper-message.ts`, `keeper-state.ts`, `keeper-stream.ts`, `lib/keeper-chat-stream-contract.ts`, `lib/keeper-response-state.ts`, `lib/sse-event-type.ts`, `schemas/sse.ts`(`:1059` timestamp 검사), `types/core.ts`, `workspaces/keepers/keeper-chat-tab.ts`, `workspaces/keepers/keepers-api.ts`, `workspaces/keepers/types.ts`.
+- TUI: `lib/masc_tui/app/cmd_executor.ml`(SSE 위치 디코드), `lib/masc_tui/protocol/wire_fleet.ml`·`.mli`, `lib/masc_tui/protocol/wire_observer.ml`, `lib/masc_tui/screens_ops/keeper_dive.ml`, `lib/masc_tui/store/fleet_store.ml`·`.mli`.
 - 스크립트: `scripts/keeper-first-turn-smoke.py:214-229`.
   - 지금은 수락 → `RUN_STARTED` → `KEEPER_REPLY_DETAILS` → `RUN_FINISHED` 순서를 단언한다.
   - 새 순서는 `RUN_STARTED` → `masc.KEEPER_TURN_STARTED` → `masc.KEEPER_REPLY_DETAILS` → `masc.KEEPER_TURN_FINISHED` → `RUN_FINISHED` 다.
@@ -324,11 +324,13 @@ related: []
   - 이유: 1.0 클라이언트는 이미 가진 id 의 `TEXT_MESSAGE_START` 를 그 메시지를 다시 여는 것으로 보고 글을 덧붙인다(`text-messages.md`). snapshot 에 답이 있는데 journal 을 처음부터 보내면 글이 두 번 쌓인다.
 - 순서: `RUN_STARTED` → `MESSAGES_SNAPSHOT` → 열린 item 을 다시 여는 START → live frame → 끝.
 - snapshot: masc 기록에 이 operation 의 지금까지 내용을 더한 것이다.
-  - 이 operation 의 내용은 user 메시지와, journal 을 위치 c 까지 접은 assistant·tool·reasoning 메시지다. user 행이 아직 없으면 operation source 의 메시지로 채운다. 이 operation 의 기록 행은 접은 내용과 겹치므로 넣지 않는다.
+  - 완료된 operation 은 `outcome_ref` 와 연결된 저장 행을 원본으로 쓴다. journal 은 안정 id 와 부가 관측을 복원하는 데 보조로 쓴다. journal 이 없어도 저장된 답은 유지하고, 같은 operation 행을 중복 합산하지 않는다.
+  - 실행 중 operation 은 live owner 의 접두부 위치와 대조해 journal 이 위치 c 까지 완전할 때만 snapshot 을 보낸다. journal 이 없거나 읽을 수 없거나 누락을 배제할 수 없으면 `RUN_STARTED` 다음에 복원 오류 `RUN_ERROR` 를 보낸다. 이 응답은 기존 메시지를 교체하는 snapshot 을 보내지 않으며 durable operation 의 상태를 바꾸지 않는다. 완료 결과를 읽지 못해도 같은 복원 오류를 보낸다. user 행이 아직 없으면 operation source 의 메시지를 쓴다.
   - 다른 operation 은 기록 행으로 넣는다.
   - 범위: 기록의 마지막 N 행과 이 operation 이다. N 은 단계 3 에서 응답 크기를 재고 정한다. 잘라 보내면 클라이언트 화면에서 그보다 앞 메시지가 지워진다. 다른 connector 에서 온 메시지도 masc 기록이라 들어간다.
   - reasoning: snapshot 에 reasoning 메시지가 하나라도 있으면 클라이언트는 snapshot 에 없는 reasoning 을 버린다(`state.md`). 이 operation 의 reasoning 을 넣어 끊기 전의 조각이 남지 않게 한다.
 - 열린 item: 위치 c 에서 열려 있던 message·tool call·reasoning message 는 snapshot 에 지금까지 내용이 들어가고, 같은 id 의 START 로 다시 연다. 1.0 은 닫힌 message·tool call 을 다시 열어 덧붙이는 것을 허용한다(`text-messages.md`, `tool-calls.md`). reasoning message 는 열린 id 만 막는다(`reasoning.md`).
+  - 열린 tool call 의 START 직후에는 그 시점까지의 인자 전체를 `TOOL_CALL_ARGS` 로 먼저 보낸 뒤 새 delta 를 잇는다.
   - reasoning span(`REASONING_START`)을 다시 여는 규칙은 1.0 에 없다. c 에서 span 이 열려 있으면 어떻게 할지는 D4 에서 SDK 동작을 보고 정한다.
 - live: sink 는 journal 을 읽기 전에 등록한다. c 까지의 이벤트는 live 에서 거른다. 지금 `chat/stream` 이 재생과 live 를 잇는 방식(`live_event_is_new`)과 같다.
 - snapshot 의 id:
@@ -378,11 +380,11 @@ related: []
 2. **wire 를 1.0 모양으로**
    - 층마다 서버, masc 클라이언트 셋, fixture 를 같이 바꾼다. 각 층의 CI 가 깨지지 않게 하기 위해서다.
    - 층 2-a: timestamp, `metadata.masc`, id, role.
-   - 층 2-b: 응답 머리, 턴 CUSTOM, 기록으로 만드는 끝과 그 세 길, CUSTOM 이름과 생성기의 `.`, thinking, usage, smoke 스크립트.
+   - 층 2-b: 응답 머리, 턴 CUSTOM, 기록으로 만드는 끝과 그 세 길, CUSTOM 이름과 생성기의 `.`, thinking, usage, 두 SSE reader 와 observer 위치의 동시 전환, smoke 스크립트.
    - 층 2-c: fixture 를 생성자마다 채우고 frame 시험과 순서 시험을 켠다.
    - 확인: 두 시험 통과, 끝을 보내는 세 길마다 시험(성공 직후 heartbeat, 큐 취소 live, 끝난 뒤 다시 붙기), observer 가 성공·취소 끝을 받는 시험, frame 여럿을 내는 이벤트 중간에서 끊고 이어 받아 빠짐·겹침이 없는 시험, Dashboard·TUI 기존 시험 통과, 네이티브 생성물 decode 시험 통과, smoke 스크립트 로컬 실행.
 3. **`RunAgentInput` 길**
-   - 확인: 입력 해석 표의 행마다 시험, 중복 전송 표의 행마다 시험(붙은 응답의 최종 글이 한 번인지 포함), `MESSAGES_SNAPSHOT` 을 포함한 응답이 순서 시험을 통과.
+   - 확인: 입력 해석 표의 행마다 시험, 중복 전송 표의 행마다 시험(붙은 응답의 최종 글이 한 번인지 포함), `MESSAGES_SNAPSHOT` 을 포함한 응답이 순서 시험을 통과. journal 이 없거나 빠진 완료 작업은 저장 결과를 한 번 표시하고, 실행 중 완전성을 확인하지 못하면 기존 메시지를 지우는 snapshot 이 나가지 않음을 확인.
 4. **외부 클라이언트 확인**(D4)
 
 ## 5. 열린 질문

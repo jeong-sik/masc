@@ -132,8 +132,7 @@ let initial_terminal_effect_state inputs =
 
 (* The failure callback every ordinary descriptor's handler receives. The
    handler calls it only for a post-effect or unknown failure; whether that
-   ends the turn is Keeper_tool_failure_boundary's decision, the same one a
-   skill composition reads for its failed nodes. *)
+   ends the turn is Keeper_tool_failure_boundary's decision. *)
 let ordinary_on_failed
       ~mark_terminal_effect_failed
       handler
@@ -719,12 +718,12 @@ let make_tool_bundle_for_descriptors_with_policy
   let fallback_vision_tools = gated_tools Fallback_vision_only in
   let image_generator_tools = gated_tools Requires_image_generator in
   let descriptor_tools = List.map fst descriptor_tools_with_loading in
-  let* composition_tools_with_loading, task_required_tool_names =
+  let* skill_tools_with_loading =
     if not masc_tools_enabled
-    then Ok ([], [])
+    then Ok []
     else
       match instruction_skills with
-      | [] -> Ok ([], [])
+      | [] -> Ok []
       | skills ->
         let+ tool =
           Keeper_instruction_skill.make_instruction_skill_tool
@@ -740,11 +739,9 @@ let make_tool_bundle_for_descriptors_with_policy
         let projection =
           Tool_output.Inline_up_to { maximum_bytes = Common.max_tool_result_wire_bytes }
         in
-        [ tool, loading, projection ], []
+        [ tool, loading, projection ]
   in
-  let composition_tools =
-    List.map (fun (tool, _, _) -> tool) composition_tools_with_loading
-  in
+  let skill_tools = List.map (fun (tool, _, _) -> tool) skill_tools_with_loading in
   (* Identity tools are external effects by definition; they join the turn
      only behind the durable Gate, irrespective of provider annotations. The
      cycle's one-shot grant threads through so an approved exact call can be
@@ -787,10 +784,10 @@ let make_tool_bundle_for_descriptors_with_policy
      Two sources, one answer. An attached tool is held back by default: a
      Keeper is handed its services' entire lists, 145 tools and 142,257 bytes
      on the Keeper the RFC measured. A built-in is held back when it declares
-     [defer_loading = true]: a descriptor or the Skill reader in its own
-     [config/tools/<name>.toml], a Skill composition in its composition
-     block -- of 89 built-ins on one Keeper, 33 went a whole day uncalled,
-     21,601 bytes charged to every request of every turn.
+     [defer_loading = true] in its own [config/tools/<name>.toml], as a
+     descriptor or the Skill reader does -- of 89 built-ins on one Keeper, 33
+     went a whole day uncalled, 21,601 bytes charged to every request of
+     every turn.
 
      The listing does not record which source a tool came from, and the model
      is not told. Holding a tool back is a property of the tool. *)
@@ -799,33 +796,25 @@ let make_tool_bundle_for_descriptors_with_policy
     | Tool_definition_toml.Always_loaded -> false
   in
   let deferred_builtin_tools, always_loaded_builtin_tools =
-    (* Both families, each paired with its declaration where it was built:
-       a descriptor's from [config/tools/<internal name>.toml], a Skill
-       composition's from its composition block, and the Skill reader and
-       request controls beside the compositions from their own tool files.
-       Splitting only the descriptors would leave a [defer_loading = true]
-       that nothing honours and nothing reports -- a declaration is either
-       read wherever it can be written or it is a trap. Exact current-Task
-       composition selection already names the schemas needed for the work:
-       its callable and ordinary leaves are provided now, without a model
-       loader roundtrip. This changes delivery, not the stored declaration,
-       source authority, or activation. Unrelated tools remain deferrable. *)
+    (* Both families, each paired with its declaration where it was built: a
+       descriptor's from [config/tools/<internal name>.toml], and the Skill
+       reader's from its own tool file. Splitting only the descriptors would
+       leave a [defer_loading = true] that nothing honours and nothing
+       reports -- a declaration is either read wherever it can be written or
+       it is a trap. *)
     let split tools_with_loading =
       let deferred, loaded =
-        List.partition (fun ((tool : Agent_core.Tool.t), loading) ->
-          deferrable loading
-          && not (List.exists (String.equal tool.schema.name) task_required_tool_names)) tools_with_loading
+        List.partition
+          (fun ((_ : Agent_core.Tool.t), loading) -> deferrable loading)
+          tools_with_loading
       in
       List.map fst deferred, List.map fst loaded
     in
     let deferred_descriptors, loaded_descriptors = split descriptor_tools_with_loading in
-    let deferred_compositions, loaded_compositions =
-      split
-        (List.map
-           (fun (tool, loading, _) -> tool, loading)
-           composition_tools_with_loading)
+    let deferred_skill_tools, loaded_skill_tools =
+      split (List.map (fun (tool, loading, _) -> tool, loading) skill_tools_with_loading)
     in
-    deferred_descriptors @ deferred_compositions, loaded_descriptors @ loaded_compositions
+    deferred_descriptors @ deferred_skill_tools, loaded_descriptors @ loaded_skill_tools
   in
   let deferred_entry tool =
     { Keeper_identity_tool_search.tool
@@ -927,16 +916,16 @@ let make_tool_bundle_for_descriptors_with_policy
   (* The lanes that cannot widen a turn get every tool as a schema: holding
      one back there would name a tool nothing can load. *)
   let always_loaded = always_loaded_builtin_tools in
-  let tools = descriptor_tools @ composition_tools @ identity_agent_tools in
+  let tools = descriptor_tools @ skill_tools @ identity_agent_tools in
   let offered_names =
     List.map (fun (tool : Agent_core.Tool.t) -> tool.schema.name) tools
     @ (match identity_listing with
        | None -> []
        | Some listing -> [listing.Keeper_identity_tool_search.tool.schema.name]) in
-  (* Runtime admission reserves static host tools. Skill compositions and
-     attached-service tools are known only here, so finish collision admission
-     before publishing either lane's bundle. A policy and a callable must never
-     resolve the same name to different owners. *)
+  (* Runtime admission reserves static host tools. Attached-service tools are
+     known only here, so finish collision admission before publishing either
+     lane's bundle. A policy and a callable must never resolve the same name
+     to different owners. *)
   List.iter (fun (descriptor : Keeper_tool_descriptor.t) ->
     match Keeper_tool_descriptor.lane_addon_export descriptor.runtime_handler with
     | Some _ ->
@@ -948,7 +937,7 @@ let make_tool_bundle_for_descriptors_with_policy
       (* The bound each result is held to on an official-client lane, read
          off the projection applied there (see [model_projection_for_call]):
          a descriptor's own, which every model name it answers to crosses,
-         and the projection a composition surface chose. Attached-service
+         and the Skill reader's. Attached-service
          text is externalized, but native image bytes are not bounded by that
          text threshold, so those tools truthfully leave the result unbounded. *)
       List.concat_map
@@ -968,7 +957,7 @@ let make_tool_bundle_for_descriptors_with_policy
           (fun (tool, _, projection) ->
              ( tool.Agent_core.Tool.schema.name
              , Tool_output.inline_ceiling_bytes projection ))
-          composition_tools_with_loading
+          skill_tools_with_loading
   in
   let agent_core_view ~admitted ~deferred listing =
     List.filter admitted always_loaded
@@ -1025,7 +1014,7 @@ let make_tool_bundle_for_descriptors_with_policy
       else true
     in
     let deferred = List.filter admitted deferred_builtin_tools in
-    let tools = List.filter admitted (descriptor_tools @ composition_tools @ identity_tools) in
+    let tools = List.filter admitted (descriptor_tools @ skill_tools @ identity_tools) in
     let held_schemas = List.map (fun (tool : Agent_core.Tool.t) -> tool.schema) tools in
     let placement_policy =
       match runtime.Runtime_instance.execution with

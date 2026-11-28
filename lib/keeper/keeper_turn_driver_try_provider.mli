@@ -228,6 +228,7 @@ val input_limit_of_runtime :
 
 val past_max_context :
   input_limit:Llm_provider.Input_budget.t option ->
+  finished_turn:Keeper_model_input_ledger.finished_turn ->
   continuity:continuity option ->
   history_digest_at:(int -> string option) ->
   turn_boundary:Keeper_carried_front.turn_start ->
@@ -241,7 +242,9 @@ val past_max_context :
     history has. [None] for no ledger, an unknown count, no [input_limit], an
     unknown boundary, or a boundary at or before the window: the signal moves a
     window early, and never moves it back or by a guess. [continuity] names the
-    Librarian point the move may go to. Pure. *)
+    Librarian point the move may go to. [finished_turn] says what this turn's
+    first request does with the turn before it; the ledger reads its peak
+    under it. Pure. *)
 
 (** What a window that stays keeps where it last sent it. *)
 type held_window =
@@ -259,13 +262,15 @@ type held_window =
 val held_window :
   opens_turn:bool ->
   input_limit:Llm_provider.Input_budget.t option ->
+  finished_turn:Keeper_model_input_ledger.finished_turn ->
   history_digest_at:(int -> string option) ->
   Keeper_model_input_ledger.t option ->
   held_window option
 (** [Some] when the ledger still holds its positions in this history and,
     at a turn's first request ([opens_turn]), the size signal watches the
     window: [input_limit] is resolved and the ledger knows how much one turn
-    grows ({!Keeper_model_input_ledger.next_turn_peak}). Without the signal,
+    grows ({!Keeper_model_input_ledger.next_turn_peak}, read under
+    [finished_turn]). Without the signal,
     a window whose start never moves grows until the provider refuses it.
     Later in the turn the window holds where its first request opened it,
     which the ledger's last request records. Pure. *)
@@ -760,10 +765,21 @@ type finished_turn_results =
           the turn boundary, whether the window stayed or moved.
           The same result is the same marker on every later request, so it
           changes once, on the first request after its turn ended
-          (RFC-tool-results-age-out-of-context). With an unknown turn
-          boundary nothing is demoted. *)
+          (RFC-tool-results-age-out-of-context). An unknown turn boundary
+          demotes nothing more: a window that stays keeps what its last
+          request sent as markers, and nothing else is demoted. *)
 
 val finished_turn_results_for : reader_available:bool -> finished_turn_results
+
+val finished_turn_for_ledger :
+  finished_turn_results:finished_turn_results ->
+  base_path:string ->
+  turn_boundary:Keeper_carried_front.turn_start ->
+  Keeper_model_input_ledger.finished_turn
+(** What a turn's first request does with the turn before it, as the ledger
+    reads it. [Left_as_markers] when the caller asks for markers, the dispatch
+    names the turn boundary and [base_path] is a store the markers are
+    written to; [Carried_whole] otherwise. *)
 (** {!Finished_turns_as_markers} for a Keeper that can read markers back
     ([reader_available]); {!Finished_turns_verbatim} for a Keeper without the
     reader. *)

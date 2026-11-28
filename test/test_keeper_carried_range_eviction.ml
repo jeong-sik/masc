@@ -58,6 +58,7 @@ let request ~digest_at ~first_atom ~atom_count : Ledger.request =
   ; ends = ends_from digest_at ~first_atom ~atom_count
   ; tail_bytes = 0
   ; turn_context = false
+  ; finished_turn = Ledger.Carried_whole
   ; demote_before = 0
   ; working_state = None
   }
@@ -661,7 +662,7 @@ let input_limit_of ?(kind = Llm_provider.Provider_config.OpenAI_compat) ?max_tok
 
 let signal_over ?(input_limit = input_limit_of (Some 3_000)) ?(turn_boundary = boundary_8)
       ?continuity ~history ledger =
-  Try_provider.past_max_context ~input_limit ~continuity
+  Try_provider.past_max_context ~input_limit ~finished_turn:Ledger.Carried_whole ~continuity
     ~history_digest_at:(Window.atom_opening_digest history) ~turn_boundary ledger
 ;;
 
@@ -875,7 +876,7 @@ let test_a_window_holds_only_while_the_size_signal_watches () =
   let held ?(opens_turn = true) ?(input_limit = input_limit_of (Some 400_000)) ledger =
     Option.map
       (fun (held : Try_provider.held_window) -> held.window_opened_at)
-      (Try_provider.held_window ~opens_turn ~input_limit
+      (Try_provider.held_window ~opens_turn ~input_limit ~finished_turn:Ledger.Carried_whole
          ~history_digest_at:(Window.atom_opening_digest history) ledger)
   in
   let at = option int in

@@ -7,6 +7,10 @@ type carried_ends =
       ; end_digest : string
       }
 
+type finished_turn =
+  | Carried_whole
+  | Left_as_markers
+
 type request =
   { prefix_digest : string
   ; first_atom : int
@@ -14,6 +18,7 @@ type request =
   ; ends : carried_ends
   ; tail_bytes : int
   ; turn_context : bool
+  ; finished_turn : finished_turn
   ; demote_before : int
   ; working_state : string option
   }
@@ -31,14 +36,21 @@ type block =
   }
 
 type turn_growth =
-  { ended_at : int option
-        (** The count of the last request before the current turn, under
-            this window; [None] for the turn the window opened in. *)
+  { built_on : int option
+        (** The count the current turn builds on, under this window: what
+            its first request kept of the turn before it. That is the turn
+            before's last count when the request carried it whole, and its
+            first count when the request left its results as markers. [None]
+            for the turn the window opened in. *)
+  ; opened_at : int option
+        (** The count of the current turn's first request under this window;
+            [None] when it went uncounted or the window opened later in the
+            turn. *)
   ; peak : int option
         (** The largest count among the current turn's requests; [None] once
             one of them went uncounted. *)
   ; largest : int option
-        (** The largest [peak - ended_at] of a turn that finished since the
+        (** The largest [peak - built_on] of a turn that finished since the
             ledger started, under any of its windows. *)
   ; last_input : int option  (** The count of the last request. *)
   }
@@ -94,18 +106,33 @@ let base_blocks (request : request) =
 
 (* A window that opened at the request in hand: that request is the only one
    counted under it, and no turn has finished under it yet. [counted] is the
-   provider's count for the request whether or not it is a sample. *)
-let growth_from (counted : usage option) =
+   provider's count for the request whether or not it is a sample. The turn
+   has a first count under the window only when this request opens it. *)
+let growth_from ~turn_context (counted : usage option) =
   let input = Option.map (fun (u : usage) -> u.input_tokens) counted in
-  { ended_at = None; peak = input; largest = None; last_input = input }
+  { built_on = None
+  ; opened_at = (if turn_context then input else None)
+  ; peak = input
+  ; largest = None
+  ; last_input = input
+  }
 ;;
 
-(* The turn the growth is in, from the last request of the turn before it to
-   its own largest request; unknown when either went uncounted. *)
+(* The turn the growth is in, from the count it builds on to its own largest
+   request; unknown when either went uncounted. *)
 let finished_growth (growth : turn_growth) =
-  match growth.ended_at, growth.peak with
-  | Some ended_at, Some peak -> Some (peak - ended_at)
+  match growth.built_on, growth.peak with
+  | Some built_on, Some peak -> Some (peak - built_on)
   | Some _, None | None, (Some _ | None) -> None
+;;
+
+(* What the next turn keeps of the turn in hand, as a count. A first request
+   that carries the turn whole starts from its last request. One that leaves
+   the turn's results as markers starts from where the turn itself started:
+   what the turn added goes with its results. *)
+let kept_of_turn (growth : turn_growth) = function
+  | Carried_whole -> growth.last_input
+  | Left_as_markers -> growth.opened_at
 ;;
 
 let larger a b =
@@ -116,14 +143,15 @@ let larger a b =
 ;;
 
 (* The same window carries one more request. A request with the turn context
-   opens the next turn: the turn before it ended at the last request's count,
-   and its growth joins the largest. A turn with a request the provider did
-   not count has no peak, so it adds nothing. *)
-let grow (growth : turn_growth) ~turn_context (counted : usage option) =
+   opens the next turn: it builds on what it kept of the turn before it, and
+   that turn's growth joins the largest. A turn with a request the provider
+   did not count has no peak, so it adds nothing. *)
+let grow (growth : turn_growth) ~turn_context ~finished_turn (counted : usage option) =
   let input = Option.map (fun (u : usage) -> u.input_tokens) counted in
   if turn_context
   then
-    { ended_at = growth.last_input
+    { built_on = kept_of_turn growth finished_turn
+    ; opened_at = input
     ; peak = input
     ; largest = larger growth.largest (finished_growth growth)
     ; last_input = input
@@ -147,14 +175,14 @@ let moved_growth (growth : turn_growth) ~turn_context (counted : usage option) =
   let largest =
     if turn_context then larger growth.largest (finished_growth growth) else growth.largest
   in
-  { (growth_from counted) with largest }
+  { (growth_from ~turn_context counted) with largest }
 ;;
 
 let last_input_tokens t = t.growth.last_input
 
-let next_turn_peak t =
-  match t.growth.last_input, larger t.growth.largest (finished_growth t.growth) with
-  | Some input, Some growth -> Some (input + growth)
+let next_turn_peak ~finished_turn t =
+  match kept_of_turn t.growth finished_turn, larger t.growth.largest (finished_growth t.growth) with
+  | Some kept, Some growth -> Some (kept + growth)
   | Some _, None | None, (Some _ | None) -> None
 ;;
 
@@ -169,7 +197,7 @@ let start (request : request) ~counted (usage : usage option) =
   ; blocks = base_blocks request
   ; last = request
   ; last_usage = usage
-  ; growth = growth_from counted
+  ; growth = growth_from ~turn_context:request.turn_context counted
   }
 ;;
 
@@ -340,7 +368,9 @@ let observe_trimmed
       ; growth =
           (if evicted_atoms > 0
            then moved_growth t.growth ~turn_context:request.turn_context counted
-           else grow t.growth ~turn_context:request.turn_context counted)
+           else
+             grow t.growth ~turn_context:request.turn_context
+               ~finished_turn:request.finished_turn counted)
       }
     in
     let event =
@@ -468,8 +498,8 @@ let to_json t =
     ; ( "cache_read_input_tokens"
       , int_opt (Option.map (fun (u : usage) -> u.cache_read_input_tokens) t.last_usage) )
     ; "last_input_tokens", int_opt t.growth.last_input
+    ; "turn_opened_at", int_opt t.growth.opened_at
     ; "largest_turn_growth", int_opt (larger t.growth.largest (finished_growth t.growth))
-    ; "next_turn_peak", int_opt (next_turn_peak t)
     ]
 ;;
 

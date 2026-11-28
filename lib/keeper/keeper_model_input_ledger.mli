@@ -79,6 +79,16 @@ type carried_ends =
                 carried atom. *)
       }
 
+(** What a request did with the results of the turns that ended before it.
+    Read at a turn's first request: it decides what the turn builds on. *)
+type finished_turn =
+  | Carried_whole
+      (** As the turn's own requests sent them. The next turn builds on the
+          turn's last request. *)
+  | Left_as_markers
+      (** As markers. What the turn added leaves with its results, so the
+          next turn builds on the turn's first request. *)
+
 (** One request as the projection handed it to the provider. *)
 type request =
   { prefix_digest : string
@@ -93,6 +103,8 @@ type request =
   ; turn_context : bool
         (** The request carried the per-turn context message, so its usage
             is not a sample. *)
+  ; finished_turn : finished_turn
+        (** What this request did with the turn that ended before it. *)
   ; demote_before : int
         (** Atoms below this index went out with their aged tool results as
             markers; 0 when nothing was demoted. *)
@@ -123,10 +135,18 @@ type block =
     is the provider's [input_tokens] for a request, a sample or not: the
     turn's first request carries the turn context and is still the largest
     request of a turn that calls no tool. A request with the turn context
-    opens a turn. A front that moves opens another window: the counts start
-    over with it, and the largest growth stays, since how much one turn grows
-    does not depend on where the window opens. A restart starts all of it
-    over. Only {!observe} changes it and only {!next_turn_peak} reads it. *)
+    opens a turn. A turn's growth is its largest count less the count it
+    builds on, which is what its first request kept of the turn before it
+    ({!finished_turn}): that turn's last count when carried whole, its first
+    count when left as markers. Measured from the last count either way, a
+    turn that follows a large one left as markers would read as shrinking,
+    and one that follows a quiet turn as growing by all of its own results.
+    A front that moves opens another window: the counts start over with it,
+    and the largest growth stays, since how much one turn grows does not
+    depend on where the window opens. A window that opens later in a turn
+    has no first count for that turn, so the turn after it has nothing to
+    build on under {!Left_as_markers}. A restart starts all of it over.
+    Only {!observe} changes it and only {!next_turn_peak} reads it. *)
 type turn_growth
 
 type t =
@@ -210,13 +230,15 @@ val last_input_tokens : t -> int option
     whether or not that request was a sample and whether or not turn growth has
     been measured yet. [None] when the last request went uncounted. *)
 
-val next_turn_peak : t -> int option
-(** The input the next turn is expected to reach while the window stays: the
-    last request's count plus the largest growth of a turn that finished
-    since the ledger started, the current turn included as if it had just
-    finished. [None] while either is unknown. The turn a window opened in has no
-    count before it under that window, so it adds no growth. A ledger's first
-    window has none until its second turn has opened. *)
+val next_turn_peak : finished_turn:finished_turn -> t -> int option
+(** The input the next turn is expected to reach while the window stays:
+    what its first request keeps of the turn in hand, plus the largest growth
+    of a turn that finished since the ledger started, the turn in hand
+    included as if it had just finished. [finished_turn] says what that
+    first request will do with the turn in hand. [None] while either part is
+    unknown. The turn a window opened in builds on no count under that
+    window, so it adds no growth. A ledger's first window has none until its
+    second turn has opened. *)
 
 val known_tokens : t -> int
 (** Sum of the measured blocks' tokens. *)

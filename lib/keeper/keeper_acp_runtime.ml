@@ -2459,6 +2459,7 @@ let ledger_request ~system_prompt ~tools { source_messages; digest_at; sends_fro
   ; ends
   ; tail_bytes = 0
   ; turn_context = true
+  ; finished_turn = Keeper_model_input_ledger.Carried_whole
   ; demote_before = 0
   ; working_state = None
   }
@@ -2494,6 +2495,7 @@ let seed_past_max_context
   match
     Keeper_turn_driver_try_provider.past_max_context
       ~input_limit:(Some input_limit)
+      ~finished_turn:Keeper_model_input_ledger.Carried_whole
       ~continuity:librarian_front
       ~history_digest_at:digest_at
       ~turn_boundary:turn_start

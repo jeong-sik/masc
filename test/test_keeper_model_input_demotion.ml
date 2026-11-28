@@ -2899,6 +2899,26 @@ let finished_turns_stay_verbatim_unless_they_can_be_read_back () =
     (planned asked)
 ;;
 
+(* The ledger reads a turn as left behind as markers only when markers were
+   asked for, the dispatch named the turn boundary and there is a store to
+   write them to. *)
+let the_ledger_reads_a_turn_as_markers_only_when_they_are_written () =
+  let left ~finished_turn_results ~base_path turn_boundary =
+    Try_provider.finished_turn_for_ledger ~finished_turn_results ~base_path ~turn_boundary
+    = Masc.Keeper_model_input_ledger.Left_as_markers
+  in
+  let known = finished_turns_through 4 in
+  let unknown = Masc.Keeper_carried_front.Turn_boundary_unknown { reason = "unreadable" } in
+  Alcotest.(check bool) "markers, a known boundary and a store" true
+    (left ~finished_turn_results:as_markers ~base_path:"/store" known);
+  Alcotest.(check bool) "an unknown boundary leaves the turn whole" false
+    (left ~finished_turn_results:as_markers ~base_path:"/store" unknown);
+  Alcotest.(check bool) "no store leaves the turn whole" false
+    (left ~finished_turn_results:as_markers ~base_path:"" known);
+  Alcotest.(check bool) "a caller that keeps results whole" false
+    (left ~finished_turn_results:Try_provider.Finished_turns_verbatim ~base_path:"/store" known)
+;;
+
 (* The driver asks for markers only for a Keeper that can read them back. *)
 let only_a_keeper_with_a_reader_asks_for_markers () =
   let asks reader_available =
@@ -3247,6 +3267,10 @@ let () =
             "only a Keeper with a reader asks for markers"
             `Quick
             only_a_keeper_with_a_reader_asks_for_markers
+        ; Alcotest.test_case
+            "the ledger reads a turn as markers only when they are written"
+            `Quick
+            the_ledger_reads_a_turn_as_markers_only_when_they_are_written
         ; Alcotest.test_case
             "the newest atom keeps its results"
             `Quick

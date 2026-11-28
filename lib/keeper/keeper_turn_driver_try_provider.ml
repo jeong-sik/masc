@@ -897,6 +897,21 @@ let finished_turn_results_for ~reader_available =
   if reader_available then Finished_turns_as_markers else Finished_turns_verbatim
 ;;
 
+(* What a turn's first request does with the turn before it, as the ledger
+   reads it ({!Keeper_model_input_ledger.finished_turn}). The results leave as
+   markers when the caller asks for markers, the dispatch names the turn
+   boundary, and there is a store to write them to ([base_path]). *)
+let finished_turn_for_ledger ~finished_turn_results ~base_path ~turn_boundary =
+  match finished_turn_results, turn_boundary with
+  | Finished_turns_as_markers, Keeper_carried_front.Turn_boundary _
+    when not (String.equal base_path "") -> Keeper_model_input_ledger.Left_as_markers
+  | ( Finished_turns_as_markers
+    , (Keeper_carried_front.Turn_boundary _ | Keeper_carried_front.Turn_boundary_unknown _) )
+  | ( Finished_turns_verbatim
+    , (Keeper_carried_front.Turn_boundary _ | Keeper_carried_front.Turn_boundary_unknown _) ) ->
+    Keeper_model_input_ledger.Carried_whole
+;;
+
 (* The least body, in bytes, of a result of an ended turn that goes as its
    marker. Smaller results stay readable in the prompt. The number is the
    threshold the replay of stored requests priced in
@@ -1356,7 +1371,7 @@ let input_limit_of_runtime (runtime : Runtime_instance.t option) =
 
 let past_max_context
       ~(input_limit : Llm_provider.Input_budget.t option)
-      ~continuity ~history_digest_at ~turn_boundary
+      ~finished_turn ~continuity ~history_digest_at ~turn_boundary
       (ledger : Keeper_model_input_ledger.t option) =
   let ( let* ) = Option.bind in
   let* ledger = ledger in
@@ -1367,7 +1382,7 @@ let past_max_context
      already past budget. Keep {!Keeper_model_input_ledger.next_turn_peak}
      unchanged so [held_window] still requires a measured turn growth. *)
   let* next_turn_peak =
-    match Keeper_model_input_ledger.next_turn_peak ledger with
+    match Keeper_model_input_ledger.next_turn_peak ~finished_turn ledger with
     | Some _ as peak -> peak
     | None -> Keeper_model_input_ledger.last_input_tokens ledger
   in
@@ -1416,15 +1431,15 @@ type held_window =
    until the provider refuses it. Later in the turn it holds where the
    turn's first request opened it, which the ledger's last request
    records. *)
-let held_window ~opens_turn ~(input_limit : Llm_provider.Input_budget.t option) ~history_digest_at
-      (ledger : Keeper_model_input_ledger.t option) =
+let held_window ~opens_turn ~(input_limit : Llm_provider.Input_budget.t option) ~finished_turn
+      ~history_digest_at (ledger : Keeper_model_input_ledger.t option) =
   match ledger with
   | None -> None
   | Some ledger ->
     let watched =
       (not opens_turn)
       || (Option.is_some input_limit
-          && Option.is_some (Keeper_model_input_ledger.next_turn_peak ledger))
+          && Option.is_some (Keeper_model_input_ledger.next_turn_peak ~finished_turn ledger))
     in
     if watched && Keeper_model_input_ledger.holds ~digest_at:history_digest_at ledger
     then
@@ -2456,10 +2471,14 @@ let bounded_model_input_projection
        this turn's growth, and the turn keeps the front the signal moved,
        held below. *)
     let opens_turn = List.exists Runtime_model_input_tail_window.is_extra_context messages in
+    let finished_turn =
+      finished_turn_for_ledger ~finished_turn_results ~base_path:demotion_base_path
+        ~turn_boundary:ctx.turn_boundary
+    in
     let past_max_context =
       if opens_turn
       then
-        past_max_context ~input_limit:(Lazy.force input_limit)
+        past_max_context ~input_limit:(Lazy.force input_limit) ~finished_turn
           ~continuity:(input_continuity ctx.request_input) ~history_digest_at
           ~turn_boundary:ctx.turn_boundary !(state.ledger)
       else None
@@ -2468,8 +2487,8 @@ let bounded_model_input_projection
        opened, where it last sent its markers and what working state it
        carried. *)
     let held_window =
-      held_window ~opens_turn ~input_limit:(Lazy.force input_limit) ~history_digest_at
-        !(state.ledger)
+      held_window ~opens_turn ~input_limit:(Lazy.force input_limit) ~finished_turn
+        ~history_digest_at !(state.ledger)
     in
     let current_turn_results = !(state.current_turn_results) in
     state.last_history_messages := Some messages;
@@ -2822,6 +2841,7 @@ let bounded_model_input_projection
               ; ends
               ; tail_bytes
               ; turn_context
+              ; finished_turn
               ; demote_before = view.composed.demote_before
               ; working_state = view.composed.working_state
               }

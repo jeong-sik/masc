@@ -486,6 +486,51 @@ let an_admin_revokes_admin_with_strict_cause () =
             ~body:{|{"cause":"operational"}|})))
 ;;
 
+(* A Member that an Admin gives the assignment acts as an Admin at once: the
+   list reads the role from the log on each request. *)
+let an_admin_makes_a_member_an_admin () =
+  with_installation (fun t ->
+    let member_id = a_member_joins t 88 in
+    let member_cookie = session_for t.zone member_id in
+    let member_str = User_id.to_string member_id in
+    let grant cookie user_id = M.grant_admin t.routes (request cookie) ~user_id in
+    Alcotest.(check int) "a Member cannot grant" 403 (code (grant (Some member_cookie) member_str));
+    Alcotest.(check int)
+      "a Member gets 403 on a missing id"
+      403
+      (code (grant (Some member_cookie) "missing-user"));
+    Alcotest.(check int) "no session" 401 (code (grant None member_str));
+    Alcotest.(check int)
+      "missing CSRF gets 403"
+      403
+      (code (M.grant_admin t.routes { (request (Some t.admin)) with Q.csrf = None } ~user_id:member_str));
+    Alcotest.(check int) "an empty id is 400" 400 (code (grant (Some t.admin) ""));
+    Alcotest.(check int) "a missing user is 404" 404 (code (grant (Some t.admin) "missing-user"));
+    Alcotest.(check int)
+      "an Admin already is 409"
+      409
+      (code (grant (Some t.admin) (User_id.to_string t.admin_id)));
+    Alcotest.(check int) "the Member does not list yet" 403 (code (M.list t.routes (read (Some member_cookie))));
+    let granted = grant (Some t.admin) member_str in
+    Alcotest.(check int) ("grant: " ^ granted.R.body) 200 (code granted);
+    Alcotest.(check (option json)) "the role" (text "admin") (member "role" granted);
+    Alcotest.(check int) "twice is 409" 409 (code (grant (Some t.admin) member_str));
+    Alcotest.(check int)
+      "the new Admin lists the members"
+      200
+      (code (M.list t.routes (read (Some member_cookie))));
+    (* The first Admin is no longer the last: the new one revokes it. *)
+    Alcotest.(check int)
+      "the new Admin revokes the first"
+      200
+      (code
+         (M.revoke_admin
+            t.routes
+            (request (Some member_cookie))
+            ~user_id:(User_id.to_string t.admin_id)
+            ~body:{|{"cause":"operational"}|})))
+;;
+
 let an_admin_deletes_a_member_and_protects_last_admin () =
   with_installation (fun t ->
     let member_id = a_member_joins t 77 in
@@ -544,6 +589,7 @@ let () =
             "an Admin revokes Admin with strict cause"
             `Quick
             an_admin_revokes_admin_with_strict_cause
+        ; Alcotest.test_case "an Admin makes a Member an Admin" `Quick an_admin_makes_a_member_an_admin
         ; Alcotest.test_case
             "an Admin deletes a member and protects last Admin"
             `Quick

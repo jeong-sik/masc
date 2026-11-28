@@ -20,8 +20,9 @@
     the id ({!is_deleted}) and the namespace. The writer draws a user id of 128
     bits from the OS CSPRNG and draws again when {!admit} refuses it as taken.
 
-    {b Admins.} An admission through an Admin invitation makes an Admin
-    assignment, and a revocation ({!revoke_admin}) ends one. The last Admin
+    {b Admins.} An admission through an Admin invitation or a grant
+    ({!grant_admin}) makes an Admin assignment, and a revocation
+    ({!revoke_admin}) ends one. The last Admin
     assignment in force is never revoked (design 5.1-5), so a log with one Admin
     keeps one. An Admin whose revocation the store gave up writes nothing
     (design 8.3), so that Admin does not count as the one that remains. *)
@@ -153,8 +154,35 @@ val revoke_admin
   :  t
   -> author:Authz_records.Author.t
   -> held:(Authz_types.User_id.t -> bool)
-  -> Authz_admin_event.t
+  -> user_id:Authz_types.User_id.t
   -> (t, revocation_refusal) result
+
+(** Why a grant of an Admin assignment is refused. *)
+type grant_refusal =
+  | Granter_is_not_an_admin of Authz_records.Author.t
+      (** The author is not an Admin that acts (see {!Revoker_is_not_an_admin}). *)
+  | No_principal_to_grant of Authz_types.User_id.t  (** Never admitted, or deleted. *)
+  | Grantee_held of Authz_types.User_id.t
+      (** The store gave up a revocation of the principal (design 8.3): it does
+          not act, and a grant would raise what the store holds lowered. *)
+  | Grantee_disabled of Authz_types.User_id.t
+  | Already_an_admin of Authz_types.User_id.t
+      (** An assignment is in force already, the principal's own included. *)
+
+val grant_refusal_to_string : grant_refusal -> string
+
+(** What one grant of an Admin assignment does: the principal, which joined as
+    a Member, gets the assignment an Admin invitation gives at admission. The
+    checks run in this order: the author, the principal, the hold, the status,
+    the assignment. Only an Admin that acts grants, as in {!revoke_admin}. A
+    grant lowers no epoch: like an enable, it gives and takes nothing away, so
+    a log restored from before it leaves the principal a Member. *)
+val grant_admin
+  :  t
+  -> author:Authz_records.Author.t
+  -> held:(Authz_types.User_id.t -> bool)
+  -> user_id:Authz_types.User_id.t
+  -> (t, grant_refusal) result
 
 type principal_refusal =
   | Writer_is_not_an_admin of Authz_records.Author.t

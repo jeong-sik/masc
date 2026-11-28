@@ -1,12 +1,14 @@
 (* HIGH-RISK-UNREVIEWED: this module writes and reads the body of the record that
-   takes the Admin assignment from a principal. An Admin manages the other
-   people of the installation. *)
+   gives the Admin assignment to a principal or takes it away. An Admin manages
+   the other people of the installation. *)
 
 (** The body of a record of kind {!Authz_record.Kind.Admin_assignment} (design
-    4.1, plan B3c-3): the Admin assignment of a principal is revoked.
+    4.1, plan B3c-3): an Admin gives the Admin assignment to a principal that
+    joined as a Member, or the Admin assignment of a principal is revoked.
 
-    An Admin assignment is made by the admission that spends an Admin invitation
-    ({!Authz_admission_event}), so this body has one event, the revocation.
+    An Admin assignment is also made by the admission that spends an Admin
+    invitation ({!Authz_admission_event}). A grant is for a person already in:
+    an invitation binds a new identity, so it cannot make a Member an Admin.
 
     {b Cause.} Design 4.1 makes the cause of a revocation required. With
     [Security_incident], the same record puts the shares and the delegated
@@ -14,7 +16,8 @@
     they stay in force. The first stage has no shares and no delegated grants
     (design 1.1), so the cause is recorded and changes nothing else yet.
 
-    {b Body.} [{"event":"revoked","user_id":...,"cause":...}], in this order.
+    {b Body.} [{"event":"granted","user_id":...}] or
+    [{"event":"revoked","user_id":...,"cause":...}], in this order.
     The labels are on disk and renaming one orphans every record written with
     it. A body with other members, the same members in another order, or a
     member of another type is refused.
@@ -34,10 +37,14 @@ val cause_label : cause -> string
 val cause_of_label : string -> cause option
 
 type t =
+  | Granted of { user_id : Authz_types.User_id.t  (** The principal that becomes an Admin. *) }
   | Revoked of
       { user_id : Authz_types.User_id.t  (** The principal that stops being an Admin. *)
       ; cause : cause
       }
+
+(** The principal the event is about. *)
+val user_id : t -> Authz_types.User_id.t
 
 val equal : t -> t -> bool
 
@@ -59,5 +66,6 @@ val error_to_string : error -> string
 
 (** Reads a body. The first check that fails is the result: it is an object
     whose first member is [event], the event is known, its members are those of
-    the event, and then the user id and the cause are each one. *)
+    the event, and then the user id and, for a revocation, the cause are each
+    one. *)
 val of_body : Authz_body.t -> (t, error) result

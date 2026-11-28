@@ -1,6 +1,7 @@
-(* Checks for the body of a revocation of an Admin assignment: the bytes it
-   writes, that it reads back what it wrote, every way a body fails to be one,
-   and who may write the record. No files, clock, or network. *)
+(* Checks for the body of a grant and of a revocation of an Admin assignment:
+   the bytes each writes, that it reads back what it wrote, every way a body
+   fails to be one, and who may write the record. No files, clock, or
+   network. *)
 
 open Authz_types
 open Authz_records
@@ -53,6 +54,22 @@ let a_revocation_reads_back () =
        (A.Revoked { user_id = alice; cause = A.Security_incident }))
 ;;
 
+let a_grant_writes_and_reads_back () =
+  let t = A.Granted { user_id = alice } in
+  Alcotest.(check string)
+    "bytes"
+    {|{"event":"granted","user_id":"alice"}|}
+    (Authz_body.to_string (to_body_exn t));
+  (match A.of_body (to_body_exn t) with
+   | Ok back -> Alcotest.(check bool) "reads back" true (A.equal t back)
+   | Error error -> Alcotest.failf "refused: %s" (A.error_to_string error));
+  Alcotest.(check bool)
+    "a grant is not a revocation"
+    false
+    (A.equal t (A.Revoked { user_id = alice; cause = A.Operational }));
+  Alcotest.(check string) "the principal" "alice" (User_id.to_string (A.user_id t))
+;;
+
 let error_name : A.error -> string = function
   | A.Not_an_object -> "not an object"
   | A.Unknown_event label -> Printf.sprintf "unknown event %S" label
@@ -70,7 +87,11 @@ let refusals =
   ; "a string", `String "revoked", "not an object"
   ; "an empty object", `Assoc [], "wrong members"
   ; "no event first", `Assoc [ "user_id", `String "alice"; "event", `String "revoked"; "cause", `String "operational" ], "wrong members"
-  ; "another event", `Assoc [ "event", `String "granted"; "user_id", `String "alice" ], {|unknown event "granted"|}
+  ; "another event", `Assoc [ "event", `String "promoted"; "user_id", `String "alice" ], {|unknown event "promoted"|}
+  ; "a grant with a cause", `Assoc [ "event", `String "granted"; "user_id", `String "alice"; "cause", `String "operational" ], "wrong members"
+  ; "a grant with no user id", `Assoc [ "event", `String "granted" ], "wrong members"
+  ; "a grant whose user id is a number", `Assoc [ "event", `String "granted"; "user_id", `Int 1 ], "wrong members"
+  ; "a grant with an empty user id", `Assoc [ "event", `String "granted"; "user_id", `String "" ], "invalid user id"
   ; "no cause", `Assoc [ "event", `String "revoked"; "user_id", `String "alice" ], "wrong members"
   ; "another member", `Assoc [ "event", `String "revoked"; "user_id", `String "alice"; "cause", `String "operational"; "note", `String "x" ], "wrong members"
   ; "a user id that is a number", body ~user_id:(`Int 1) (), "wrong members"
@@ -86,7 +107,7 @@ let a_body_that_is_not_a_revocation_is_refused () =
   List.iter
     (fun (name, json, expected) ->
       match A.of_body (body_of_json json) with
-      | Ok _ -> Alcotest.failf "%s was read as a revocation" name
+      | Ok _ -> Alcotest.failf "%s was read as an event" name
       | Error error -> Alcotest.(check string) name expected (error_name error))
     refusals;
   Alcotest.(check int)
@@ -130,6 +151,7 @@ let () =
         ; Alcotest.test_case "reads back" `Quick a_revocation_reads_back
         ; Alcotest.test_case "refusals" `Quick a_body_that_is_not_a_revocation_is_refused
         ] )
+    ; "grant", [ Alcotest.test_case "bytes and reads back" `Quick a_grant_writes_and_reads_back ]
     ; "record", [ Alcotest.test_case "who writes it" `Quick only_an_authenticated_principal_writes_one ]
     ]
 ;;

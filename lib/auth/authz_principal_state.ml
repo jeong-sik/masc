@@ -219,7 +219,7 @@ let author_is_an_admin ~held t (author : Author.t) =
   | Author.System_maintenance -> false
 ;;
 
-let revoke_admin t ~author ~held (Authz_admin_event.Revoked { user_id; cause = _ }) =
+let revoke_admin t ~author ~held ~user_id =
   if not (author_is_an_admin ~held t author)
   then Error (Revoker_is_not_an_admin author)
   else if not (User_id.Set.mem user_id t.admins)
@@ -227,6 +227,44 @@ let revoke_admin t ~author ~held (Authz_admin_event.Revoked { user_id; cause = _
   else (
     let after = { t with admins = User_id.Set.remove user_id t.admins } in
     if an_admin_remains ~held after then Ok after else Error (Last_admin user_id))
+;;
+
+type grant_refusal =
+  | Granter_is_not_an_admin of Author.t
+  | No_principal_to_grant of User_id.t
+  | Grantee_held of User_id.t
+  | Grantee_disabled of User_id.t
+  | Already_an_admin of User_id.t
+
+let grant_refusal_to_string = function
+  | Granter_is_not_an_admin author ->
+    Printf.sprintf "%s is not an Admin, and only an Admin gives an Admin assignment" (Author.label author)
+  | No_principal_to_grant user_id -> Printf.sprintf "there is no principal %s" (User_id.to_string user_id)
+  | Grantee_held user_id ->
+    Printf.sprintf
+      "%s is held by a revocation the store gave up, so it is given no Admin assignment"
+      (User_id.to_string user_id)
+  | Grantee_disabled user_id ->
+    Printf.sprintf "%s is disabled, so it is given no Admin assignment" (User_id.to_string user_id)
+  | Already_an_admin user_id -> Printf.sprintf "%s has an Admin assignment already" (User_id.to_string user_id)
+;;
+
+let grant_admin t ~author ~held ~user_id =
+  if not (author_is_an_admin ~held t author)
+  then Error (Granter_is_not_an_admin author)
+  else (
+    match find t user_id with
+    | None -> Error (No_principal_to_grant user_id)
+    | Some { status; identity = _ } ->
+      if held user_id
+      then Error (Grantee_held user_id)
+      else (
+        match status with
+        | Disabled -> Error (Grantee_disabled user_id)
+        | Active ->
+          if User_id.Set.mem user_id t.admins
+          then Error (Already_an_admin user_id)
+          else Ok { t with admins = User_id.Set.add user_id t.admins }))
 ;;
 
 type principal_refusal =

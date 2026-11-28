@@ -241,6 +241,7 @@ let state_refusal : S.refusal -> state_refusal = function
   | S.Admission _
   | S.Admin_assignment_unreadable _
   | S.Admin_assignment _
+  | S.Admin_grant _
   | S.Principal_unreadable _
   | S.Principal_event _
   | S.Kind_not_read _

@@ -157,6 +157,7 @@ type refusal =
           (design 8.3). *)
   | Admin_assignment_unreadable of Authz_admin_event.error
   | Admin_assignment of Authz_principal_state.revocation_refusal
+  | Admin_grant of Authz_principal_state.grant_refusal
   | Principal_unreadable of Authz_principal_event.error
   | Principal_event of Authz_principal_state.principal_refusal
   | Author_inactive of Authz_types.User_id.t

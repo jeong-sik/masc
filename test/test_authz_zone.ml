@@ -335,6 +335,7 @@ let refusal_name : Authz_state.refusal -> string = function
   | Authz_state.Revocation_pending _ -> "Revocation_pending"
   | Authz_state.Admin_assignment_unreadable _ -> "Admin_assignment_unreadable"
   | Authz_state.Admin_assignment _ -> "Admin_assignment"
+  | Authz_state.Admin_grant _ -> "Admin_grant"
   | Authz_state.Principal_unreadable _ -> "Principal_unreadable"
   | Authz_state.Principal_event _ -> "Principal_event"
   | Authz_state.Author_inactive _ -> "Author_inactive"

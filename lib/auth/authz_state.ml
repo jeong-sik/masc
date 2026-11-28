@@ -155,6 +155,7 @@ type refusal =
   | Revocation_pending of Authz_records.Subject.t
   | Admin_assignment_unreadable of Authz_admin_event.error
   | Admin_assignment of Authz_principal_state.revocation_refusal
+  | Admin_grant of Authz_principal_state.grant_refusal
   | Principal_unreadable of Authz_principal_event.error
   | Principal_event of Authz_principal_state.principal_refusal
   | Author_inactive of Authz_types.User_id.t
@@ -213,6 +214,7 @@ let refusal_to_string = function
   | Admin_assignment_unreadable error ->
     "the Admin assignment record cannot be read: " ^ Authz_admin_event.error_to_string error
   | Admin_assignment refusal -> Authz_principal_state.revocation_refusal_to_string refusal
+  | Admin_grant refusal -> Authz_principal_state.grant_refusal_to_string refusal
   | Principal_unreadable error ->
     "the principal record cannot be read: " ^ Authz_principal_event.error_to_string error
   | Principal_event refusal -> Authz_principal_state.principal_refusal_to_string refusal
@@ -429,13 +431,21 @@ let held state user_id =
 ;;
 
 (* An Admin assignment that ends lowers the role epoch of its principal
-   (design 8.1), so the store takes a [Revoke] on that principal. *)
+   (design 8.1), so the store takes a [Revoke] on that principal. A grant gives
+   and takes nothing away, as an enable does, and has no intent: a log restored
+   from before it leaves the principal a Member. *)
 let admin_assignment state (record : R.t) =
   match Authz_admin_event.of_body record.R.body with
   | Error error -> Error (Admin_assignment_unreadable error)
-  | Ok (Authz_admin_event.Revoked { user_id; cause = _ } as event) ->
+  | Ok (Authz_admin_event.Granted { user_id }) ->
     (match
-       Authz_principal_state.revoke_admin state.principals ~author:record.R.author ~held:(held state) event
+       Authz_principal_state.grant_admin state.principals ~author:record.R.author ~held:(held state) ~user_id
+     with
+     | Error refusal -> Error (Admin_grant refusal)
+     | Ok principals -> Ok { state = { state with principals }; high_water = None })
+  | Ok (Authz_admin_event.Revoked { user_id; cause = _ }) ->
+    (match
+       Authz_principal_state.revoke_admin state.principals ~author:record.R.author ~held:(held state) ~user_id
      with
      | Error refusal -> Error (Admin_assignment refusal)
      | Ok principals ->

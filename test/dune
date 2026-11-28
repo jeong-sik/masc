@@ -5598,5 +5598,6 @@
 (include stanzas/rbac_live_e2e_seed.inc)
 
 (include stanzas/test_attachment_store.inc)
+(include stanzas/test_media_format.inc)
 
 (include stanzas/test_attachments_http_and_gc.inc)

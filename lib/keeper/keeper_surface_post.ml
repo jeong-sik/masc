@@ -129,6 +129,44 @@ let thread_ts_of_args ~surface args =
      | _ -> Error "thread_ts must not be repeated")
   | _ -> Error "keeper_surface_post arguments must be an object"
 
+(* The ids a Discord post attaches, in the order given. Each is a canonical
+   attachment id; a repeat would upload the same file twice. *)
+let attachment_ids_of_json = function
+  | `List [] ->
+    Error "attachment_ids must not be empty; omit it to post text only"
+  | `List items
+    when List.length items > Discord_rest_client.max_files_per_message ->
+    Error
+      (Printf.sprintf "attachment_ids names %d files; a Discord post carries at most %d"
+         (List.length items) Discord_rest_client.max_files_per_message)
+  | `List items ->
+    let rec decode seen acc index = function
+      | [] -> Ok (List.rev acc)
+      | `String id :: rest ->
+        (match Attachment_store.parse_id id with
+         | Error detail ->
+           Error (Printf.sprintf "attachment_ids[%d] %s" index detail)
+         | Ok _ when List.mem id seen ->
+           Error (Printf.sprintf "attachment_ids[%d] repeats %s" index id)
+         | Ok _ -> decode (id :: seen) (id :: acc) (index + 1) rest)
+      | _ :: _ ->
+        Error (Printf.sprintf "attachment_ids[%d] must be a string" index)
+    in
+    decode [] [] 0 items
+  | _ -> Error "attachment_ids must be an array of attachment ids"
+
+let attachment_ids_of_args ~surface args =
+  match args with
+  | `Assoc fields ->
+    (match List.filter (fun (name, _) -> name = "attachment_ids") fields with
+     | [] -> Ok []
+     | [ (_, value) ] ->
+       if not (String.equal surface discord_label) then
+         Error "attachment_ids is supported only for Discord posts"
+       else attachment_ids_of_json value
+     | _ -> Error "attachment_ids must not be repeated")
+  | _ -> Error "keeper_surface_post arguments must be an object"
+
 let blocks_of_args ~surface args =
   match args with
   | `Assoc fields ->

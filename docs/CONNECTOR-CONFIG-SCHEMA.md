@@ -60,7 +60,7 @@ Discord-specific setup (cannot be driven from dashboard — operator must do):
 1. https://discord.com/developers/applications → New Application.
 2. Bot tab → Reset Token → paste into shell env as `DISCORD_BOT_TOKEN`.
 3. Bot tab → enable **Message Content Intent** (required for `GUILD_MESSAGES`/`MESSAGE_CONTENT` intents).
-4. OAuth2 URL Generator → `bot` scope, permissions: Send Messages, Embed Links, Read Message History → invite.
+4. OAuth2 URL Generator → `bot` scope, permissions: Send Messages, Send Messages in Threads, Embed Links, Attach Files, Read Message History → invite. Without Attach Files, a post that carries files is refused by Discord.
 5. Restart the server so the new token is picked up at the next gateway connect.
 
 ### Discord image input
@@ -74,6 +74,20 @@ Successful images appear on the accepted user row and go through the normal
 Keeper image input path. If an image is unavailable, the turn keeps the
 message and records the reason on that row. When the same turn resumes, it
 uses the retained attachment from that row.
+
+### Discord file output
+
+A Keeper attaches files to a Discord post with `keeper_surface_post`'s
+`attachment_ids`: canonical attachment ids (`att_<64 hex>`), such as the
+`attachment_id` that `keeper_generate_image` returns. The list is part of the
+approved input. Before approval MASC checks that each id is in the attachment
+store; after approval it reads the bytes and uploads them in one
+`multipart/form-data` Create Message request, under the stored file name (or
+the digest and the extension the bytes prove). When the text needs more than
+one Discord message, the files ride on the last one. Discord shows images
+inline and plays audio in place; MIDI, PDF and other files appear as
+downloads. The per-file size limit depends on the server's boost tier, so
+Discord decides it: an oversized file comes back as a send failure.
 
 ### iMessage (in-process gateway)
 

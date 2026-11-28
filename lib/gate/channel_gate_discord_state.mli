@@ -208,6 +208,20 @@ val send_message :
     Must be called inside an Eio context (the underlying REST
     client uses the piaf-backed http pool). *)
 
+val send_files :
+  channel_id:string ->
+  content:string ->
+  ?reply_to_message_id:string ->
+  ?mention_user_ids:string list ->
+  files:Discord_rest_client.upload * Discord_rest_client.upload list ->
+  unit ->
+  (string, send_error) result
+(** Post [content] with [files] attached. [content] and [mention_user_ids]
+    are split as {!send_message} splits them; the last chunk carries the
+    files ({!Discord_rest_client.send_files}) and earlier chunks are plain
+    messages. Returns the id of the message that carries the files. A failure
+    after an earlier chunk was sent leaves that chunk in the channel. *)
+
 val edit_message :
   channel_id:string ->
   message_id:string ->

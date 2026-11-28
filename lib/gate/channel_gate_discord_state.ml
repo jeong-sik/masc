@@ -556,6 +556,41 @@ let send_message ~channel_id ~content ?reply_to_message_id
     in
     send_chunks true None messages
 
+(* The files ride on the last text chunk, so they sit under the end of the
+   text they illustrate; earlier chunks go out as [send_message] does. *)
+let send_files ~channel_id ~content ?reply_to_message_id
+    ?(mention_user_ids = []) ~files () =
+  match bot_token_opt () with
+  | None -> Error Missing_token
+  | Some token ->
+    let limit = Discord_rest_client.message_content_limit in
+    let rec send first = function
+      | [] ->
+        Error
+          (Rest_error
+             (Discord_rest_client.Other
+                { request_id = ""
+                ; reason = "Discord message chunker produced no output"
+                ; body_bytes = 0
+                }))
+      | [ last ] ->
+        Discord_rest_client.send_files ~token ~channel_id
+          ?content:(match last.content with "" -> None | text -> Some text)
+          ?reply_to_message_id:(if first then reply_to_message_id else None)
+          ~allowed_user_mentions:last.allowed_user_mentions ~files ()
+        |> Result.map_error (fun e -> Rest_error e)
+      | message :: rest ->
+        (match
+           Discord_rest_client.send_message ~token ~channel_id
+             ~content:message.content
+             ?reply_to_message_id:(if first then reply_to_message_id else None)
+             ~allowed_user_mentions:message.allowed_user_mentions ()
+         with
+         | Ok _ -> send false rest
+         | Error e -> Error (Rest_error e))
+    in
+    send true (message_chunks_with_mentions ~limit ~content ~mention_user_ids)
+
 let edit_message ~channel_id ~message_id ~content () =
   match bot_token_opt () with
   | None -> Error Missing_token

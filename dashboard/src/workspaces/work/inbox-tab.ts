@@ -210,6 +210,7 @@ export function decodeGatePayload(raw: unknown): {
           toolName: item.toolName,
           inputPreview: asNonEmptyString(row.input_preview) ?? (row.input ? JSON.stringify(row.input) : null),
           waitingSec: item.waitingSec,
+          requestedAt: item.requestedAt,
           phase: decodeApprovalQueuePhase(row.phase),
           disposition: normalizeKeeperSummaryAttemptDisposition(row.summary_attempt_disposition),
           sequence: item.sequence,
@@ -533,7 +534,7 @@ export function InboxTab(props: WorkspaceViewProps) {
       list.push({ kind: 'keeper_ask', key: `ask:${item.askId}`, waitingSinceMs: waitingSinceAskedAt(item.askedAt), item })
     }
     for (const item of gates) {
-      list.push({ kind: 'channel_gate', key: `gate:${item.id}`, waitingSinceMs: waitingSinceGateRead(item.waitingSec, gateReadAtMs), item })
+      list.push({ kind: 'channel_gate', key: `gate:${item.id}`, waitingSinceMs: waitingSinceGateRead(item, gateReadAtMs), item })
     }
     for (const goal of goals) {
       list.push({ kind: 'goal_confirmation', key: `goal:${goal.id}`, waitingSinceMs: null, goal })

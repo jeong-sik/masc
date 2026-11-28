@@ -13,7 +13,7 @@
 import { html } from 'htm/preact'
 import { formatDuration } from '../../lib/format-time'
 import { nowSecondsSignal, useNowSecondsTicker } from '../../lib/now-signal'
-import { toolApprovalTimeout, type InboxEntry } from './types'
+import { toolApprovalTimeout, type GatePendingItem, type InboxEntry } from './types'
 
 const MS_PER_SECOND = 1000
 
@@ -22,10 +22,16 @@ export function waitingSinceAskedAt(askedAt: number | null): number | null {
   return askedAt === null ? null : askedAt * MS_PER_SECOND
 }
 
-/** When a Gate row began to wait: `waitingSec` back from `readAtMs`, when the
- *  answer that carried it arrived. */
-export function waitingSinceGateRead(waitingSec: number | null, readAtMs: number | null): number | null {
-  return waitingSec === null || readAtMs === null ? null : readAtMs - waitingSec * MS_PER_SECOND
+/** When a Gate row began to wait. The row's own `requestedAt` says it; `waitingSec`
+ *  is derived from that when the server builds the payload and goes stale when the
+ *  payload is cached, so the derived pair (`waitingSec` back from `readAtMs`, when
+ *  the answer that carried it arrived) is only a fallback. */
+export function waitingSinceGateRead(
+  item: Pick<GatePendingItem, 'requestedAt' | 'waitingSec'>,
+  readAtMs: number | null,
+): number | null {
+  if (item.requestedAt !== null) return item.requestedAt * MS_PER_SECOND
+  return item.waitingSec === null || readAtMs === null ? null : readAtMs - item.waitingSec * MS_PER_SECOND
 }
 
 /** Longest wait first. An entry with no time comes after those, in the place it had. */

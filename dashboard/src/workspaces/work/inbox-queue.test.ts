@@ -38,13 +38,15 @@ const goalEntry = (key: string): InboxEntry => ({
 })
 
 describe('workspaces/work inbox queue', () => {
-  it('counts a wait from the time a row was asked, and a Gate row back from its read', () => {
+  it('counts a wait from the time a row was asked, and a Gate row from when it was requested', () => {
     expect(waitingSinceAskedAt(1_800_000_000)).toBe(NOW_MS)
     expect(waitingSinceAskedAt(null)).toBeNull()
-    expect(waitingSinceGateRead(90, NOW_MS)).toBe(NOW_MS - 90_000)
+    // The row's own `requested_at` wins; the derived `waiting_s` pair is only a fallback.
+    expect(waitingSinceGateRead({ requestedAt: 1_800_000_000, waitingSec: 90 }, NOW_MS)).toBe(NOW_MS)
+    expect(waitingSinceGateRead({ requestedAt: null, waitingSec: 90 }, NOW_MS)).toBe(NOW_MS - 90_000)
     // Neither half alone says when the row began to wait.
-    expect(waitingSinceGateRead(null, NOW_MS)).toBeNull()
-    expect(waitingSinceGateRead(90, null)).toBeNull()
+    expect(waitingSinceGateRead({ requestedAt: null, waitingSec: null }, NOW_MS)).toBeNull()
+    expect(waitingSinceGateRead({ requestedAt: null, waitingSec: 90 }, null)).toBeNull()
   })
 
   it('puts the longest wait first, whatever the kind', () => {

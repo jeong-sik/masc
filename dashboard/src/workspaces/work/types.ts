@@ -1103,6 +1103,10 @@ export interface GatePendingItem {
   readonly toolName: string
   readonly inputPreview: string | null
   readonly waitingSec: number | null
+  /** Unix seconds when the row began to wait, from the row's own `requested_at`.
+   *  `waitingSec` is derived from it when the server builds the payload and can go
+   *  stale when that payload is cached, so this is the authoritative time. */
+  readonly requestedAt: number | null
   /** Null when the row's phase is missing or not a current variant. */
   readonly phase: ApprovalQueuePhase | null
   readonly disposition: KeeperSummaryAttemptDisposition | null

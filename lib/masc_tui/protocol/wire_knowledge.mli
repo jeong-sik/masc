@@ -277,7 +277,6 @@ type wiki_lint_kind =
   | Unreadable_page
   | Revision_log_gap
   | Revision_log_hole
-  | Duplicate_title_candidate
   | Other_lint of string
 
 type wiki_lint_finding = {

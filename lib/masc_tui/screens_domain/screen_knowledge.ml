@@ -1598,8 +1598,6 @@ let wiki_lint_kind_say = function
       Say.make ~ko:"로그 리비전이 문서보다 앞섬" ~en:"Log ahead of page"
   | Wire_knowledge.Revision_log_hole ->
       Say.make ~ko:"로그에 빠진 리비전" ~en:"Revision missing from log"
-  | Wire_knowledge.Duplicate_title_candidate ->
-      Say.make ~ko:"중복 제목 후보" ~en:"Duplicate title candidate"
   | Wire_knowledge.Other_lint raw -> Say.literal raw
 
 let draw_wiki_links_lint_card ~slug ~lang ~(k : Knowledge_store.t) ~cache
@@ -1758,7 +1756,6 @@ let render_wiki ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~b
               | Wire_knowledge.Unreadable_page
               | Wire_knowledge.Revision_log_gap
               | Wire_knowledge.Revision_log_hole
-              | Wire_knowledge.Duplicate_title_candidate
               | Wire_knowledge.Other_lint _ ->
                   None)
             rep.findings

@@ -946,7 +946,6 @@ type wiki_lint_kind =
   | Unreadable_page
   | Revision_log_gap
   | Revision_log_hole
-  | Duplicate_title_candidate
   | Other_lint of string
 
 type wiki_lint_finding = {
@@ -1019,15 +1018,15 @@ type wiki_lint_tally = {
   other : int;
 }
 
-(* A kind no count key reads: its findings are counted from the list, since
-   the counts object's key for it is dropped. *)
+(* A kind this build does not know has no count field, since the decoder
+   drops its key, so its findings are counted from the list. *)
 let has_no_count = function
   | Broken_link | Unsupported_link | Broken_media_embed | Broken_wiki_embed
   | Broken_artifact_embed | Invalid_embed | Unsupported_embed | Orphan_page
   | Orphan_unconfirmed | Missing_sources | Hearsay_only | Unreadable_page
   | Revision_log_gap | Revision_log_hole ->
       false
-  | Duplicate_title_candidate | Other_lint _ -> true
+  | Other_lint _ -> true
 
 (* Warning 9 is on here: a count added to the record and left out of this
    pattern stops the build until it goes in one of the four. *)
@@ -1196,7 +1195,6 @@ let wiki_lint_kind_of_string = function
   | "unreadable_page" -> Unreadable_page
   | "revision_log_gap" -> Revision_log_gap
   | "revision_log_hole" -> Revision_log_hole
-  | "duplicate_title_candidate" | "duplicate_title" -> Duplicate_title_candidate
   | other -> Other_lint other
 
 let optional_nonnegative_count_field json key =

@@ -1,0 +1,3 @@
+; Only the wire module is dune source; Gradle output (build/, .gradle/) stays
+; out of the dune scan.
+(dirs wire)

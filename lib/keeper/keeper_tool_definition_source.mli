@@ -7,8 +7,8 @@
 
 val resolve : string -> string option
 (** [resolve tool_name] is the file the tool's definition came from,
-    relative to the masc directory: ["tools/<name>.toml"]. [None] means no
-    file under [tools/] ships under that name — an answer, not a failure to
+    relative to [config/]: ["tools/<name>.toml"]. [None] means no
+    file under [config/tools/] ships under that name — an answer, not a failure to
     look. *)
 
 val annotate_row : Yojson.Safe.t -> Yojson.Safe.t

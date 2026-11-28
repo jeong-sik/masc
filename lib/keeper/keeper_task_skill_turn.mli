@@ -26,7 +26,6 @@ type error = Keeper_task_skill_resolution_error.t =
 type selected = private
   { reference : Skill_reference.t
   ; skill : Keeper_skill_catalog.skill
-  ; diagnostic : Keeper_skill_catalog.error option
   ; task_ids : string list
   }
 
@@ -164,12 +163,6 @@ val skills : t -> Keeper_skill_catalog.skill list
 val task_ids_for_reference : t -> Skill_reference.t -> string list
 (** Exact Task ids that selected this revision in the frozen turn observation. *)
 
-val executable_selection :
-  projection:Keeper_skill_catalog.turn_projection -> t -> t
-(** Retain only Task selections present in the executable turn projection.
-    Activation provenance uses this view, so a profile-filtered Task Skill
-    cannot be recorded as an executable Task activation. *)
-
 val exact_task_surfaces :
   snapshot:Skill_catalog_snapshot.t ->
   tool_deny:string list ->
@@ -182,9 +175,12 @@ val exact_task_surfaces :
 (** Project the per-task exact Skill surfaces a turn advertises and executes,
     keyed by task id in observation order (current task first). Takes the
     already-resolved frozen [selection] and never re-resolves. [tool_deny],
-    [sandbox_profile] and [skill_names] are the same inputs the executable bundle passes to
-    {!Keeper_capability_surface.create}, which builds this projection too, so
-    prompt, bundle, and preview consumers share one computation without
+    [sandbox_profile] and [skill_names] are the inputs the executable bundle
+    passes to {!Keeper_capability_surface.create_with_descriptors_policy}.
+    This function builds the projection with
+    {!Keeper_capability_surface.create_with_descriptors}, which is that call
+    with MASC tools enabled, so for a Keeper whose MASC tools are enabled
+    prompt, bundle, and preview consumers read one projection without
     breaking the turn-boundary freeze. Each task's [unprojectable] references
     follow its projected ones as unavailable rows carrying their reason.
     Within this call, project each selected/unprojectable row at most once

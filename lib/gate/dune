@@ -24,6 +24,7 @@
   discord_gateway_client
   discord_gateway_state
   discord_rest_client
+  discord_voice_clip
   discord_wss_connection
   slack_gateway_state
   slack_socket_client
@@ -73,6 +74,8 @@
   masc.crypto_rng
   ; Create Message nonces use the shared random-id generator.
   masc.masc_random_id
+  ; Voice message waveforms travel as base64 in payload_json.
+  base64
   masc.http_client
   masc.masc_log
   otel_metric_store

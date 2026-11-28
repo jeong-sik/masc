@@ -749,14 +749,10 @@ let upload_payload_json ~content ~reply_to_message_id ~allowed_user_mentions
   in
   Yojson.Safe.to_string (`Assoc (add_message_reference reply_to_message_id fields))
 
-let build_upload_request ~token ~channel_id ~boundary:(Boundary boundary)
-    ?content ?reply_to_message_id ?(allowed_user_mentions = []) ?nonce
-    ~files:(first, rest) () =
-  let files = first :: rest in
-  let payload =
-    upload_payload_json ~content ~reply_to_message_id ~allowed_user_mentions
-      ~nonce files
-  in
+(* One Create Message request: [payload] as [payload_json], then [files] as
+   [files[0]] and on. *)
+let multipart_message_request ~token ~channel_id ~boundary:(Boundary boundary)
+    ~payload files =
   (* RFC 2046 section 5.1.1: the delimiter must not occur inside a part.
      "--" and the boundary is the delimiter without its leading CRLF, so
      refusing it anywhere in a part is the conservative check. *)
@@ -805,39 +801,133 @@ let build_upload_request ~token ~channel_id ~boundary:(Boundary boundary)
     in
     Ok (url, headers, body)
 
+let build_upload_request ~token ~channel_id ~boundary ?content
+    ?reply_to_message_id ?(allowed_user_mentions = []) ?nonce
+    ~files:(first, rest) () =
+  let files = first :: rest in
+  let payload =
+    upload_payload_json ~content ~reply_to_message_id ~allowed_user_mentions
+      ~nonce files
+  in
+  multipart_message_request ~token ~channel_id ~boundary ~payload files
+
+(* A minted boundary occurs in a part with probability about bytes / 16^48;
+   a fresh one is drawn until none does. *)
+let rec encode_with_fresh_boundary build =
+  match build (fresh_boundary ()) with
+  | Error Boundary_in_payload -> encode_with_fresh_boundary build
+  | Ok encoded -> encoded
+
+let post_multipart ?clock ~timeout_sec ~request_kind (url, headers, body) =
+  match Masc_http_client.post_sync ?clock ~timeout_sec ~url ~headers ~body () with
+  | Error msg -> Error (Network msg)
+  | Ok (status, body) ->
+    parse_response ~request_id:(next_request_id request_kind) ~status ~body ()
+
+let parse_rest_snowflake id =
+  snowflake_of_string id |> Result.map_error (fun message -> Network message)
+
+let parse_reply_to = function
+  | None -> Ok None
+  | Some id -> parse_rest_snowflake id |> Result.map Option.some
+
 let send_files ?clock ?(timeout_sec = Masc_http_client.default_request_timeout_sec)
     ~token ~channel_id ?content ?reply_to_message_id
     ?(allowed_user_mentions = []) ?nonce ~files () =
   let open Result.Syntax in
-  let parse_id id =
-    snowflake_of_string id |> Result.map_error (fun message -> Network message)
-  in
-  let* channel_id = parse_id channel_id in
+  let* channel_id = parse_rest_snowflake channel_id in
   let* allowed_user_mentions =
     List.fold_right
       (fun id acc ->
          let* acc = acc in
-         let* id = parse_id id in
+         let* id = parse_rest_snowflake id in
          Ok (id :: acc))
       allowed_user_mentions (Ok [])
   in
-  let* reply_to_message_id =
-    match reply_to_message_id with
-    | None -> Ok None
-    | Some id -> parse_id id |> Result.map Option.some
+  let* reply_to_message_id = parse_reply_to reply_to_message_id in
+  encode_with_fresh_boundary (fun boundary ->
+    build_upload_request ~token ~channel_id ~boundary ?content
+      ?reply_to_message_id ~allowed_user_mentions ?nonce ~files ())
+  |> post_multipart ?clock ~timeout_sec ~request_kind:"upload"
+
+(* ── Voice message ───────────────────────────────────────────────── *)
+
+(* Message flag IS_VOICE_MESSAGE. A voice message carries one audio file and
+   no content, and cannot be edited afterwards. *)
+let voice_message_flag = 1 lsl 13
+
+(* Voice Messages: clients downsample so that "no more than 256 datapoints
+   are in the waveform", one byte per datapoint. *)
+let voice_waveform_max_points = 256
+
+(* Clients upload "a 1 channel, 48000 Hz, 32kbps Opus stream in an OGG
+   container" (Voice Messages, as of 2023-04-14). The part's Content-Type
+   must begin with "audio/" for Discord to read duration_secs and waveform. *)
+let voice_message_filename = "voice-message.ogg"
+let voice_message_media_type = "audio/ogg"
+
+(* RFC 3533 section 6: every Ogg page begins with the capture pattern. *)
+let ogg_capture_pattern = "OggS"
+
+type voice_clip =
+  { voice_ogg : string
+  ; voice_duration_secs : float
+  ; voice_waveform : string
+  }
+
+let voice_clip ~duration_secs ~waveform ogg =
+  let points = String.length waveform in
+  if not (Float.is_finite duration_secs && duration_secs > 0.0) then
+    Error "Discord voice message duration must be a positive number of seconds"
+  else if points = 0 || points > voice_waveform_max_points then
+    Error
+      (Printf.sprintf "Discord voice message waveform must have 1 to %d points"
+         voice_waveform_max_points)
+  else if not (String.starts_with ~prefix:ogg_capture_pattern ogg) then
+    Error "Discord voice message audio must be an Ogg stream"
+  else Ok { voice_ogg = ogg; voice_duration_secs = duration_secs; voice_waveform = waveform }
+
+let voice_clip_duration_secs clip = clip.voice_duration_secs
+
+let voice_message_payload_json ~reply_to_message_id clip =
+  let attachment =
+    `Assoc
+      [ "id", `Int 0
+      ; "filename", `String voice_message_filename
+      ; "duration_secs", `Float clip.voice_duration_secs
+      ; "waveform", `String (Base64.encode_string clip.voice_waveform)
+      ]
   in
-  (* A minted boundary occurs in the payload with probability about
-     bytes / 16^48; a fresh one is drawn until none does. *)
-  let rec encode () =
-    match
-      build_upload_request ~token ~channel_id ~boundary:(fresh_boundary ())
-        ?content ?reply_to_message_id ~allowed_user_mentions ?nonce ~files ()
-    with
-    | Error Boundary_in_payload -> encode ()
-    | Ok encoded -> encoded
+  Yojson.Safe.to_string
+    (`Assoc
+       (add_message_reference reply_to_message_id
+          [ "flags", `Int voice_message_flag
+          ; "attachments", `List [ attachment ]
+            (* No content, so no user to notify; a reply does not ping its
+               author either, as {!send_message}'s replies do not. *)
+          ; ( "allowed_mentions"
+            , allowed_mentions_json ~is_reply:(Option.is_some reply_to_message_id) [] )
+          ]))
+
+let build_voice_message_request ~token ~channel_id ~boundary
+    ?reply_to_message_id ~clip () =
+  let payload = voice_message_payload_json ~reply_to_message_id clip in
+  let file =
+    { upload_filename = voice_message_filename
+    ; upload_media_type = voice_message_media_type
+    ; upload_description = None
+    ; upload_bytes = clip.voice_ogg
+    }
   in
-  let url, headers, body = encode () in
-  match Masc_http_client.post_sync ?clock ~timeout_sec ~url ~headers ~body () with
-  | Error msg -> Error (Network msg)
-  | Ok (status, body) ->
-    parse_response ~request_id:(next_request_id "upload") ~status ~body ()
+  multipart_message_request ~token ~channel_id ~boundary ~payload [ file ]
+
+let send_voice_message ?clock
+    ?(timeout_sec = Masc_http_client.default_request_timeout_sec) ~token
+    ~channel_id ?reply_to_message_id ~clip () =
+  let open Result.Syntax in
+  let* channel_id = parse_rest_snowflake channel_id in
+  let* reply_to_message_id = parse_reply_to reply_to_message_id in
+  encode_with_fresh_boundary (fun boundary ->
+    build_voice_message_request ~token ~channel_id ~boundary
+      ?reply_to_message_id ~clip ())
+  |> post_multipart ?clock ~timeout_sec ~request_kind:"voice"

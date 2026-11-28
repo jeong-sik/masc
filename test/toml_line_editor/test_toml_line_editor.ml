@@ -79,10 +79,10 @@ let test_float_edit_on_a_quoted_table () =
    hold yet goes below the table's last value, so the blank line and the next
    table's comment keep their place above [\[board\]]. *)
 let test_a_new_key_goes_below_the_last_value () =
-  let source = "[typesafeai]\nmemory_recall = true\n\n# board settings\n[board]\nmode = 1\n" in
+  let source = "[first]\nkept = true\n\n# board settings\n[board]\nmode = 1\n" in
   let out =
-    Toml_line_editor.edit_table_scalar source ~path:"typesafeai"
-      ~key:"memory_recall_scope" ~value:(Some "all")
+    Toml_line_editor.edit_table_scalar source ~path:"first"
+      ~key:"added" ~value:(Some "all")
   in
   let lines = fst (Toml_line_editor.split_lines out) in
   let index target =
@@ -91,7 +91,7 @@ let test_a_new_key_goes_below_the_last_value () =
     | None -> Alcotest.failf "line not found: %s" target
   in
   Alcotest.(check int) "the new key sits right below the last value"
-    (index "memory_recall = true" + 1) (index {|memory_recall_scope = "all"|});
+    (index "kept = true" + 1) (index {|added = "all"|});
   Alcotest.(check int) "the comment stays right above its header"
     (index "[board]" - 1) (index "# board settings");
   Alcotest.(check string) "the blank line stays between the two tables" ""

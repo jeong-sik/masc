@@ -114,6 +114,14 @@ val validate_claim : string -> (string, string) result
     [(scope, claim)] via JSON array encoding (immune to delimiter collisions). *)
 val fact_id_of_claim : scope:string -> claim:string -> string
 
+(** The fact ID that releases up to v0.78.0 derived from [(scope, claim)]:
+    [scope ^ "\n" ^ claim] (both trimmed), sha256, ["wf-"] plus 24 hex.
+    Ledgers written by those releases keep their rows under this ID. It is
+    ambiguous across the newline delimiter, so it is only a lookup key for an
+    existing row whose stored [(scope, claim)] is compared exactly; new rows
+    are always written under {!fact_id_of_claim}. *)
+val legacy_newline_fact_id_of_claim : scope:string -> claim:string -> string
+
 val world_fact_to_json : world_fact -> Yojson.Safe.t
 
 type world_edge =

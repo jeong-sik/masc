@@ -274,6 +274,12 @@ let fact_id_of_claim ~scope ~claim =
   "wf-" ^ String.sub hex 0 24
 ;;
 
+let legacy_newline_fact_id_of_claim ~scope ~claim =
+  let payload = String.trim scope ^ "\n" ^ String.trim claim in
+  let hex = Agent_core_sha256.(digest_string payload |> to_hex) in
+  "wf-" ^ String.sub hex 0 24
+;;
+
 let world_fact_to_json (f : world_fact) =
   `Assoc
     [ "fact_id", `String f.fact_id

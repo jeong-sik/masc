@@ -1318,7 +1318,14 @@ let handle_tool_execute_typed
                       inline: %s"
                      (Keeper_execute_output_files.error_to_string detail);
                    inline)
-              | (Ok _ | Error _) as chosen -> chosen
+              | ( Ok
+                    ( { Keeper_execute_output_files.placed =
+                          ( Keeper_execute_output_files.Returned_inline
+                          | Keeper_execute_output_files.Stored_as_artifacts )
+                      ; _
+                      }
+                    , _ )
+                | Error _ ) as chosen -> chosen
             in
             (match output_fields with
              | Error detail ->

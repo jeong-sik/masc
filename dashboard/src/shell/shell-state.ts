@@ -350,17 +350,8 @@ export function isRecentEnospcObservation(
   if (!obs || obs.exhaustionTotal === null || obs.exhaustionTotal <= 0) {
     return false
   }
-  const statusLower = obs.status?.toLowerCase() ?? null
-  if (statusLower === 'exhausted_enospc') {
-    return true
-  }
-  if (obs.lastExhaustionTs !== null && obs.lastExhaustionTs > 0) {
-    const ageSec = Math.max(0, nowSec - obs.lastExhaustionTs)
-    return ageSec <= ENOSPC_RECENT_WINDOW_SEC
-  }
-  // Undated monotonic counter alone must not pin a permanent alert once filesystem recovers.
-  const pct = obs.filesystem?.capacityPercent ?? null
-  return statusLower === 'error' || statusLower === 'degraded' || (pct !== null && pct >= 90)
+  if (obs.lastExhaustionTs === null || obs.lastExhaustionTs <= 0) return false
+  return Math.max(0, nowSec - obs.lastExhaustionTs) <= ENOSPC_RECENT_WINDOW_SEC
 }
 
 export function classifyDiskPressure(
@@ -388,11 +379,15 @@ export function classifyDiskPressure(
   const pctLabel = pct !== null ? `${Math.round(pct)}%` : null
   const statusLower = obs.status?.toLowerCase() ?? null
 
-  if (statusLower === 'degraded' || statusLower === 'error' || (pct !== null && pct >= 90)) {
+  if (statusLower === 'unavailable') {
+    return { level: 'unavailable', label: '디스크 상태 미확인', detail: '서버가 호스트 디스크 상태를 확인하지 못했습니다.' }
+  }
+
+  if (statusLower === 'critical' || statusLower === 'degraded' || statusLower === 'error' || (pct !== null && pct >= 90)) {
     return {
       level: 'critical',
       label: pctLabel ? `디스크 ${pctLabel}` : '디스크 위험',
-      detail: pctLabel
+      detail: pctLabel && pct !== null && pct >= 90
         ? `호스트 디스크 사용률 ${pctLabel} (위험 임계치 90% 이상)`
         : `호스트 디스크 상태: ${obs.status ?? 'critical'}`,
     }
@@ -414,14 +409,79 @@ export function classifyDiskPressure(
 }
 
 export const hostDiskObservation = signal<HostDiskObservation | null>(null)
+const diskObservationClock = signal(Date.now() / 1000)
 export const diskPressureSummary = computed<DiskPressureSummary>(() =>
-  classifyDiskPressure(hostDiskObservation.value),
+  classifyDiskPressure(hostDiskObservation.value, diskObservationClock.value),
 )
 
 export function updateHostDiskObservation(raw: unknown): HostDiskObservation | null {
   const decoded = decodeDiskObservation(raw)
-  hostDiskObservation.value = decoded
+  batch(() => {
+    diskObservationClock.value = Date.now() / 1000
+    hostDiskObservation.value = decoded
+  })
   return decoded
+}
+
+const HOST_DISK_REFRESH_MS = 60_000
+
+/** Refresh the top bar's reading while the authenticated shell is visible. */
+export function installHostDiskObservation(fetchImpl?: typeof fetch): () => void {
+  let inflight: AbortController | null = null
+  const retireRead = () => {
+    inflight?.abort()
+    inflight = null
+  }
+  const refresh = async () => {
+    diskObservationClock.value = Date.now() / 1000
+    if (
+      inflight
+      || (typeof document !== 'undefined' && document.visibilityState === 'hidden')
+      || !canAccessMemberWorkspace(authSession.peek())
+    ) return
+
+    const controller = new AbortController()
+    const epoch = currentSessionEpoch()
+    inflight = controller
+    try {
+      const result = await apiGet<unknown>('/api/v1/dashboard/shell?light=true', { signal: controller.signal, fetchImpl })
+      if (controller.signal.aborted || !isEpochCurrent(epoch) || !result.ok || !isRecord(result.value)) return
+      const shell = result.value
+      const runtime = shell.runtime_resolution
+      const disk = isRecord(runtime) && 'disk_observation' in runtime
+        ? runtime.disk_observation
+        : shell.disk_observation
+      updateHostDiskObservation(disk)
+    } finally {
+      if (inflight === controller) inflight = null
+    }
+  }
+
+  const onVisible = () => { void refresh() }
+  const unsubAuth = authSession.subscribe((session) => {
+    if (canAccessMemberWorkspace(session)) void refresh()
+    else {
+      retireRead()
+      updateHostDiskObservation(null)
+    }
+  })
+  let observedEpoch = currentSessionEpoch()
+  const unsubEpoch = sessionEpoch.subscribe((epoch) => {
+    if (epoch === observedEpoch) return
+    observedEpoch = epoch
+    retireRead()
+    updateHostDiskObservation(null)
+    void refresh()
+  })
+  const interval = setInterval(onVisible, HOST_DISK_REFRESH_MS)
+  if (typeof document !== 'undefined') document.addEventListener('visibilitychange', onVisible)
+  return () => {
+    unsubAuth()
+    unsubEpoch()
+    clearInterval(interval)
+    if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', onVisible)
+    retireRead()
+  }
 }
 
 // ── Build-Commit & Connection Diagnostics (Popover Only!) ───────────────
@@ -717,7 +777,6 @@ export async function refreshPendingHitl(
       pendingGoalConfirmations.value = []
       pendingVerifications.value = []
       hitlSourceStatus.value = DEFAULT_HITL_SOURCE_STATUS
-      hostDiskObservation.value = null
     })
     return
   }
@@ -1218,6 +1277,7 @@ export function dismissShellToast(id: number): void {
 // ── Observer / Epoch Reactive Bridge ────────────────────────────────────
 
 export function installShellObservers(fetchImpl?: typeof fetch): () => void {
+  const stopHostDiskObservation = installHostDiskObservation(fetchImpl)
   const unsubResync = subscribeObserverResync((reason) => {
     recordIncident({
       severity: 'warn',
@@ -1278,7 +1338,6 @@ export function installShellObservers(fetchImpl?: typeof fetch): () => void {
       pendingGoalConfirmations.value = []
       pendingVerifications.value = []
       hitlSourceStatus.value = DEFAULT_HITL_SOURCE_STATUS
-      hostDiskObservation.value = null
     })
     if (canAccessMemberWorkspace(authSession.peek())) {
       void refreshPendingHitl(fetchImpl)
@@ -1307,6 +1366,7 @@ export function installShellObservers(fetchImpl?: typeof fetch): () => void {
   })
 
   return () => {
+    stopHostDiskObservation()
     unsubResync()
     unsubFrames()
     unsubReconnect()

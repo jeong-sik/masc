@@ -1,10 +1,11 @@
 import { html } from 'htm/preact'
 import { cleanup, fireEvent, render, waitFor } from '@testing-library/preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { resetAuthStateForTests } from '../../core/auth'
+import { authSession, resetAuthStateForTests } from '../../core/auth'
 import { currentRoute, resetRouterForTests } from '../../routes/router'
 import {
   diskPressureSummary,
+  installHostDiskObservation,
   resetShellStateForTests,
   updateHostDiskObservation,
 } from '../../shell/shell-state'
@@ -156,6 +157,44 @@ describe('HostStorageCard & TopBar disk pressure telemetry', () => {
     expect(cardView.getByTestId('host-storage-status-badge').getAttribute('data-tone')).toBe('ok')
     expect(cardView.queryByTestId('host-storage-enospc-alert')).toBeNull()
     expect(cardView.getByTestId('host-storage-enospc-history').textContent).toContain('3')
+  })
+
+
+  it('uses server critical status below 80% and refreshes recovery without mounting Pulse', async () => {
+    resetRouterForTests('/infra/sandboxes')
+    vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible')
+    authSession.value = {
+      kind: 'single_user_local',
+      mode: 'single_user',
+      role: 'admin',
+      tokenPresent: true,
+      authMethods: { google: false, github: false, dev_token: false },
+      workspaceId: 'default',
+    }
+    const critical = {
+      status: 'critical',
+      filesystem: { total_bytes: 8 * GIB, available_bytes: 1.8 * GIB, capacity_percent: 77.5 },
+    }
+    const shell = (disk_observation: object) => ({ runtime_resolution: { disk_observation } })
+    const fetchImpl = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json(shell(critical)))
+      .mockImplementationOnce(async () => Response.json(shell({
+        status: 'ok', filesystem: { capacity_percent: 40 },
+      })))
+
+    const stop = installHostDiskObservation(fetchImpl)
+    try {
+      const view = render(html`<${TopBar} />`)
+      const pill = await view.findByTestId('topbar-disk-pressure-pill')
+      expect(pill.getAttribute('data-disk-level')).toBe('critical')
+      expect(fetchImpl.mock.calls[0]?.[0]).toBe('/api/v1/dashboard/shell?light=true')
+
+      document.dispatchEvent(new Event('visibilitychange'))
+      await waitFor(() => expect(view.queryByTestId('topbar-disk-pressure-pill')).toBeNull())
+      expect(fetchImpl).toHaveBeenCalledTimes(2)
+    } finally {
+      stop()
+    }
   })
 
   it('keeps TopBar completely silent when healthy and shows clickable warning pill when pressured', async () => {

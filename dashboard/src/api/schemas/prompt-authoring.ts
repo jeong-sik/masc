@@ -8,5 +8,3 @@ export const PromptAuthoringIssuesSchema = Schema.Array(Schema.Struct({
   value: Schema.String,
   source_file: Schema.String,
 }))
-
-export type PromptAuthoringIssue = Schema.Schema.Type<typeof PromptAuthoringIssuesSchema>[number]

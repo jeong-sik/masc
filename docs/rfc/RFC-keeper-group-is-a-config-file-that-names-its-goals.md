@@ -104,19 +104,20 @@ goals = ["goal-0193...", "goal-0194..."]
   type membership =
     | No_group
     | Member of Keeper_group.t
-    | Missing_group of Keeper_group.id   (* 파일이 가리키는 그룹 파일이 없다 *)
+    | Missing_group of Keeper_group.id
+    | Invalid_group_reference of string
+    | Unreadable_group of Keeper_group.id * group_read_error
   ```
 
-  - `Missing_group` 인 Keeper 의 프롬프트에는 그룹 블록도 「우리 그룹」 표시도 없다.
-  - Keeper 행과 shell 은 `group: {"missing": "<id>"}` 로 보내고, 대시보드와 TUI 는 그 Keeper 에 「없는 그룹 `<id>`」를 표시한다. 운영자는 그룹을 다시 만들거나 소속을 바꾼다.
-  - Keeper 를 멈추지 않는 이유: 헌법은 하드 게이팅을 기본으로 두지 않는다(`docs/constitution.xml:428`). 그룹은 권한도 실행 조건도 아니라서, 그룹 파일이 없다고 Keeper 일을 막을 근거가 없다.
+  - 기존 `keeper.group` 값이 slug 가 아니면 `Invalid_group_reference` 로 원문을 보존한다. id 는 맞지만 파일을 열거나 해석할 수 없으면 `Unreadable_group` 이다. 파일이 없는 경우만 `Missing_group` 이다. `group_read_error` 는 I/O 실패, TOML 구문 오류, 스키마 오류를 구별하는 닫힌 타입이다.
+  - 세 오류 상태에서도 Keeper 는 계속 돌고 프롬프트에는 그룹 블록과 「우리 그룹」 표시가 없다. 대시보드와 TUI 는 각각 없는 그룹, 잘못된 그룹 id, 읽을 수 없는 그룹을 표시한다. 운영자는 파일을 복구하거나 Keeper 의 소속을 바꿀 수 있다.
 - 지금 `keeper.group` 을 쓰는 Keeper 가 없으므로(§1.1) 옛 이름표를 옮기는 코드는 만들지 않는다.
 
 ### D3. 「그룹 없음」은 값이 없는 것 하나다
 
-- 서버 응답의 Keeper 행은 `group: {"id": "<id>"} | {"missing": "<id>"} | null` 이다.
-- shell 은 `groups: [{id, name, keepers}]` 와 `ungrouped_keepers: [...]` 를 따로 보낸다. `"ungrouped"` 라는 이름은 없앤다.
-- 대시보드의 `'General'`, TUI 의 `"Other"` 와 이름 앞부분 추정, #55334 의 이름 비교를 지운다. 화면은 `null` 을 「그룹 없음」으로 그린다.
+- 서버 응답의 Keeper 행은 `group: {"id": "<id>"} | {"missing": "<id>"} | {"invalid_reference": "<stored value>"} | {"unreadable": {"id": "<id>", "reason": "<reason>"}} | null` 이다. `reason` 은 `io_error`, `invalid_toml`, `invalid_schema` 중 하나다.
+- shell 은 정상 그룹의 `groups: [{id, name, keepers}]`, 소속이 없는 `ungrouped_keepers`, 오류 소속을 보존하는 `unresolved_group_keepers: [{keeper, group}]` 를 따로 보낸다. 서버는 같은 소속 판정으로 Keeper 를 정확히 한 목록에 넣는다.
+- 화면은 `null` 을 「그룹 없음」으로 그린다. 오류 목록은 저장된 소속과 원인을 보여 준다. 대시보드의 'General', TUI 의 'Other' 와 이름 앞부분 추정, #55334 의 이름 비교는 제거한다.
 
 ### D4. 그룹 파일이 Goal 을 가리킨다
 
@@ -169,10 +170,10 @@ goals = ["goal-0193...", "goal-0194..."]
 ## 5. 단계와 확인 방법
 
 1. `Keeper_group` 타입·읽기·쓰기 → 확인: slug 가 아닌 파일 이름과 모르는 키를 거절하는 시험. 왕복 시험.
-2. `keeper.group` 이 그룹 id 인지 검사 → 확인: 없는 id 저장은 거절된다. 손으로 지운 그룹을 가리키는 Keeper 는 돌고, 응답에 `{"missing": "<id>"}` 가 오고, 프롬프트에 그룹 블록이 없다.
+2. `keeper.group` 이 그룹 id 인지 검사 → 확인: 없는 id 저장은 거절된다. 손으로 지운 그룹을 가리키는 Keeper 는 돌고, 응답에 `{"missing": "<id>"}` 가 오고, 프롬프트에 그룹 블록이 없다. 깨진 TOML, 읽기 실패와 slug 가 아닌 저장값도 각각 구분하고 Keeper 실행은 유지한다.
 3. API 와 설정 스키마 `target=group:<id>` → 확인: 만들기·이름 바꾸기·지우기 시험. 구성원이 있으면 409.
 4. 프롬프트: `Group_instructions` 블록과 Active Goals 의 「우리 그룹」 표시 → 확인: 구성원의 조립 결과에 블록이 있고 비구성원에게는 없다. 턴 기록 digest 가 지시문 변경을 따라간다.
-5. shell·Keeper 행의 `group` 과 `ungrouped_keepers` → 확인: `"ungrouped"` 문자열이 응답에 없다.
+5. shell·Keeper 행의 소속 → 확인: 정상 그룹, 소속 없음, 각 오류 상태를 섞어 조회해 모든 Keeper 가 정확히 한 목록에 있으며 행과 shell 의 소속 판정이 같은지 확인한다.
 6. 대시보드·TUI: 그룹 없음 이름과 이름 앞부분 추정을 지우고, 그룹 화면(목록·만들기·설정·지우기)을 둔다 → 확인: 화면 시험. `rg "'General'|\"Other\"|ungrouped"` 가 그룹 코드에서 0건.
 
 - 1~5 는 서버 stack, 6 은 대시보드·TUI stack 이다. 5 와 6 은 응답 모양이 바뀌므로 같이 병합한다.

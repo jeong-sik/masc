@@ -1,5 +1,89 @@
 ## [Unreleased]
 
+## [0.83.12] - 2026-11-28
+
+### Added
+
+- `scripts/install-local-build.sh --from REF` builds and installs one commit from the detached deploy worktree `<main checkout>/.worktrees/deploy`, which only `--from` moves and only while it holds that worktree's install lock. The server and the guest exec shim are then built from one source while other sessions pull or edit the checkout the install was started from; before, a pull between the two builds left them declaring different commits and the install refused (#55315).
+- Add live sandbox terminal output viewer with XSS-safe ANSI SGR parsing, stream/text filtering, gap warnings, and collapsed host container/VM logs inside Keeper Work & Sandbox, plus host disk space and `.masc/` store pressure telemetry in Infra Sandboxes and TopBar (#55335).
+- Keeper detail has a Prompt tab (`/keepers/:name/prompt`) that shows what the
+  keeper was told on its last assembled turn: the blocks in assembly order,
+  what each injection site carries, its size and text, and whether it went
+  into the system prompt or the extra context (read from the capture's
+  partition). It also lists the parts of that turn's last provider request,
+  each read when opened. It is an admin read (#55441).
+
+### Removed
+
+- Dashboard chat rejects the unsupported `goal_notification` delivery key as
+  invalid delivery information. The unused Keeper question client and its
+  parsers are removed. Work Inbox still recognizes a Keeper shutdown refusal
+  and retains the unsent answer draft (#55200).
+- The boot warning about `[typesafeai].memory_recall_keepers` names that match no Keeper is removed, together with the memory recall gate that nothing has asked since the recall pipeline was removed (#55423).
+- The `[typesafeai]` keys `memory_recall`, `memory_recall_scope` and `memory_recall_keepers` are removed; nothing has read them since the recall pipeline was removed (#55426).
+
+### Fixed
+
+- Work › Inbox › 24h Decisions says a Gate decision as "승인" or "거절", where it showed "approve" or "reject" (#55138).
+- **Process & File Locks**: wrapped `Posix_spawn_process_mgr.reap` in `locked` with `EINTR` retry, guarded `pgid > 1` and used cooperative Eio sleep in `Process_eio_detached.tree_kill`, made `Eio_process_capture` drain pipes concurrently with stdin writes and cancellation grace, checked `Eio.Switch.check` before `Posix_spawn_detached.spawn`, and fixed `File_lock_eio` unheld `F_ULOCK`, `EINTR` retries, and stale-inode races (#55161).
+- A detached group that ignores its initial shutdown signal still receives SIGKILL when cancellation interrupts the grace period. A symbolic link at a scoped lock sidecar is rejected (#55161).
+- The TUI keeper dive no longer shows a Keeper's schedule list as complete when only some pages of schedules were read. With a page left unread the count reads `(N+)`, an empty list says it holds none of the pages read, and the list ends with a note that the next pages were not read; a list not read yet says so instead of "No scheduled jobs" (#55298).
+- Keeper chat store inspections, MSX checkpoint receipt reads and native task
+  and child content journal reads open through `Sqlite_file.open_reader`. A
+  rollback-journal file opens read-write with `PRAGMA query_only=1`, never
+  READONLY, and the reader waits up to 5 s for a writer's lock instead of
+  reporting `SQLITE_BUSY` (#55378).
+- The canonical turn, compaction, memory search and world memory stores open
+  their readers through `Sqlite_file.open_reader`, and their writers refuse a
+  new file that SQLite leaves outside WAL mode instead of creating it with
+  READONLY readers attached (#55379).
+- Tool metrics series reads open through `Sqlite_file.open_reader`, and the
+  iMessage gateway opens Messages' `chat.db` as an external READONLY file that
+  waits up to 5 s for a lock instead of reporting `SQLITE_BUSY` (#55380).
+- **Local install**: `scripts/install-local-build.sh` rebuilds a workspace guest exec shim that declares another source identity than the build even when the shim has a sha256 sidecar, and removes that sidecar, which described the replaced shim (kept as `masc-exec-shim.previous`). Before, the install left such a shim alone and ended 0, and the restarted server refused it: between 2026-11-21 and 2026-11-24 three microVM Keepers ran no guest command for about 73 hours while the server was replaced fourteen or more times. A failed rebuild installs nothing; its by-hand command now removes the sidecar too, and its message says a workspace that runs no microVM Keeper can remove the shim instead. A shim that already declares the build's identity loses a sidecar that does not name its sha256, the pair the server refuses (`microvm_shim_hash_mismatch`, `microvm_shim_sidecar_invalid`). A signal that ends the install during the swap leaves the old shim with its sidecar or the new shim without one. `--refresh-guest-shim` still hands a release shim to the release step (#55481, refs #53296).
+- On a single-user installation, the dashboard Board screen now plays the `audio` and `midi` entries of a post's typed `attachments` argument, which it did not read before. A stored (`sha256`) file loads only with an admin login. A multi-account installation shows these entries but cannot play them. Other kinds are still not drawn (#55483).
+- `keeper_memory_write` and `keeper_memory_retract` receipts carry `memory_id_history` (how many times the Memory commit log has inserted and retracted that id, and when it was last retracted), so a Keeper re-inserting a claim it just retracted no longer reads a plain "inserted" as if for the first time. The counts are exact while the log is unfolded and fully decodable; once older commits are folded away (`older_history_folded`) or undecodable (`unreadable_log_lines`), every count is a lower bound and `last_retracted_at` may be missing. The answer the repeat guard compares is unchanged (#55484).
+- A link to a Goal, Task, Wiki page or Artifact that the list does not hold says so in the detail pane ("이 링크가 가리키는 태스크(<id>)가 목록에 없습니다.") where the first row was shown in its place, and Wiki and Artifacts keep the row picked after a link when the list is read again (#55149).
+- A list-and-detail screen keeps the focus in its pane when the control that had it goes away, as a link in a Wiki page does when it opens another page; the focus fell to the page body (#55150).
+- World Memory promotion continues a fact row written by v0.78.0 or earlier under its old newline-delimited ID instead of inserting the same fact again under the current ID (#55291).
+- `GET /api/v1/keepers/:name/provider-input` writes `wire.phase` as the string
+  `"Pre_dispatch_serialization"`. The answer used the stored row's derived
+  encoder, which writes that constant constructor as a one-element list, so
+  the dashboard and the TUI refused every real manifest. The stored rows keep
+  their format (#55440).
+- The dashboard reads a keeper's last prompt with the block ids the server
+  writes, and the system prompt's partition, and fails on anything else
+  instead of filling a missing id, size or turn with a made-up value. The
+  Debug Companion reads the provider-input manifest through the strict
+  decoder; its loose copy, which turned an unknown part kind into a message,
+  is removed (#55440).
+
+### Performance
+
+- Keeper: a Keeper's provider requests no longer encode every finished
+  message again after each new provider attempt. The history JSON sizes the
+  window and the aged-result plan measure are kept per Keeper for the life of
+  the server, in a table of at most 64 MiB of measured messages; past that it
+  drops entries the last two attempts did not ask for and keeps no new ones.
+  The provider wire measure still lives one attempt. Requests are unchanged
+  (#55268).
+- Keeper: the official-client lanes (Claude Code, Codex, Antigravity, ACP)
+  no longer encode every finished message of the Start range again on each
+  turn. The Start projection now measures through the Keeper's table for
+  the history envelope, bounded like the Agent Core lane's table at 64 MiB
+  of measured messages per Keeper and encoder. Requests are unchanged
+  (#55397).
+
+### Internal
+
+- The libraries under `lib/` that run SQL see `Masc_sqlite3.Sqlite3`, whose
+  `db_open` takes no READONLY mode, so only `Sqlite_file.open_reader` can open
+  a SQLite reader READONLY (#55381).
+
+### Upgrade notes
+
+- Before installing this build, delete `memory_recall`, `memory_recall_scope` and `memory_recall_keepers` from `[typesafeai]` in `runtime.toml`; delete the three together, because the previous build refuses some partial sets, such as a keeper list without its scope. `[typesafeai]` refuses unknown keys, so while any of them remains `scripts/install-local-build.sh` refuses the file and installs nothing. A new binary started without that check refuses the file at boot and starts in model-setup-required mode with no runtime and no Keepers; deleting the keys then is not enough, and the server needs a model setup resume (`POST /api/v1/runtime/setup/resume`) or a restart. The previous build reads a file without the three keys as recall off, so they can be deleted before the upgrade (#55426).
+
 ## [0.83.11] - 2026-11-28
 
 ### Upgrade notes

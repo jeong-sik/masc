@@ -1,5 +1,5 @@
 name = "keeper_skill"
-description = "Read one frozen instruction Skill body. Every row in the Available list below is something this workspace wrote down about work that recurs here — a failure that repeats, a convention and the reason for it, a sequence whose order matters. Open the row whose one-line description names the work you are about to start, before starting it. The common error is not opening one that applied: a body that turns out not to apply costs a single call.\n\nPass the `identity` exactly as the Available list prints it. `content_revision` is optional: omit it and this turn's frozen list decides which revision is read, or pass one to pin it. When that body names a bundled file needed for the current work, call again with its relative `file` path. Bodies or resources larger than the inline wire boundary are returned as structured artifact handles readable via `keeper_artifact_read`."
+description = "Read one frozen instruction Skill body. Every row in the Available list below is something this workspace wrote down about work that recurs here — a failure that repeats, a convention and the reason for it, a sequence whose order matters. Open the row whose one-line description names the work you are about to start, before starting it. The common error is not opening one that applied: a body that turns out not to apply costs a single call.\n\nPass a row's name as `identity.name`. `source_id`, `package_id` and `content_revision` are optional: one you write is compared with the Skill's own and the call is refused when it differs, so leave them out unless a refusal asks you to tell two Skills apart. Without `content_revision`, this turn's frozen list decides which revision is read. When that body names a bundled file needed for the current work, call again with its relative `file` path. Bodies or resources larger than the inline wire boundary are returned as structured artifact handles readable via `keeper_artifact_read`."
 additional_properties = false
 # Keep discovery resident: this schema carries the Available Skill list.
 # The shared Keeper prompt also directs task-based selection without a user
@@ -11,18 +11,29 @@ name = "identity"
 type = "object"
 required = true
 additional_properties = false
-description = "Exact Skill identity from the frozen turn snapshot."
+description = "The Skill to read. `name` is one row of the Available list."
 
+# source_id and package_id are optional. A Keeper's list holds a name once
+# unless a Task pins another source or revision of it; the handler refuses a
+# name it holds twice and prints the references to choose from.
+#
+# Both were required, and the Available list printed all three on every row.
+# Of 56 refused calls (2026-11-21..27, 1,164 calls), 48 wrote the right name
+# with another source_id or package_id: 19 wrote one configured source for a
+# Skill of another, 18 wrote a source id as the package_id. None left a field
+# out. The 64 rows of that list held 64 names, each with package_id = name.
+#
+# A field the call writes is still matched exactly and refused on a mismatch.
 [[params.params]]
 name = "source_id"
 type = "string"
-required = true
+required = false
 min_length = 1
 
 [[params.params]]
 name = "package_id"
 type = "string"
-required = true
+required = false
 min_length = 1
 
 [[params.params]]
@@ -51,7 +62,7 @@ min_length = 1
 name = "content_revision"
 type = "string"
 required = false
-description = "Optional canonical domain-separated SHA-256 content revision of the exact frozen SKILL.md bytes: 64 lowercase hex characters. Omit it to read whichever revision this turn's Skill list carries under that identity; pass it to pin one, copied verbatim from the Task skill reference or this tool's Available list."
+description = "Optional canonical domain-separated SHA-256 content revision of the exact frozen SKILL.md bytes: 64 lowercase hex characters. Omit it to read whichever revision this turn's Skill list carries under that name; pass it to pin one, copied verbatim from the Task skill reference or this tool's Available list."
 
 [[params]]
 name = "file"

@@ -74,6 +74,7 @@ import {
   type QuotaScopeSort,
   type RuntimeMetrics24hSnapshot,
 } from './quota-scope-view'
+import { keyConnectableRows, personConnectRows, PersonConnectList } from './person-connect'
 import {
   decodeMultiAccountIntegrations,
   decodeMultiAccountProviderAccounts,
@@ -259,7 +260,9 @@ export function QuotasTab(props: WorkspaceViewProps) {
   const [scopeSort, setScopeSort] = useState<QuotaScopeSort>('default')
   const [scopeQuery, setScopeQuery] = useState('')
   const [pausedPanelPref, setPausedPanelPref] = useState<boolean | null>(null)
-  const [inventoryOpen, setInventoryOpen] = useState(false)
+  // null until the person toggles it: then the list opens by itself for a
+  // signed-in person with no account yet, who has nothing else to do here.
+  const [inventoryToggled, setInventoryToggled] = useState<boolean | null>(null)
   const [pausedSortBy, setPausedSortBy] = useState<QuotaRestSortKey>('release')
   const [pausedCauseFilter, setPausedCauseFilter] = useState<QuotaRestCauseFilter>('all')
   const [expandedGroups, setExpandedGroups] = useState<ReadonlySet<string>>(() => new Set())
@@ -537,6 +540,17 @@ export function QuotasTab(props: WorkspaceViewProps) {
       : []),
     [personIntegObs],
   )
+
+  const personConnect = useMemo(() => {
+    const connected = new Set<string>()
+    for (const acc of multiAccounts) {
+      const pid = acc.integration_id ?? acc.provider
+      if (pid) connected.add(pid)
+    }
+    return personConnectRows(personIntegrations, connected)
+  }, [personIntegrations, multiAccounts])
+  const personKeyRows = useMemo(() => keyConnectableRows(personConnect), [personConnect])
+  const inventoryOpen = inventoryToggled ?? (isMultiAccountSignedIn && multiAccounts.length === 0)
 
   const providerDisplayNames = useMemo(() => {
     const names = new Map<string, string>()
@@ -1503,7 +1517,9 @@ export function QuotasTab(props: WorkspaceViewProps) {
               type="button"
               class="btn-primary"
               onClick=${() => setCredForm({
-                providerId: personIntegrations[0]?.integration_id ?? integrations[0]?.id ?? 'openai',
+                providerId: isMultiAccountSignedIn
+                  ? (personKeyRows[0]?.integrationId ?? '')
+                  : (integrations[0]?.id ?? 'openai'),
                 secret: '',
                 mode: 'api_key',
               })}
@@ -2066,17 +2082,35 @@ export function QuotasTab(props: WorkspaceViewProps) {
           </div>
           <div style=${{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 'var(--sp-2)' }}>
             <label style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-1)', fontSize: 'var(--fs-12)' }}>
-              <span>제공자 ID</span>
-              <input
-                type="text"
-                value=${credForm.providerId}
-                onInput=${(e: Event) => {
-                  const val = (e.target as HTMLInputElement).value
-                  setCredForm((prev) => (prev ? { ...prev, providerId: val } : prev))
-                }}
-                style=${{ padding: 'var(--sp-1) var(--sp-2)', background: 'var(--input-bg)', border: '1px solid var(--input-border)', borderRadius: 'var(--radius-sm)' }}
-                required
-              />
+              <span>제공자</span>
+              ${isMultiAccountSignedIn
+                ? html`
+                    <select
+                      aria-label="API 키로 연결할 제공자"
+                      value=${credForm.providerId}
+                      onChange=${(e: Event) => {
+                        const val = (e.target as HTMLSelectElement).value
+                        setCredForm((prev) => (prev ? { ...prev, providerId: val } : prev))
+                      }}
+                      style=${{ padding: 'var(--sp-1) var(--sp-2)', background: 'var(--input-bg)', border: '1px solid var(--input-border)', borderRadius: 'var(--radius-sm)' }}
+                      required
+                    >
+                      <option value="" disabled>${personKeyRows.length === 0 ? 'API 키로 연결할 수 있는 제공자가 없어요' : '제공자를 골라요'}</option>
+                      ${personKeyRows.map((row) => html`<option key=${row.integrationId} value=${row.integrationId}>${row.displayName} (${row.integrationId})</option>`)}
+                    </select>
+                  `
+                : html`
+                    <input
+                      type="text"
+                      value=${credForm.providerId}
+                      onInput=${(e: Event) => {
+                        const val = (e.target as HTMLInputElement).value
+                        setCredForm((prev) => (prev ? { ...prev, providerId: val } : prev))
+                      }}
+                      style=${{ padding: 'var(--sp-1) var(--sp-2)', background: 'var(--input-bg)', border: '1px solid var(--input-border)', borderRadius: 'var(--radius-sm)' }}
+                      required
+                    />
+                  `}
             </label>
             <label style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-1)', fontSize: 'var(--fs-12)' }}>
               <span>API 키 / 시크릿</span>
@@ -2244,11 +2278,11 @@ export function QuotasTab(props: WorkspaceViewProps) {
           class="ap-disclosure-trigger"
           data-testid="provider-inventory-toggle"
           aria-expanded=${inventoryOpen}
-          onClick=${() => setInventoryOpen((v) => !v)}
+          onClick=${() => setInventoryToggled(!inventoryOpen)}
         >
           <span>
             ${isMultiAccountSignedIn
-              ? `내 제공자 계정 (${multiAccounts.length}개 계정)`
+              ? `내 제공자 계정 (${multiAccounts.length}개 연결 · 연결할 수 있는 구독 ${personConnect.length}개)`
               : `제공자 연동 & 자격 증명 (${integrations.length}개 제공자 · 활성 ${enabledIntegrationsCount})`}
           </span>
           <span aria-hidden="true">${inventoryOpen ? '▾' : '▸'}</span>
@@ -2277,11 +2311,19 @@ export function QuotasTab(props: WorkspaceViewProps) {
               </div>
             `}
 
+            ${isMultiAccountSignedIn && personIntegObs.kind === 'value' && html`
+              <${PersonConnectList}
+                rows=${personConnect}
+                busy=${actionBusy !== null}
+                onLogin=${(id: string) => void handleStartOAuthLogin(id)}
+                onKey=${(id: string) => setCredForm({ providerId: id, secret: '', mode: 'api_key' })}
+              />
+            `}
             ${isMultiAccountSignedIn
               ? (multiAccounts.length === 0
                 ? (inventoryObs.kind === 'failed'
                   ? null
-                  : html`<div class="dtable-absent">${inventoryObs.kind === 'loading' ? '불러오는 중…' : '연결된 개인 제공자 계정이 없습니다.'}</div>`)
+                  : html`<div class="dtable-absent">${inventoryObs.kind === 'loading' ? '불러오는 중…' : '연결된 개인 제공자 계정이 없어요. 위 목록에서 구독을 연결해요.'}</div>`)
                 : html`
                     <div style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-2)' }}>
                       ${multiAccounts.map((acc, i) => {

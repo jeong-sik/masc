@@ -3678,7 +3678,9 @@ let apply_http_reply ~now (m : Model.t) reply =
           Model.open_wiki_edit_modal_for_detail detail next
         else next
       in
-      (next, [])
+      (* The page that landed may embed an artifact, whose title needs the
+         artifact list. *)
+      (next, View_fetches.selected_wiki_page_fetch next)
   | Msg.Reply_wiki_page { page; result = Error err } ->
       err_reply
         ~fail:

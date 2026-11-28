@@ -9486,6 +9486,169 @@ let test_sandbox_infra_probe_reads_selected_detail_with_fleet () =
   Alcotest.(check (list string)) "denied Fleet with no selection emits no detail read" []
     (named_requests (after_403 @ denied_reads))
 
+(* An artifact embed with no label is named by the artifact's title, which
+   only the artifact list carries. A page with one asks for that list when it
+   lands, unless the list is held fresh. *)
+let test_wiki_artifact_embed_reads_the_artifact_list () =
+  let artifact_id = "artifact-0123456789abcdef0123456789abcdef" in
+  let summary : Wire_knowledge.wiki_page_summary =
+    {
+      slug = "guide";
+      file = "guide.md";
+      title = "Guide";
+      summary = "Summary";
+      source = Wire_knowledge.Source_observation;
+      author = "alpha";
+      created = "2026-11-20";
+      updated = "2026-11-22";
+      revision = 3;
+      tags = [];
+      backlink_count = 0;
+      outgoing_link_count = 0;
+      sources_count = 1;
+      hearsay_count = 0;
+      sha256 = "sha-w3";
+    }
+  in
+  let index : Wire_knowledge.wiki_index =
+    {
+      pages_total = 1;
+      pages_readable = 1;
+      pages_unreadable = 0;
+      pages = [ summary ];
+      unreadable_pages = [];
+      lint =
+        {
+          total_findings = 0;
+          counts =
+            {
+              broken_link = 0;
+              unsupported_link = 0;
+              broken_media_embed = 0;
+              broken_wiki_embed = 0;
+              broken_artifact_embed = 0;
+              invalid_embed = 0;
+              unsupported_embed = 0;
+              orphan = 0;
+              orphan_unconfirmed = 0;
+              missing_sources = 0;
+              hearsay_only = 0;
+              unreadable_page = 0;
+              revision_log_gap = 0;
+              revision_log_hole = 0;
+              duplicate_title_candidates = 0;
+            };
+          log_hole_suppressed = false;
+          orphans = [];
+          duplicate_title_candidates = [];
+          findings = [];
+        };
+    }
+  in
+  let artifact_embed label : Wire_knowledge.wiki_embed =
+    {
+      target = Wire_knowledge.Embed_artifact { id = artifact_id; exists = Some true };
+      label;
+      syntax = Wire_knowledge.Embed_obsidian;
+      raw = "![[artifact:" ^ artifact_id ^ "]]";
+    }
+  in
+  let detail embeds : Wire_knowledge.wiki_page_detail =
+    {
+      page = "guide";
+      slug = "guide";
+      file = "guide.md";
+      frontmatter =
+        {
+          title = "Guide";
+          summary = "Summary";
+          source = Wire_knowledge.Source_observation;
+          author = "alpha";
+          created = "2026-11-20";
+          updated = "2026-11-22";
+          revision = 3;
+          tags = [];
+        };
+      sha256 = "sha-w3";
+      body_markdown = "# Guide\n\n![[artifact:" ^ artifact_id ^ "]]";
+      outgoing_links = [];
+      embeds;
+      backlinks = [];
+      lint_findings = [];
+    }
+  in
+  let entry : Wire_knowledge.artifact_entry =
+    {
+      id = artifact_id;
+      revision = 1;
+      title = "System Benchmark";
+      summary = "HTML report";
+      author = "sangsu";
+      created_at_unix = 1795000000.0;
+      body = { sha256 = String.make 64 'd'; bytes = 512; mime = "text/html" };
+    }
+  in
+  let m0 = Model.initial ~auth_session:Rbac.single_user_local_admin () in
+  let on_wiki_tab =
+    {
+      m0 with
+      nav = { m0.nav with workspace = Nav.Knowledge; inspector = None };
+      knowledge =
+        m0.knowledge
+        |> Knowledge_store.set_tab Nav.Knowledge_wiki
+        |> Knowledge_store.apply_wiki_index ~observed_at:t0 index;
+    }
+  in
+  let page_lands (m : Model.t) page =
+    Update.step ~now:t1 m
+      (Msg.Http_reply
+         {
+           epoch = m.epoch;
+           reply = Msg.Reply_wiki_page { page = "guide"; result = Ok page };
+         })
+  in
+  let asks_for_artifacts cmds =
+    List.exists
+      (function
+        | Cmd.Http_get { req = Cmd.Get_artifacts _; _ } -> true
+        | _ -> false)
+      (Cmd.flatten cmds)
+  in
+  let with_artifact = detail [ artifact_embed None ] in
+  let landed, cmds = page_lands on_wiki_tab with_artifact in
+  Alcotest.(check bool) "a page that embeds an artifact asks for the artifact list"
+    true (asks_for_artifacts cmds);
+  let _, cmds_plain = page_lands on_wiki_tab (detail []) in
+  Alcotest.(check bool) "a page without an artifact embed does not" false
+    (asks_for_artifacts cmds_plain);
+  let listed =
+    {
+      on_wiki_tab with
+      knowledge =
+        Knowledge_store.apply_artifacts ~observed_at:t0 [ entry ] on_wiki_tab.knowledge;
+    }
+  in
+  let _, cmds_listed = page_lands listed with_artifact in
+  Alcotest.(check bool) "a list held fresh is not asked for again" false
+    (asks_for_artifacts cmds_listed);
+  let note (k : Knowledge_store.t) page =
+    match Knowledge_store.wiki_markdown_embeds ~lang:Say.Lang_en k page with
+    | [ { Masc_tui_ui.Markdown.shown = Masc_tui_ui.Markdown.Embed_note note; _ } ] -> note
+    | _ -> Alcotest.fail "expected one artifact note"
+  in
+  let mentions text part =
+    let n = String.length part and m = String.length text in
+    let rec at i = i + n <= m && (String.equal (String.sub text i n) part || at (i + 1)) in
+    at 0
+  in
+  Alcotest.(check bool) "before the list is read the embed is named by its id" true
+    (mentions (note landed.knowledge with_artifact) artifact_id);
+  let named = note listed.knowledge with_artifact in
+  Alcotest.(check bool) "with the list the embed is named by its title" true
+    (mentions named "System Benchmark" && not (mentions named artifact_id));
+  Alcotest.(check bool) "a label the page writes still wins" true
+    (mentions (note listed.knowledge (detail [ artifact_embed (Some "bench") ])) "bench")
+
 (* On a first visit to the Wiki tab the fetch list is built before the index
    lands, so it names no page. The index reply asks for the page it selects. *)
 let test_wiki_index_reply_requests_selected_page () =
@@ -25262,6 +25425,8 @@ let () =
             `Quick test_sandbox_infra_probe_reads_selected_detail_with_fleet;
           Alcotest.test_case "The wiki index reply asks for the page it selects"
             `Quick test_wiki_index_reply_requests_selected_page;
+          Alcotest.test_case "wiki artifact embed reads the artifact list"
+            `Quick test_wiki_artifact_embed_reads_the_artifact_list;
           Alcotest.test_case "Infra changes follow the selected repository"
             `Quick test_infra_changes_follow_the_selected_repository;
           Alcotest.test_case "Unified navigation: Left Sidebar, Tab focus ring, live preview, Palette & mouse"

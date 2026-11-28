@@ -678,9 +678,10 @@ let fetches_for_inspector ~force (m : Model.t) =
               { scope = Wire_infra.Ws_keeper peek.keeper; path = peek.path })
 
 (* The Wiki tab shows the selected page's body, so it needs that page unless
-   the slot already holds it fresh. A dive covers the tab, and a Wiki dive
-   keeps its own page in the same slot, so nothing is asked while one is
-   open. *)
+   the slot already holds it fresh. A page that embeds an artifact names it by
+   the title in the artifact list, so it needs that list too. A dive covers
+   the tab, and a Wiki dive keeps its own page in the same slot, so nothing is
+   asked while one is open. *)
 let selected_wiki_page_reqs ~force (m : Model.t) =
   match (Model.active_inspector m, m.knowledge.active_tab) with
   | Some _, _
@@ -691,11 +692,21 @@ let selected_wiki_page_reqs ~force (m : Model.t) =
       match Knowledge_store.selected_wiki_page m.knowledge with
       | None -> []
       | Some p ->
-          if
-            needs_fetch ~force
-              (Knowledge_store.wiki_page_for ~slug:p.slug m.knowledge)
-          then [ Cmd.Get_wiki_page { page = p.slug } ]
-          else [])
+          let page = Knowledge_store.wiki_page_for ~slug:p.slug m.knowledge in
+          let artifact_list_req =
+            match Observed.to_option page with
+            | Some detail
+              when Knowledge_store.wiki_page_embeds_artifact detail
+                   && needs_fetch ~force m.knowledge.artifacts ->
+                [
+                  Cmd.Get_artifacts
+                    { generation = m.knowledge.artifact_list_generation };
+                ]
+            | Some _ | None -> []
+          in
+          (if needs_fetch ~force page then [ Cmd.Get_wiki_page { page = p.slug } ]
+           else [])
+          @ artifact_list_req)
 
 let fetches_for_workspace ~force (m : Model.t) =
   match m.nav.workspace with

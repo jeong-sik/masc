@@ -67,16 +67,7 @@ let public_fields draft =
    "base_revision", `Int draft.base_revision; "base_sha256", `String draft.base_sha256;
    "state", `String draft.state; "sequence", `Int draft.sequence;
    "updated_by", `String draft.updated_by; "updated_at", `String draft.updated_at]
-let public_to_json draft = `Assoc (public_fields draft)
 let to_json draft = `Assoc (public_fields draft @ ["discussion", Artifact_discussion.events_to_json draft.discussion])
-let document_to_json ~draft ~content ~selection =
-  (* Private construction and strict reads validate the event history. *)
-  let threads = Artifact_discussion.threads draft.discussion |> Result.get_ok in
-  `Assoc ["draft", public_to_json draft; "content", `String content;
-    "threads", `List (List.map Artifact_discussion.thread_to_json threads);
-    "discussion_receipts", Artifact_discussion.events_to_json draft.discussion;
-    "selection", (match selection with None -> `Null | Some (selection, anchor, head) ->
-      `Assoc ["selection", selection_to_json selection; "anchor", `Int anchor; "head", `Int head])]
 let of_json json =
   let* fields = fields ["schema"; "target"; "base_revision"; "base_sha256"; "state"; "sequence"; "updated_by"; "updated_at"; "discussion"] json in
   let* () = if field "schema" fields = `String "masc.artifact_draft.v2" then Ok () else Error "invalid draft schema" in

@@ -166,9 +166,6 @@ let checkpoint ?runner ~base_path ~actor ~(target : Draft.target) ~expected_sequ
         | `Retry -> Error Draft_snapshot_changed
         | `Saved -> Ok (Checkpointed { view with draft = next }))
     |> Result.map_error (fun error -> Draft_error (Artifact_error error)) in
-  (match result with
-   | Ok (Checkpointed view) -> Artifact_draft_live.publish ~base_path ~draft:view.draft ~content:view.content
-   | Ok (Already_current _) | Error _ -> ());
   result
 
 let open_draft ?runner ~base_path ~actor ~artifact_id ~revision () =
@@ -202,7 +199,7 @@ let mutate ?runner ~base_path ~actor (target : Draft.target) transform =
       let* committed = commit ~base_path snapshot draft in
       match committed with `Retry -> attempt () | `Saved -> Ok { draft; content = source.content; selection } in
   attempt ()
-let execute_command ?runner ~base_path ~actor command = protect (fun () ->
+let execute ?runner ~base_path ~actor command = protect (fun () ->
   if String.trim actor = "" || not (String.is_valid_utf_8 actor) then Error (Invalid "actor must be nonblank UTF-8")
   else match command with
   | Draft.Open { artifact_id; revision } -> open_draft ?runner ~base_path ~actor ~artifact_id ~revision ()
@@ -246,8 +243,3 @@ let execute_command ?runner ~base_path ~actor command = protect (fun () ->
         let* discussion = Discussion.append draft.discussion ~actor ~at:(Types_core.now_iso ()) request ~applied
           |> Result.map_error (fun message -> Discussion_conflict message) in
         Ok (snapshot, selection, discussion)))
-
-let execute ?runner ~base_path ~actor command =
-  let result = execute_command ?runner ~base_path ~actor command in
-  (match result with Error _ -> () | Ok view -> Artifact_draft_live.publish ~base_path ~draft:view.draft ~content:view.content);
-  result

@@ -1,12 +1,10 @@
 module Draft = Artifact_draft
 module Store = Artifact_draft_store
-module Scope = Keeper_artifact_draft_scope
 module Discovery = Keeper_artifact_discovery
 open Result.Syntax
 type command =
   | Draft_command of Draft.command
   | Read of Draft.target
-  | Leave of Draft.target
   | Find of Discovery.query
   | Published of string
   | Checkpoint of { target : Draft.target; expected_sequence : int; revision : int }
@@ -37,12 +35,12 @@ let parse json =
   | Some (`String "published") ->
     let* id = Discovery.published_id_of_json json in Ok (Published id)
   | Some (`String "checkpoint") -> checkpoint_of_json json
-  | Some (`String ("read" | "leave" as action)) ->
+  | Some (`String "read") ->
     (match json with
      | `Assoc fields when List.length fields = 2 && List.mem_assoc "action" fields && List.mem_assoc "target" fields ->
        let* target = Draft.target_of_json (List.assoc "target" fields) in
-       Ok (if action = "read" then Read target else Leave target)
-     | _ -> Error "read/leave requires only action and target")
+       Ok (Read target)
+     | _ -> Error "read requires only action and target")
   | _ ->
     let* command = Draft.command_of_json json in match command with
     | Draft.Merge _ -> Error "Keeper edits use selected text, not CRDT wire updates"
@@ -65,12 +63,11 @@ let refused = function
   | Artifact_error (Published_artifact_store.Missing | Conflict _) as error -> fail Tool_result.Workflow_rejection (Store.error_message error)
   | Artifact_error (Published_artifact_store.Unavailable _) | Transform_error { kind = Unavailable; _ } | Unavailable _ as error ->
       fail Tool_result.Runtime_failure (Store.error_message error)
-let data (view : Store.view) ~present =
+let data (view : Store.view) =
   `Assoc ["target", Draft.target_to_json view.draft.target;
     "base_revision", `Int view.draft.base_revision; "base_sha256", `String view.draft.base_sha256;
     "sequence", `Int view.draft.sequence; "updated_by", `String view.draft.updated_by;
     "updated_at", `String view.draft.updated_at; "content", `String view.content;
-    "presence_active", `Bool present;
     "next_request_id", `String (Random_id.uuid_v7 ());
     "discussion_receipts", Artifact_discussion.events_to_json view.draft.discussion;
     "threads", `List (List.map Artifact_discussion.thread_to_json (Artifact_discussion.threads view.draft.discussion |> Result.get_ok));
@@ -84,14 +81,11 @@ let result ~base_path start_time data =
       ~effect_disposition:Tool_result.Proven_post_effect
       ~message:"The draft operation completed, but its result manifest could not be stored. Read the current draft before retrying."
       data
-let handle ?runner ~scope ~base_path ~keeper ~turn_ref ~args () =
+let handle ?runner ~base_path ~keeper ~args () =
   let start_time = Tool_timing.start () in
   match parse args with
   | Error message -> fail Tool_result.Policy_rejection message
   | Ok command ->
-    match Scope.admit scope ~base_path ~keeper ~turn_ref with
-    | Error _ -> fail Tool_result.Runtime_failure "The owning Keeper turn has ended or does not match this call."
-    | Ok () ->
       let read target =
         let* view = Store.read ?runner ~base_path ~artifact_id:target.Draft.artifact_id () in
         if view.draft.target = target then Ok view else Error (Store.Generation_conflict view.draft.target) in
@@ -109,25 +103,17 @@ let handle ?runner ~scope ~base_path ~keeper ~turn_ref ~args () =
              | Store.Checkpointed view -> view, "checkpointed"
              | Store.Already_current view -> view, "already_current" in
            Eio.Cancel.protect (fun () ->
-             let present = Result.is_ok (Scope.present scope ~turn_ref view) in
-             let payload = match data view ~present with
+             let payload = match data view with
                | `Assoc fields -> `Assoc (("checkpoint", `String status) :: fields)
                | other -> other in
              result ~base_path start_time payload))
-      | Leave target ->
-        Scope.leave scope ~target;
-        Keeper_tool_execution.success_data (`Assoc ["target", Draft.target_to_json target; "presence_active", `Bool false])
       | Read target ->
         (match read target with Error error -> refused error | Ok view ->
-          Eio.Cancel.protect (fun () ->
-            let present = Result.is_ok (Scope.present scope ~turn_ref view) in
-            result ~base_path start_time (data view ~present)))
+          Eio.Cancel.protect (fun () -> result ~base_path start_time (data view)))
       | Draft_command command ->
         match Store.execute ?runner ~base_path ~actor:keeper command with
         | Error error -> refused error
         | Ok view ->
           (* A suspended operation can commit while its owner ends. Preserve
-             its committed result without recreating ended-turn presence. *)
-          Eio.Cancel.protect (fun () ->
-            let present = Result.is_ok (Scope.present scope ~turn_ref view) in
-            result ~base_path start_time (data view ~present))
+             its committed result. *)
+          Eio.Cancel.protect (fun () -> result ~base_path start_time (data view))

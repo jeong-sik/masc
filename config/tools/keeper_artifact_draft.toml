@@ -2,7 +2,7 @@ name = "keeper_artifact_draft"
 defer_loading = true
 description = """
 Find published workspace artifacts, read their latest published source, and
-edit a shared artifact source together with other Keepers and dashboard editors.
+edit a shared artifact source together with other Keepers.
 find searches title, summary, all revision authors, Task and Goal references, returning
 candidate ids and current revisions. It does not decide whether a candidate is
 the same document. Follow next_cursor with the same query; if matching artifacts
@@ -13,9 +13,8 @@ artifact revision to obtain its bound target, then select UTF-16 source indices
 and copy the returned selection unchanged into edit with the exact expected
 text and replacement. Other edits move relative positions; changed selected
 text is refused. Read current source after a refused or uncertain write before
-retrying. No CRDT state/base64 is exposed. Your actual Keeper turn owns the
-visible editing position; leave or turn completion removes it. This changes
-the shared draft; publishing a document revision is a separate operation.
+retrying. No CRDT state/base64 is exposed. This changes the shared draft;
+publishing a document revision is a separate operation.
 After publishing the exact shared draft content, checkpoint its target, observed
 sequence and returned revision. It only advances the draft's base if the latest
 publication, format, source and draft sequence still match. A refusal or
@@ -32,7 +31,7 @@ additional_properties = false
 [[params]]
 name = "action"
 type = "string"
-enum = ["find", "published", "open", "read", "select", "resolve", "edit", "leave", "discuss", "checkpoint"]
+enum = ["find", "published", "open", "read", "select", "resolve", "edit", "discuss", "checkpoint"]
 required = true
 
 [[params]]
@@ -73,7 +72,7 @@ description = "checkpoint: exact shared draft sequence whose content was publish
 name = "target"
 type = "object"
 additional_properties = false
-description = "read/select/leave/checkpoint: exact target returned by open."
+description = "read/select/checkpoint: exact target returned by open."
 [[params.params]]
 name = "artifact_id"
 type = "string"
@@ -216,7 +215,7 @@ description = "Advance a shared draft's base after its exact content was publish
 required = ["target", "expected_sequence", "revision"]
 forbidden = ["artifact_id", "query", "cursor", "selection", "anchor", "head", "expected", "replacement", "request"]
 [[one_of]]
-description = "Read, select, leave, or discuss the exact shared draft target."
+description = "Read, select, or discuss the exact shared draft target."
 required = ["target"]
 forbidden = ["artifact_id", "revision", "expected_sequence", "query", "cursor", "selection", "expected", "replacement"]
 [[one_of]]

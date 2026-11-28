@@ -21,8 +21,6 @@ val checkpoint : t -> base_revision:int -> base_sha256:string -> actor:string ->
     same observed draft before calling this constructor. *)
 val of_json : Yojson.Safe.t -> (t, string) result
 val to_json : t -> Yojson.Safe.t
-val public_to_json : t -> Yojson.Safe.t
-val document_to_json : draft:t -> content:string -> selection:(selection * int * int) option -> Yojson.Safe.t
 val target_to_json : target -> Yojson.Safe.t
 val selection_to_json : selection -> Yojson.Safe.t
 val target_of_json : Yojson.Safe.t -> (target, string) result

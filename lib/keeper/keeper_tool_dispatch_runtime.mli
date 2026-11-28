@@ -39,7 +39,6 @@ val execute_keeper_tool_descriptor_for_capability_surface_with_outcome
   -> ?prepared_edit:Keeper_tool_filesystem_runtime.prepared_edit
   -> ?prepared_write:Keeper_tool_filesystem_runtime.prepared_write
   -> ?turn_sandbox_factory:Keeper_sandbox_factory.t
-  -> ?artifact_draft_scope:Keeper_artifact_draft_scope.t
   -> ?sw:Eio.Switch.t
   -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
   -> ?proc_mgr:Eio_unix.Process.mgr_ty Eio.Resource.t
@@ -73,7 +72,6 @@ val execute_keeper_tool_call_for_capability_surface_with_outcome
   -> ?prepared_edit:Keeper_tool_filesystem_runtime.prepared_edit
   -> ?prepared_write:Keeper_tool_filesystem_runtime.prepared_write
   -> ?turn_sandbox_factory:Keeper_sandbox_factory.t
-  -> ?artifact_draft_scope:Keeper_artifact_draft_scope.t
   -> ?sw:Eio.Switch.t
   -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
   -> ?proc_mgr:Eio_unix.Process.mgr_ty Eio.Resource.t
@@ -105,7 +103,6 @@ module Compatibility : sig
     -> ?prepared_edit:Keeper_tool_filesystem_runtime.prepared_edit
     -> ?prepared_write:Keeper_tool_filesystem_runtime.prepared_write
     -> ?turn_sandbox_factory:Keeper_sandbox_factory.t
-  -> ?artifact_draft_scope:Keeper_artifact_draft_scope.t
     -> ?sw:Eio.Switch.t
     -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
     -> ?proc_mgr:Eio_unix.Process.mgr_ty Eio.Resource.t
@@ -136,7 +133,6 @@ module Compatibility : sig
     -> ?prepared_edit:Keeper_tool_filesystem_runtime.prepared_edit
     -> ?prepared_write:Keeper_tool_filesystem_runtime.prepared_write
     -> ?turn_sandbox_factory:Keeper_sandbox_factory.t
-  -> ?artifact_draft_scope:Keeper_artifact_draft_scope.t
     -> ?sw:Eio.Switch.t
     -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
     -> ?proc_mgr:Eio_unix.Process.mgr_ty Eio.Resource.t
@@ -164,7 +160,6 @@ module Compatibility : sig
     -> ?source_context:Keeper_tool_call_log_context.turn_context
     -> ?owned_job_replay:Keeper_owned_job_invocation.replay
     -> ?turn_sandbox_factory:Keeper_sandbox_factory.t
-  -> ?artifact_draft_scope:Keeper_artifact_draft_scope.t
     -> name:string
     -> input:Yojson.Safe.t
     -> unit

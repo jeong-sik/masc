@@ -341,7 +341,7 @@ let test_editor_publishes_and_never_overwrites () =
     ; source_context = None
     ; owned_job_replay = None
     ; execution_scope = None
-    ; artifact_draft_scope = None; turn_sandbox_factory = None; sw = None; clock = None; proc_mgr = None
+    ; turn_sandbox_factory = None; sw = None; clock = None; proc_mgr = None
     ; net = None; mcp_session_id = None; continuation_channel = None
     ; gate_context = None; turn_ref = None; gate_grant = None; tool_use_id = None; trace_id = None
     ; result_projection = None

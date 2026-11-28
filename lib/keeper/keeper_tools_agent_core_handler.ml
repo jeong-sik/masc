@@ -24,7 +24,6 @@ let make_keeper_tool_handler_with_authority
       ?owned_job_replay
       ?prepared_file
       ?turn_sandbox_factory
-      ?artifact_draft_scope
       ?clock
       ?continuation_channel
       ?gate_context
@@ -286,7 +285,6 @@ let make_keeper_tool_handler_with_authority
                 ?prepared_edit
                 ?prepared_write
                 ?turn_sandbox_factory
-                ?artifact_draft_scope
                 ?sw
                 ?clock
                 ?proc_mgr

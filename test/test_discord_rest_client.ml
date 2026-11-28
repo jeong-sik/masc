@@ -545,9 +545,188 @@ let test_truncate_to_limit_korean_valid_utf8 () =
 (* Entry                                                            *)
 (* ---------------------------------------------------------------- *)
 
+(* ---------------------------------------------------------------- *)
+(* build_upload_request                                             *)
+(* ---------------------------------------------------------------- *)
+
+let test_boundary value =
+  match R.boundary_of_string value with
+  | Ok boundary -> boundary
+  | Error message -> failf "invalid test boundary: %s" message
+
+let test_upload ?description ~filename ~media_type bytes =
+  match R.upload ~filename ~media_type ?description bytes with
+  | Ok upload -> upload
+  | Error message -> failf "upload rejected: %s" message
+
+(* Splits [body] on [sep] the way a multipart reader does: no escaping, the
+   first occurrence ends the piece. *)
+let split_on_string ~sep body =
+  let rec go pos acc =
+    match String_util.find_substring ~pos body sep with
+    | None -> List.rev (String.sub body pos (String.length body - pos) :: acc)
+    | Some index ->
+      go (index + String.length sep) (String.sub body pos (index - pos) :: acc)
+  in
+  go 0 []
+
+(* (header block, part body) for each part, read with the RFC 2046 framing:
+   the first delimiter opens the body, CRLF+delimiter separates parts, and
+   CRLF+delimiter+"--" closes it. *)
+let multipart_parts ~boundary body =
+  let delimiter = "--" ^ boundary in
+  let opening = delimiter ^ "\r\n" in
+  let closing = "\r\n" ^ delimiter ^ "--\r\n" in
+  if not (String.starts_with ~prefix:opening body) then
+    fail "body does not open with the delimiter";
+  if not (String.ends_with ~suffix:closing body) then
+    fail "body does not end with the close delimiter";
+  let inner =
+    String.sub body (String.length opening)
+      (String.length body - String.length opening - String.length closing)
+  in
+  split_on_string ~sep:("\r\n" ^ opening) inner
+  |> List.map (fun part ->
+       match split_on_string ~sep:"\r\n\r\n" part with
+       | headers :: rest -> (headers, String.concat "\r\n\r\n" rest)
+       | [] -> fail "part without a header block")
+
+(* Binary bytes that hold CRLF, NUL and a lone "--": a part body is not text. *)
+let png_bytes = "\x89PNG\r\n\x1a\n\x00\x00--\r\n\xff"
+let midi_bytes = "MThd\x00\x00\x00\x06\x00\x01"
+
+let test_upload_request_is_payload_json_then_files_in_order () =
+  let boundary = "test-boundary-1" in
+  let nonce =
+    match R.nonce_of_string "upload-nonce-1" with
+    | Ok nonce -> nonce
+    | Error message -> failf "invalid test nonce: %s" message
+  in
+  let files =
+    ( test_upload ~filename:"고양이.png" ~media_type:"image/png"
+        ~description:"창가의 고양이" png_bytes
+    , [ test_upload ~filename:"riff.mid" ~media_type:"audio/midi" midi_bytes ] )
+  in
+  match
+    R.build_upload_request ~token:"sekret" ~channel_id:(sf "123")
+      ~boundary:(test_boundary boundary) ~content:"악보예요"
+      ~reply_to_message_id:(sf "42") ~nonce ~files ()
+  with
+  | Error R.Boundary_in_payload -> fail "unexpected boundary collision"
+  | Ok (url, headers, body) ->
+    check string "create-message URL"
+      "https://discord.com/api/v10/channels/123/messages" url;
+    check string "multipart Content-Type names the boundary"
+      ("multipart/form-data; boundary=" ^ boundary)
+      (header_value headers "Content-Type");
+    check string "Authorization header" "Bot sekret"
+      (header_value headers "Authorization");
+    (match multipart_parts ~boundary body with
+     | [ (payload_headers, payload); (png_headers, png); (midi_headers, midi) ] ->
+       check string "payload_json part headers"
+         "Content-Disposition: form-data; name=\"payload_json\"\r\n\
+          Content-Type: application/json"
+         payload_headers;
+       let open Yojson.Safe.Util in
+       let json = Yojson.Safe.from_string payload in
+       check string "content" "악보예요" (json |> member "content" |> to_string);
+       check string "attachments name files[n] by id, in order"
+         "[{\"id\":0,\"filename\":\"고양이.png\",\"description\":\"창가의 고양이\"},\
+          {\"id\":1,\"filename\":\"riff.mid\"}]"
+         (json |> member "attachments" |> Yojson.Safe.to_string);
+       check string "mentions suppressed, original author not pinged"
+         "{\"parse\":[],\"replied_user\":false}"
+         (json |> member "allowed_mentions" |> Yojson.Safe.to_string);
+       check string "reply reference"
+         "{\"message_id\":\"42\",\"fail_if_not_exists\":true}"
+         (json |> member "message_reference" |> Yojson.Safe.to_string);
+       check string "nonce" "upload-nonce-1" (json |> member "nonce" |> to_string);
+       check bool "enforce_nonce" true (json |> member "enforce_nonce" |> to_bool);
+       check string "files[0] part headers"
+         "Content-Disposition: form-data; name=\"files[0]\"; filename=\"고양이.png\"\r\n\
+          Content-Type: image/png"
+         png_headers;
+       check string "files[0] bytes unchanged" png_bytes png;
+       check string "files[1] part headers"
+         "Content-Disposition: form-data; name=\"files[1]\"; filename=\"riff.mid\"\r\n\
+          Content-Type: audio/midi"
+         midi_headers;
+       check string "files[1] bytes unchanged" midi_bytes midi
+     | parts -> failf "expected 3 parts, got %d" (List.length parts));
+    (match
+       R.build_upload_request ~token:"t" ~channel_id:(sf "123")
+         ~boundary:(test_boundary boundary) ~content:"<@77> 들어 보세요"
+         ~allowed_user_mentions:[ sf "77" ] ~files ()
+     with
+     | Error R.Boundary_in_payload -> fail "unexpected boundary collision"
+     | Ok (_, _, body) ->
+       (match multipart_parts ~boundary body with
+        | (_, payload) :: _ ->
+          let open Yojson.Safe.Util in
+          check string "only the explicit user may be notified"
+            "{\"users\":[\"77\"]}"
+            (Yojson.Safe.from_string payload |> member "allowed_mentions"
+             |> Yojson.Safe.to_string)
+        | [] -> fail "no payload part"))
+
+let test_upload_refuses_values_that_break_part_headers () =
+  let refused label = function
+    | Ok _ -> failf "%s: accepted" label
+    | Error (_ : string) -> ()
+  in
+  let upload ?description ?(media_type = "image/png") filename =
+    R.upload ~filename ~media_type ?description "x"
+  in
+  refused "empty filename" (upload "");
+  refused "quote ends the filename parameter" (upload "a\".png");
+  refused "CRLF starts a new header" (upload "a\r\nX-Injected: 1.png");
+  refused "backslash" (upload "a\\b.png");
+  refused "path" (upload "../a.png");
+  refused "NUL" (upload "a\000.png");
+  refused "invalid UTF-8" (upload "a\xff.png");
+  refused "CRLF in media type" (upload ~media_type:"image/png\r\nX-Injected: 1" "a.png");
+  refused "media type without subtype" (upload ~media_type:"image" "a.png");
+  refused "media type parameter" (upload ~media_type:"image/png; charset=x" "a.png");
+  refused "alt text over 1024 characters"
+    (upload ~description:(String.concat "" (List.init 1025 (fun _ -> "가"))) "a.png");
+  (match upload ~description:(String.concat "" (List.init 1024 (fun _ -> "가"))) "a.png" with
+   | Ok _ -> ()
+   | Error message -> failf "1024-character alt text refused: %s" message);
+  (match upload ~media_type:"audio/midi" "riff.mid" with
+   | Ok upload -> check string "filename kept" "riff.mid" (R.upload_filename upload)
+   | Error message -> failf "audio/midi refused: %s" message);
+  refused "boundary over 70 characters"
+    (R.boundary_of_string (String.make 71 'a'));
+  refused "boundary with a quote" (R.boundary_of_string "a\"b")
+
+let test_upload_request_refuses_a_boundary_inside_a_part () =
+  let boundary = test_boundary "b1" in
+  let build ?content bytes =
+    R.build_upload_request ~token:"t" ~channel_id:(sf "1") ~boundary ?content
+      ~files:(test_upload ~filename:"a.bin" ~media_type:"application/octet-stream" bytes, [])
+      ()
+  in
+  (match build "head\r\n--b1\r\ntail" with
+   | Error R.Boundary_in_payload -> ()
+   | Ok _ -> fail "delimiter inside file bytes was accepted");
+  (match build ~content:"see --b1" "x" with
+   | Error R.Boundary_in_payload -> ()
+   | Ok _ -> fail "delimiter inside payload_json was accepted");
+  match build "-b1 is not the delimiter" with
+  | Ok _ -> ()
+  | Error R.Boundary_in_payload -> fail "a non-delimiter was refused"
+
 let () =
   run "discord_rest_client"
-    [ ( "snowflake"
+    [ ( "build_upload_request"
+      , [ test_case "payload_json then files[n] in order, bytes unchanged"
+            `Quick test_upload_request_is_payload_json_then_files_in_order
+        ; test_case "values that break part headers are refused" `Quick
+            test_upload_refuses_values_that_break_part_headers
+        ; test_case "a boundary inside a part is refused" `Quick
+            test_upload_request_refuses_a_boundary_inside_a_part
+        ] )
+    ; ( "snowflake"
       , [ test_case "rejects non-decimal IDs" `Quick
             test_snowflake_decoder_rejects_non_decimal_ids ] )
     ; ( "nonce"

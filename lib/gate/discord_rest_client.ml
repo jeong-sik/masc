@@ -614,3 +614,229 @@ let send_embed_message ?clock
   | Error msg -> Error (Network msg)
   | Ok (status, body) ->
     parse_response ~request_id:(next_request_id "embed") ~status ~body ()
+
+(* ── File upload ────────────────────────────────────────────────── *)
+
+(* Discord reads each file's name from its part's Content-Disposition
+   header, a quoted string (RFC 7578 section 4.2). A quote, backslash, CR,
+   LF or NUL would end or split that header, and a slash names a path that
+   Discord does not keep. Such a name is refused rather than escaped: Discord
+   documents no escape it reads back. *)
+let upload_filename_forbidden = function
+  | '"' | '\\' | '\r' | '\n' | '\000' | '/' -> true
+  | _ -> false
+
+let parse_upload_filename value =
+  if value = "" then Error "Discord upload filename must be non-empty"
+  else if String.exists upload_filename_forbidden value then
+    Error
+      "Discord upload filename must not contain a quote, backslash, slash, CR, \
+       LF or NUL"
+  else if not (String_util.is_valid_utf8 value) then
+    Error "Discord upload filename must be valid UTF-8"
+  else Ok value
+
+(* RFC 6838 section 4.2 restricted-name: a letter or digit, then up to 126
+   of letters, digits and "!#$&-^_.+". The same set keeps the part's
+   Content-Type header to one line. *)
+let media_type_name_max_length = 127
+
+let is_restricted_name_char = function
+  | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' -> true
+  | '!' | '#' | '$' | '&' | '-' | '^' | '_' | '.' | '+' -> true
+  | _ -> false
+
+let is_restricted_name name =
+  let length = String.length name in
+  length > 0
+  && length <= media_type_name_max_length
+  && Char.Ascii.is_alphanum name.[0]
+  && String.for_all is_restricted_name_char name
+
+let parse_media_type value =
+  match String.split_on_char '/' value with
+  | [ type_name; subtype_name ]
+    when is_restricted_name type_name && is_restricted_name subtype_name ->
+    Ok value
+  | _ -> Error "Discord upload media type must be type/subtype (RFC 6838)"
+
+(* Attachment Request Structure: description is the file's alt text, "max
+   1024 characters". *)
+let upload_description_limit = 1024
+
+let parse_upload_description = function
+  | None -> Ok None
+  | Some description ->
+    if not (String_util.is_valid_utf8 description) then
+      Error "Discord upload description must be valid UTF-8"
+    else if String_util.utf8_length description > upload_description_limit then
+      Error
+        (Printf.sprintf "Discord upload description exceeds %d characters"
+           upload_description_limit)
+    else Ok (Some description)
+
+type upload =
+  { upload_filename : string
+  ; upload_media_type : string
+  ; upload_description : string option
+  ; upload_bytes : string
+  }
+
+let upload ~filename ~media_type ?description bytes =
+  let open Result.Syntax in
+  let* upload_filename = parse_upload_filename filename in
+  let* upload_media_type = parse_media_type media_type in
+  let* upload_description = parse_upload_description description in
+  Ok { upload_filename; upload_media_type; upload_description; upload_bytes = bytes }
+
+let upload_filename upload = upload.upload_filename
+
+type boundary = Boundary of string
+
+(* RFC 2046 section 5.1.1: 1 to 70 characters. This client mints and accepts
+   only letters, digits and "-", a subset of bchars that needs no quoting in
+   the Content-Type parameter. *)
+let boundary_max_length = 70
+
+let boundary_of_string value =
+  let length = String.length value in
+  if length = 0 || length > boundary_max_length then
+    Error
+      (Printf.sprintf "multipart boundary must be 1 to %d characters"
+         boundary_max_length)
+  else if
+    not (String.for_all (fun c -> Char.Ascii.is_alphanum c || c = '-') value)
+  then Error "multipart boundary must use letters, digits and '-'"
+  else Ok (Boundary value)
+
+(* "masc-" and 24 random bytes as 48 hex characters: 53 characters. *)
+let boundary_random_bytes = 24
+
+let fresh_boundary () =
+  Boundary ("masc-" ^ Random_id.hex ~bytes:boundary_random_bytes)
+
+type upload_build_error = Boundary_in_payload
+
+let upload_payload_json ~content ~reply_to_message_id ~allowed_user_mentions
+    ~nonce files =
+  let attachment_json index file =
+    `Assoc
+      ([ "id", `Int index; "filename", `String file.upload_filename ]
+       @
+       match file.upload_description with
+       | None -> []
+       | Some description -> [ "description", `String description ])
+  in
+  let fields =
+    [ ( "allowed_mentions"
+      , allowed_mentions_json ~is_reply:(Option.is_some reply_to_message_id)
+          allowed_user_mentions )
+    ; "attachments", `List (List.mapi attachment_json files)
+    ]
+  in
+  let fields =
+    match content with
+    | None -> fields
+    | Some content -> ("content", `String content) :: fields
+  in
+  let fields =
+    match nonce with
+    | None -> fields
+    | Some nonce ->
+      fields
+      @ [ "nonce", `String (nonce_to_string nonce); "enforce_nonce", `Bool true ]
+  in
+  Yojson.Safe.to_string (`Assoc (add_message_reference reply_to_message_id fields))
+
+let build_upload_request ~token ~channel_id ~boundary:(Boundary boundary)
+    ?content ?reply_to_message_id ?(allowed_user_mentions = []) ?nonce
+    ~files:(first, rest) () =
+  let files = first :: rest in
+  let payload =
+    upload_payload_json ~content ~reply_to_message_id ~allowed_user_mentions
+      ~nonce files
+  in
+  (* RFC 2046 section 5.1.1: the delimiter must not occur inside a part.
+     "--" and the boundary is the delimiter without its leading CRLF, so
+     refusing it anywhere in a part is the conservative check. *)
+  let delimiter = "--" ^ boundary in
+  let parts_hold_delimiter =
+    String_util.contains_substring payload delimiter
+    || List.exists
+         (fun file -> String_util.contains_substring file.upload_bytes delimiter)
+         files
+  in
+  if parts_hold_delimiter then Error Boundary_in_payload
+  else
+    let crlf = "\r\n" in
+    let payload_part =
+      [ delimiter; crlf
+      ; "Content-Disposition: form-data; name=\"payload_json\""; crlf
+      ; "Content-Type: application/json"; crlf
+      ; crlf
+      ; payload; crlf
+      ]
+    in
+    let file_part index file =
+      [ delimiter; crlf
+      ; Printf.sprintf
+          "Content-Disposition: form-data; name=\"files[%d]\"; filename=\"%s\""
+          index file.upload_filename
+      ; crlf
+      ; "Content-Type: "; file.upload_media_type; crlf
+      ; crlf
+      ; file.upload_bytes; crlf
+      ]
+    in
+    let body =
+      String.concat ""
+        (payload_part
+         @ List.concat (List.mapi file_part files)
+         @ [ delimiter; "--"; crlf ])
+    in
+    let url =
+      Printf.sprintf "%s/channels/%s/messages" api_base
+        (snowflake_to_string channel_id)
+    in
+    let headers =
+      ("Content-Type", "multipart/form-data; boundary=" ^ boundary)
+      :: auth_headers ~token
+    in
+    Ok (url, headers, body)
+
+let send_files ?clock ?(timeout_sec = Masc_http_client.default_request_timeout_sec)
+    ~token ~channel_id ?content ?reply_to_message_id
+    ?(allowed_user_mentions = []) ?nonce ~files () =
+  let open Result.Syntax in
+  let parse_id id =
+    snowflake_of_string id |> Result.map_error (fun message -> Network message)
+  in
+  let* channel_id = parse_id channel_id in
+  let* allowed_user_mentions =
+    List.fold_right
+      (fun id acc ->
+         let* acc = acc in
+         let* id = parse_id id in
+         Ok (id :: acc))
+      allowed_user_mentions (Ok [])
+  in
+  let* reply_to_message_id =
+    match reply_to_message_id with
+    | None -> Ok None
+    | Some id -> parse_id id |> Result.map Option.some
+  in
+  (* A minted boundary occurs in the payload with probability about
+     bytes / 16^48; a fresh one is drawn until none does. *)
+  let rec encode () =
+    match
+      build_upload_request ~token ~channel_id ~boundary:(fresh_boundary ())
+        ?content ?reply_to_message_id ~allowed_user_mentions ?nonce ~files ()
+    with
+    | Error Boundary_in_payload -> encode ()
+    | Ok encoded -> encoded
+  in
+  let url, headers, body = encode () in
+  match Masc_http_client.post_sync ?clock ~timeout_sec ~url ~headers ~body () with
+  | Error msg -> Error (Network msg)
+  | Ok (status, body) ->
+    parse_response ~request_id:(next_request_id "upload") ~status ~body ()

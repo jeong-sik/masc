@@ -70,7 +70,8 @@ val finish_write : write -> ('a, board_error) result -> ('a, board_error) result
     original reserved cleanup cause through the shared Board carrier. *)
 val require_readable : store -> (unit, board_error) result
 val reobservation_due : store -> bool
-(** Pure. True only when this store is refused because its file moved away
-    from the observation it holds (another writer appended or replaced it), so
-    one fresh read can clear the refusal. False for every other refusal and
-    for a pending publication or an unknown write (#55449). *)
+(** Pure. True only when this store is refused for a cause
+    {!Board_posts_source.fresh_read_can_clear} accepts: its file moved away
+    from the observation it holds, or the read met another writer's lock.
+    False for every other refusal and for a pending publication or an unknown
+    write (#55449). *)

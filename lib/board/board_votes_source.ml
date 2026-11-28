@@ -193,12 +193,11 @@ let rec contradicts_observation = function
   | Transaction_settlement_failed { primary = Transaction_succeeded _; _ }
   | Transaction_append_failed _ -> false
 
-(* #55449: a refusal that only proves this store's observation stale (another
-   writer moved the file) is cleared by one fresh read, as the posts source
-   is (task-4036). A refusal for any other reason is not: the same file would
-   refuse again. *)
+(* #55449: a refusal that one more read of the same file can end is read
+   again before the next operation, as the posts source is (task-4036). A
+   refusal for any other reason is not: the file would refuse again. *)
 let stale_observation = function
-  | Votes_transaction_failed error -> contradicts_observation error
+  | Votes_transaction_failed error -> Board_posts_source.fresh_read_can_clear error
   | Votes_not_observed | Votes_rows_rejected _ | Votes_missing | Votes_binding_mismatch
   | Votes_publication_pending | Votes_workspace_refused _ | Votes_raised _ -> false
 

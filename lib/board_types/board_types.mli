@@ -382,6 +382,11 @@ module Comment_page : sig
     | Comment_tail
     | After_comment_id
 
+  val argument_names : string list
+  (** The names of the arguments {!request_of_args} reads, in the order it
+      reads them. A comment page selection carried beside its bytes (a
+      verifier's source cursor) is these members of the call and no others. *)
+
   type request_error =
     | Arguments_not_an_object
     | Not_an_integer of

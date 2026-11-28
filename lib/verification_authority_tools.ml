@@ -142,18 +142,53 @@ let artifact_reader_schema (keeper : Keeper_tool_descriptor.t) =
        ])
 ;;
 
+(* A cursor continues the exact source page it names. A Board thread's page
+   was selected by comment arguments, so its cursor carries them as [select]
+   and a continuation repeats nothing but the source id. [select] offers the
+   descriptor's own comment arguments, under the names the source reader
+   reads a page selection with, so the schema and the reader name the same
+   members. Their descriptions are left out, as a cursor is copied and not
+   written. *)
+let cursor_description =
+  "Continue with next_cursor from a source_json_page: pass this cursor object \
+   as cursor and keep the same source id. Concatenate content until \
+   next_cursor is null to recover exact source JSON. A cursor that carries \
+   select continues that page on its own: the comment arguments need not be \
+   repeated, and repeating a different selection is refused."
+
+let without_description = function
+  | `Assoc members -> `Assoc (List.remove_assoc "description" members)
+  | other -> other
+;;
+
 let source_pagination_schema = function
   | `Assoc fields ->
     let open Result.Syntax in
     let* properties = match List.assoc_opt "properties" fields with
       | Some (`Assoc properties) -> Ok properties
       | _ -> Error "source descriptor properties must be an object" in
-    let cursor = `Assoc ["type", `String "object";
-      "description", `String "Continue with next_cursor from a source_json_page; keep the same source id and comment pagination. Concatenate content until next_cursor is null to recover exact source JSON. A changed source rejects the cursor.";
-      "properties", `Assoc ["source_sha256", `Assoc ["type", `String "string"];
-        "byte_offset", `Assoc ["type", `String "integer"; "minimum", `Int 1]];
-      "required", `List [`String "source_sha256"; `String "byte_offset"];
-      "additionalProperties", `Bool false] in
+    let selection =
+      match List.filter (fun (name, _) -> List.mem name Verification_collaboration_evidence.comment_argument_names) properties with
+      | [] -> []
+      | selected ->
+        [ ( "select"
+          , `Assoc
+              [ "type", `String "object"
+              ; "description", `String "The comment arguments that selected the page this cursor continues"
+              ; "properties", `Assoc (List.map (fun (name, property) -> name, without_description property) selected)
+              ; "additionalProperties", `Bool false ] ) ] in
+    let cursor =
+      `Assoc
+        [ "type", `String "object"
+        ; "description", `String cursor_description
+        ; "properties",
+          `Assoc
+            ([ ("source_sha256", `Assoc ["type", `String "string"])
+             ; ("byte_offset", `Assoc ["type", `String "integer"; "minimum", `Int 1]) ]
+             @ selection)
+        ; "required", `List [`String "source_sha256"; `String "byte_offset"]
+        ; "additionalProperties", `Bool false ]
+    in
     Ok (`Assoc (("properties", `Assoc (("cursor", cursor) :: properties)) :: List.remove_assoc "properties" fields))
   | _ -> Error "source descriptor schema must be an object"
 ;;

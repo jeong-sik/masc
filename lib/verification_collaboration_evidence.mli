@@ -12,10 +12,18 @@ type error =
   | Storage_failed of string
 
 val error_to_string : error -> string
+(** The arguments that select one page of a submitted Board thread. The cursor
+    of such a page carries them as [select]; the review's Board schema names
+    the same members. *)
+val comment_argument_names : string list
 (** Large responses are bounded JSON-text pages. The caller follows next_cursor
-    with unchanged source arguments and concatenates content to recover the exact
+    with the same source id and concatenates content to recover the exact
     structured source. Each cursor pins SHA-256 and UTF-8 byte offset; every page
-    uses only the immutable submitted bytes and refuses mismatched cursors. *)
+    uses only the immutable submitted bytes and refuses mismatched cursors. The
+    cursor of a Board thread also carries the comment arguments that selected
+    its page, so a continuation needs no other argument: the same arguments may
+    be repeated, and a different selection beside the cursor is an invalid
+    request rather than a changed source. *)
 val capture : config:Workspace.config -> authority:authority -> references:string list ->
   (Workspace_verification_store.submitted_evidence_item list, error) result
 (** Capture explicit collaboration references before the submission commits.

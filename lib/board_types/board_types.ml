@@ -448,6 +448,13 @@ module Comment_page = struct
     | After_comment_id -> "after_comment_id"
   ;;
 
+  (* Every argument a request reads, by the name a call spells. A page
+     selection that travels beside its bytes (a verifier's source cursor) is
+     these members of the call and no others. *)
+  let argument_names =
+    List.map argument_name [Comment_offset; Comment_limit; Comment_tail; After_comment_id]
+  ;;
+
   let integer_argument (fields : (string * Yojson.Safe.t) list) argument =
     match List.assoc_opt (argument_name argument) fields with
     | None -> Ok None

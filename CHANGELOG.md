@@ -21,6 +21,8 @@
   and retains the unsent answer draft (#55200).
 - The boot warning about `[typesafeai].memory_recall_keepers` names that match no Keeper is removed, together with the memory recall gate that nothing has asked since the recall pipeline was removed (#55423).
 - The `[typesafeai]` keys `memory_recall`, `memory_recall_scope` and `memory_recall_keepers` are removed; nothing has read them since the recall pipeline was removed (#55426).
+- The Librarian's `not_committed` report and its `on_not_committed` callback are gone, together with `Keeper_exact_walk_failure.shows_range_size`. No production caller passed the callback, and nothing outside tests read the range-size verdict after #55222 (#55236).
+- **Local install**: `scripts/install-local-build.sh --refresh-guest-shim` is removed, as RFC host-and-shim-share-one-build-identity decided, and the option is now refused as unknown. It downloaded the release shim of the version the build reports. A checkout build accepts that shim only when both declare the same source identity, which takes a clean checkout of the release's own commit; for such a build an old shim is now rebuilt from the checkout instead of downloaded. In five cases (unreadable `SHA256SUMS`, no such asset, a listed asset that cannot be downloaded, a sidecar without an asset name, a build that reports no release version) the option left the old shim in place after one WARN line and ended 0. The install without the option already rebuilds a shim of another source identity from the same checkout (#55481). To go back to a release shim, run the release installer: `scripts/install.sh --version vX.Y.Z --force --base-path <workspace>`. It also replaces the server in its prefix with that release's (#55518).
 
 ### Fixed
 
@@ -57,6 +59,18 @@
   Debug Companion reads the provider-input manifest through the strict
   decoder; its loose copy, which turned an unknown part kind into a message,
   is removed (#55440).
+- A Board source (posts, comments, votes, reactions, sub-boards) refused for what its file was — a torn last line, a second hard link, a file that is not regular — or for a read that failed part-way stayed refused until the server restarted, also after the file was repaired. It is now read again at the next Board call once the file has changed since the server last read it, which one `lstat` without a lock decides; while the file stays as it is, it is not read. A read again that fails before it reaches the file is tried again at the next call instead of leaving the source refused until a restart (#55513).
+- `scripts/install-pele.sh` copies every module at the top of `tools/pele`
+  instead of a hand-kept list, so the local install no longer fails with
+  `ERR_MODULE_NOT_FOUND` for `chart.mjs` and keeps an old Pele without chart
+  rendering. A `pele-install` workflow runs the installer and the Pele tests
+  on pull requests that touch Pele or its installer (#55517).
+- MIDI attachments that name no instrument are now audible in the dashboard
+  player; they used to play as silence (#55519).
+- Dashboard: a wiki page whose header holds only a date (`updated: 2026-11-28`) reads as 오늘, 어제 or N일 전 in local days instead of hours counted from UTC midnight. The relative time formatter has one copy in `lib/format-time.ts`; an event time less than 45 seconds (or one calendar day) ahead of the local clock reads as now, one further ahead reads as ahead, and a schedule's next run reads ahead and behind. Wiki lint findings and the Lint tab's count chips show Korean names instead of wire names (#55520).
+- TUI: the wiki header counts broken image, page and artifact embeds as 깨짐, and reads `wiki-lint 정상` only when no finding stands, counting findings of a kind it does not know as 그 밖; a zero count is left out of the header. The page side card's lint rows name the kind and its target instead of the page slug, and the card shows loading while the page is read instead of 서버 미보고 (#55521).
+- **Board tests**: `test_board_delete_rewrite_requeue` failed on main after #55460. Its case for a posts file edited in place asserted that the read after the refused deletion still shows the row from before the edit. Every Board call now reads such a source again first, so the read shows the file's row; the assertion says that. No product code changes (#55523).
+- **install**: `scripts/install-local-build.sh` puts the dashboard bundle that `make build` made beside the binaries, in `<prefix>/assets/dashboard`. Every workspace started with that `masc` reads the same bundle, so an account server on its own base path no longer answers `/dashboard` with 503. A prefix with no bundle is given one, and an older one is kept as `dashboard-backup-<UTC time>`. The runtime install artifact now carries the script of this step (#55524, Refs #55405).
 
 ### Performance
 
@@ -83,6 +97,7 @@
 ### Upgrade notes
 
 - Before installing this build, delete `memory_recall`, `memory_recall_scope` and `memory_recall_keepers` from `[typesafeai]` in `runtime.toml`; delete the three together, because the previous build refuses some partial sets, such as a keeper list without its scope. `[typesafeai]` refuses unknown keys, so while any of them remains `scripts/install-local-build.sh` refuses the file and installs nothing. A new binary started without that check refuses the file at boot and starts in model-setup-required mode with no runtime and no Keepers; deleting the keys then is not enough, and the server needs a model setup resume (`POST /api/v1/runtime/setup/resume`) or a restart. The previous build reads a file without the three keys as recall off, so they can be deleted before the upgrade (#55426).
+- After this install, a server started from the prefix reads `<prefix>/assets/dashboard` before `<base>/assets/dashboard`, so a bundle kept under a base path is no longer served and can be removed. A server with `MASC_ASSETS_DIR` still reads that directory first. Local installation updates the bundle beside the binary, so a custom directory needs its own update (#55524).
 
 ## [0.83.11] - 2026-11-28
 

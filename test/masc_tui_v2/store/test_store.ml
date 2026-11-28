@@ -9599,13 +9599,20 @@ let test_wiki_artifact_embed_reads_the_artifact_list () =
         |> Knowledge_store.apply_wiki_index ~observed_at:t0 index;
     }
   in
-  let page_lands (m : Model.t) page =
+  let page_lands ?(slug = "guide") (m : Model.t) page =
     Update.step ~now:t1 m
       (Msg.Http_reply
          {
            epoch = m.epoch;
-           reply = Msg.Reply_wiki_page { page = "guide"; result = Ok page };
+           reply = Msg.Reply_wiki_page { page = slug; result = Ok page };
          })
+  in
+  let asks_for_a_page cmds =
+    List.exists
+      (function
+        | Cmd.Http_get { req = Cmd.Get_wiki_page _; _ } -> true
+        | _ -> false)
+      (Cmd.flatten cmds)
   in
   let asks_for_artifacts cmds =
     List.exists
@@ -9618,6 +9625,10 @@ let test_wiki_artifact_embed_reads_the_artifact_list () =
   let landed, cmds = page_lands on_wiki_tab with_artifact in
   Alcotest.(check bool) "a page that embeds an artifact asks for the artifact list"
     true (asks_for_artifacts cmds);
+  let _, cmds_other = page_lands ~slug:"other" on_wiki_tab with_artifact in
+  Alcotest.(check bool)
+    "another page landing asks for neither the selected page nor the list" false
+    (asks_for_a_page cmds_other || asks_for_artifacts cmds_other);
   let _, cmds_plain = page_lands on_wiki_tab (detail []) in
   Alcotest.(check bool) "a page without an artifact embed does not" false
     (asks_for_artifacts cmds_plain);

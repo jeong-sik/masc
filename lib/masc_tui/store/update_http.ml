@@ -3678,9 +3678,16 @@ let apply_http_reply ~now (m : Model.t) reply =
           Model.open_wiki_edit_modal_for_detail detail next
         else next
       in
-      (* The page that landed may embed an artifact, whose title needs the
-         artifact list. *)
-      (next, View_fetches.selected_wiki_page_fetch next)
+      (* The selected page that landed may embed an artifact, whose title
+         needs the artifact list. Its slot is now fresh, so only that list can
+         be asked for. Another page landing leaves the selected page's own
+         read alone: it may still be in flight. *)
+      let landed_selected =
+        match Knowledge_store.selected_wiki_page next.knowledge with
+        | Some selected -> String.equal selected.slug page
+        | None -> false
+      in
+      (next, if landed_selected then View_fetches.selected_wiki_page_fetch next else [])
   | Msg.Reply_wiki_page { page; result = Error err } ->
       err_reply
         ~fail:

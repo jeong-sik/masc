@@ -505,16 +505,19 @@ let notify_post_creation (creation : Board.post_creation) =
       (Board.Post_publication_failure.after_commit creation
          (Board.Post_publication_failure.Raised exn))
 
-(* task-4036: a posts refusal caused by another writer moving the file is
-   cleared by one fresh read before the operation; it never refuses forever.
-   Called only at operation entry, outside every Board lock. *)
+(* task-4036, #55449: a refusal of any Board source caused by another writer
+   moving its file is cleared by one fresh read before the operation; it never
+   refuses until a restart. Every write starts from this store, and so does
+   every read that a refused source would refuse. A read that serves the
+   loaded posts either way starts from [backend ()]. Called only at operation
+   entry, outside every Board lock. *)
 let reobserved_backend () =
   let store = backend () in
-  (match Board.reobserve_posts store with
-   | Ok () -> ()
-   | Error error ->
-     Log.BoardLog.warn "board posts source stays unavailable after reobservation: %s"
-       (Board_types.show_board_error error));
+  List.iter
+    (fun (source, error) ->
+       Log.BoardLog.warn "board source %s stays unavailable after reobservation: %s"
+         (Board_paths.store_file_path store source) (Board_types.show_board_error error))
+    (Board.reobserve store);
   store
 
 (* task-4036: the one entry for a write to an existing post row.  It takes the
@@ -655,10 +658,10 @@ let read_post_unchecked ~post_id =
   let store = backend () in Board.read_post store ~post_id
 
 let read_post_for_evidence_unchecked ~post_id =
-  let store = backend () in Board.read_post_for_evidence store ~post_id
+  let store = reobserved_backend () in Board.read_post_for_evidence store ~post_id
 
 let get_comment_parent_for_evidence_unchecked ~comment_id =
-  let store = backend () in
+  let store = reobserved_backend () in
   match Board.get_comment store ~comment_id with
   | Error _ as error -> error
   | Ok comment ->
@@ -808,7 +811,7 @@ let current_post_cursor () =
   let store = backend () in Board.current_post_cursor store
 
 let read_comments_unchecked ~post_id =
-  let store = backend () in Board.read_comments store ~post_id
+  let store = reobserved_backend () in Board.read_comments store ~post_id
 
 let read_comments ~reader ~post_id =
   match read_post ~reader ~post_id with
@@ -828,7 +831,7 @@ let require_persisted_sources_readable () =
           Board.board_error_of_read_error (Board.Read_source_unavailable error))
 
 let get_post_and_comments_unchecked ~post_id =
-  let store = backend () in
+  let store = reobserved_backend () in
       Board.read_post_and_comments store ~post_id
       |> Result.map_error Board.board_error_of_read_error
 
@@ -903,7 +906,7 @@ let add_comment ~reader ~post_id ~author ~content ?parent_id ?ttl_hours ?attachm
   |> Result.map fst
 
 let current_vote_for_post ~reader ~voter ~post_id =
-  let store = backend () in
+  let store = reobserved_backend () in
   Board_core_persist.maybe_sweep store;
   match Board.Post_id.of_string_for_read post_id with
   | Error read_err -> Error (Board.board_error_of_read_error read_err)
@@ -975,7 +978,7 @@ let vote ~reader ~voter ~post_id ~direction =
   result
 
 let current_vote_for_comment ~reader ~voter ~comment_id =
-  let store = backend () in
+  let store = reobserved_backend () in
   match Board.get_comment store ~comment_id with
   | Error _ as error -> error
   | Ok comment ->
@@ -1119,12 +1122,13 @@ let toggle_reaction ~reader ~target_type ~target_id ~user_id ~emoji =
   Result.map (fun (reaction : Board.reaction_toggle_result) -> { post_id = reaction.post_id; reaction }) result
 
 let list_reactions ~reader ~target_type ~target_id ?user_id () =
+  let store = reobserved_backend () in
   match require_readable_target ~reader ~target_type ~target_id with
   | Error _ as error -> error
-  | Ok () -> let store = backend () in Board.list_reactions store ~target_type ~target_id ?user_id ()
+  | Ok () -> Board.list_reactions store ~target_type ~target_id ?user_id ()
 
 let list_reactions_batch ~reader ~targets ?user_id () =
-  let store = backend () in
+  let store = reobserved_backend () in
   Board_core_persist.maybe_sweep store;
   let user_id = Board_reactions.normalize_reaction_user_id user_id in
   (* Parse target IDs up front (pure CPU, no locks) so invalid IDs are skipped
@@ -1383,18 +1387,18 @@ let sub_board_for_reader ~reader (board : Board.sub_board) =
     { board with post_count })
 
 let create_sub_board ~reader ~slug ~name ~description ~owner ?members ?access () =
-  let store = backend () in
+  let store = reobserved_backend () in
       Board.create_sub_board store ~slug ~name ~description ~owner ?members ?access ()
       |> Result.map (sub_board_for_reader ~reader)
 
 let get_sub_board ~reader ~sub_board_id =
-  let store = backend () in
+  let store = reobserved_backend () in
     Board.get_sub_board store ~sub_board_id |> Result.map (fun (board : Board.sub_board) ->
       let counts = list_hearths ~reader () in
       { board with post_count = (match List.assoc_opt board.slug counts with None -> 0 | Some count -> count) })
 
 let list_sub_boards ~reader () =
-  let store = backend () in
+  let store = reobserved_backend () in
   Board.read_sub_boards store |> Result.map (fun boards ->
     let counts = list_hearths ~reader () in
     List.map (fun (board : Board.sub_board) ->
@@ -1410,5 +1414,6 @@ let delete_sub_board ~authorization ~sub_board_id =
   | Error _ as refused -> refused
 
 let update_sub_board ~reader ~sub_board_id ?name ?description ?members ?access () =
-  let store = backend () in Board.update_sub_board store ~sub_board_id ?name ?description ?members ?access ()
+  let store = reobserved_backend () in
+  Board.update_sub_board store ~sub_board_id ?name ?description ?members ?access ()
       |> Result.map (sub_board_for_reader ~reader)

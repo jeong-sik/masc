@@ -9,6 +9,7 @@ let reload_votes store =
   | Error _ -> Error (Io_error "Board data is unavailable.")
 
 let reobserve_posts = Board_store_load.reobserve_posts
+let reobserve = Board_store_load.reobserve
 
 let reload_reactions store =
   match Board_store_load.load_persisted_reactions store with

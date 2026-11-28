@@ -52,6 +52,11 @@ val reobserve_posts : store -> (unit, board_error) result
 (** See {!Board_store_load.reobserve_posts}. Call outside persistence before a
     Board operation so a stale posts observation does not refuse it. *)
 
+val reobserve : store -> (Board_paths.persisted_file * board_error) list
+(** See {!Board_store_load.reobserve}: the posts read and the same for the
+    comments, votes, reactions and sub-board policy sources. Call outside
+    persistence before a Board operation. *)
+
 (** {1 Voting} *)
 
 val current_vote_for_post :

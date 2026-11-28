@@ -20,20 +20,23 @@ already holds `masc-pele`, so a local masc install leaves masc-tui and the
 helper on one checkout. A prefix without `masc-pele` gets none.
 
 The helper reads one JSON request from stdin and writes PNG bytes to stdout.
-`format` is `mermaid`, `svg`, or `graph`; unknown and missing formats fail explicitly.
+`format` is `mermaid`, `svg`, `graph`, or `chart`; unknown and missing formats fail explicitly.
 `source` is the retained markup and `maxWidth` is the current available pixel
 width. Optional `colors` contains observed `foreground` and `background` as
 six-digit RGB hex strings. Without an observed palette, the standalone preview
 uses Pele's light defaults. Failure writes diagnostics to stderr and exits
 nonzero without an image. The caller retains source and owns preview selection.
 
-The TUI requests `protocol: 1`. For that request the helper frames stdout as
-`masc-pele-protocol:1` and a newline, followed by PNG bytes on success. A
+The TUI requests `protocol: 2`. For that request the helper frames stdout as
+`masc-pele-protocol:2` and a newline, followed by PNG bytes on success. A
 rendering failure can still emit the receipt but no PNG; diagnostics remain on
 stderr and the exit status is nonzero. The TUI requires the receipt before
 using a successful image, so an older helper cannot silently ignore SVG,
 layout, or raster fields. Requests without `protocol` keep the ordinary
-command-line interface; other protocol versions are rejected.
+command-line interface; other protocol versions are rejected. Version 2 is the
+first protocol whose contract includes `chart`. A version-1 helper rejects the
+TUI's request without a receipt, so the TUI's render error names
+`scripts/install-pele.sh`.
 
 Optional `fontSize` is a positive safe integer (default `16`) describing the
 physical text density. Pele lays out at its logical default of 16 with available

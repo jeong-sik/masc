@@ -40,7 +40,7 @@ type response =
   | Confirmed of string
   | Unconfirmed
 
-let protocol_version = 1
+let protocol_version = 2
 let protocol_receipt = Printf.sprintf "masc-pele-protocol:%d" protocol_version
 let default_timeout_s = 10.0
 

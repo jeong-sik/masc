@@ -95,7 +95,7 @@ let test_document_preview_transfer_budget () =
         (fun () ->
           write_file png_path (Base64.decode_exn mermaid);
           write_file script
-            (Printf.sprintf "#!/bin/sh\nprintf 'masc-pele-protocol:1\\n'\nexec cat %s\n"
+            (Printf.sprintf "#!/bin/sh\nprintf 'masc-pele-protocol:2\\n'\nexec cat %s\n"
                (Filename.quote png_path));
           Unix.chmod script 0o700;
           Unix.putenv "PATH" (base_path ^ ":" ^ Option.value original_path ~default:"/usr/bin:/bin");
@@ -250,7 +250,7 @@ let test_retained_preview_recovers () =
   check int "subsequent image loads after earlier fetch exception" 1
     (List.length placements)
 
-let test_pele_confirmed_protocol_v1 () =
+let test_pele_confirmed_protocol_v2 () =
   with_cache (fun cache_dir ->
       let palette =
         Palette.of_responses
@@ -265,11 +265,11 @@ let test_pele_confirmed_protocol_v1 () =
 
       let rendered, request =
         run_probe ~cache_dir ~ending:(Pele.Exited (Unix.WEXITED 0))
-          ~stderr:"node warning\n" ~stdout:"masc-pele-protocol:1\npng"
+          ~stderr:"node warning\n" ~stdout:"masc-pele-protocol:2\npng"
       in
       check (result string string) "confirmed image" (Ok "png") rendered;
       let open Yojson.Safe.Util in
-      check int "protocol version" 1 (request |> member "protocol" |> to_int);
+      check int "protocol version" 2 (request |> member "protocol" |> to_int);
       check string "format mermaid" "mermaid"
         (request |> member "format" |> to_string);
       check int "raster width" 320
@@ -282,7 +282,7 @@ let test_pele_confirmed_protocol_v1 () =
       let svg_req = ref None in
       let runner ~input ~output ~errors =
         svg_req := Some (Yojson.Safe.from_file input);
-        write_file output "masc-pele-protocol:1\nsvg-png";
+        write_file output "masc-pele-protocol:2\nsvg-png";
         write_file errors "";
         Pele.Exited (Unix.WEXITED 0)
       in
@@ -302,7 +302,7 @@ let test_pele_confirmed_protocol_v1 () =
       let graph_req = ref None in
       let graph_runner ~input ~output ~errors =
         graph_req := Some (Yojson.Safe.from_file input);
-        write_file output "masc-pele-protocol:1\ngraph-png";
+        write_file output "masc-pele-protocol:2\ngraph-png";
         write_file errors "";
         Pele.Exited (Unix.WEXITED 0)
       in
@@ -322,9 +322,9 @@ let test_pele_unconfirmed_and_errors () =
           check bool "unconfirmed output rejected" true (Result.is_error result))
         [
           "\137PNG\r\n\026\nraw";
-          "masc-pele-protocol:1";
-          "masc-pele-protocol:2\npng";
-          "noise\nmasc-pele-protocol:1\npng";
+          "masc-pele-protocol:2";
+          "masc-pele-protocol:1\npng";
+          "noise\nmasc-pele-protocol:2\npng";
         ];
 
       let check_error stdout =
@@ -339,7 +339,7 @@ let test_pele_unconfirmed_and_errors () =
             message
         | Ok _ -> fail "failed renderer returned an image"
       in
-      let confirmed = check_error "masc-pele-protocol:1\n" in
+      let confirmed = check_error "masc-pele-protocol:2\n" in
       let unconfirmed = check_error "" in
       check bool "confirmed vs unconfirmed error distinct" true
         (not (String.equal confirmed unconfirmed));
@@ -347,7 +347,7 @@ let test_pele_unconfirmed_and_errors () =
       (* Empty stderr on confirmed non-zero exit omits trailing ": " *)
       (match
          run_probe ~cache_dir ~ending:(Pele.Exited (Unix.WEXITED 2))
-           ~stderr:"  \n" ~stdout:"masc-pele-protocol:1\n"
+           ~stderr:"  \n" ~stdout:"masc-pele-protocol:2\n"
        with
        | Error msg, _ -> check string "no trailing colon on empty stderr" "Pele exited 2" msg
        | Ok _, _ -> fail "expected error on exit 2");
@@ -356,7 +356,7 @@ let test_pele_unconfirmed_and_errors () =
       let huge_stderr = "\x1b[31mboom\x1b[0m\n" ^ String.make 5000 'x' in
       (match
          run_probe ~cache_dir ~ending:(Pele.Exited (Unix.WEXITED 1))
-           ~stderr:huge_stderr ~stdout:"masc-pele-protocol:1\n"
+           ~stderr:huge_stderr ~stdout:"masc-pele-protocol:2\n"
        with
        | Error msg, _ ->
            check bool "stderr bounded under 2200 bytes" true
@@ -369,14 +369,14 @@ let test_pele_unconfirmed_and_errors () =
 
       let empty, _ =
         run_probe ~cache_dir ~ending:(Pele.Exited (Unix.WEXITED 0)) ~stderr:""
-          ~stdout:"masc-pele-protocol:1\n"
+          ~stdout:"masc-pele-protocol:2\n"
       in
       check bool "empty pixels rejected" true (Result.is_error empty);
 
       let killed ending =
         match
           run_probe ~cache_dir ~ending ~stderr:""
-            ~stdout:"masc-pele-protocol:1\npartial"
+            ~stdout:"masc-pele-protocol:2\npartial"
         with
         | Error message, _ -> message
         | Ok _, _ -> fail "killed renderer returned an image"
@@ -864,8 +864,8 @@ let () =
             `Quick test_document_preview_transfer_budget;
           test_case "visible retained previews retry without occupying the fetch slot"
             `Quick test_retained_preview_recovers;
-          test_case "protocol v1 confirmed Mermaid/Svg/Graph + palette colors"
-            `Quick test_pele_confirmed_protocol_v1;
+          test_case "protocol v2 confirmed Mermaid/Svg/Graph + palette colors"
+            `Quick test_pele_confirmed_protocol_v2;
           test_case "unconfirmed output, errors, deadline & cancellation" `Quick
             test_pele_unconfirmed_and_errors;
           test_case "process_runner missing binary & non-protocol output" `Quick

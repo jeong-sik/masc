@@ -2,7 +2,7 @@
 import { readFileSync } from 'node:fs';
 import { renderDocument } from './engine.mjs';
 
-const protocolVersion = 1;
+const protocolVersion = 2;
 
 if (process.argv.length === 3 && process.argv[2] === '--help') {
   console.log('masc-pele: read {format:mermaid|svg|graph|chart,source,maxWidth,fontSize?,now?,colors?,raster?:{width,height,crop?:{left,top,right,bottom}}} JSON from stdin; write PNG to stdout');

@@ -155,7 +155,7 @@ let run_phase ~child root =
      on_execution_settled=(fun ~keeper_name:_ ~claimed_operation_id:_ ~operations:_ ~execution ->
        Eio.Promise.resolve resolve_settled execution)} in
   Registry.install_from_store ~sw ~operation_runner:(Some runner)
-    ~on_turn_slot_released:None workspace |> require "install Owner" |> ignore;
+    workspace |> require "install Owner" |> ignore;
   Keeper_direct_native_continuation.complete_restart_settlements
     ~runtime:(Runtime_agent_execution_runtime.get () |> Option.get) ~base_path:root
     |> require "complete startup native journal settlement" |> ignore;
@@ -313,7 +313,7 @@ let test_native_input_checkpoint_order ?(fail_before_canonical=false) ~uncertain
      on_execution_settled=(fun ~keeper_name:_ ~claimed_operation_id:_ ~operations:_ ~execution ->
        Eio.Promise.resolve resolve_settled execution)} in
   Registry.install_from_store ~sw ~operation_runner:(Some runner)
-    ~on_turn_slot_released:None workspace |> require "install Owner" |> ignore;
+    workspace |> require "install Owner" |> ignore;
   Keeper_direct_native_continuation.complete_restart_settlements
     ~runtime:(Runtime_agent_execution_runtime.get () |> Option.get) ~base_path:root
     |> require "complete startup native journal settlement" |> ignore;
@@ -436,7 +436,7 @@ let test_retired_input_history_cut () =
   let runner:Owner.operation_runner={ready=(fun ~keeper_name:_ -> true);execute;
     on_execution_settled=(fun ~keeper_name:_ ~claimed_operation_id:_ ~operations:_ ~execution ->
       Eio.Promise.resolve resolve_settled execution)} in
-  Registry.install_from_store ~sw ~operation_runner:(Some runner) ~on_turn_slot_released:None workspace
+  Registry.install_from_store ~sw ~operation_runner:(Some runner) workspace
     |> require "install Owner" |> ignore;
   Keeper_direct_native_continuation.complete_restart_settlements
     ~runtime:(Runtime_agent_execution_runtime.get () |> Option.get) ~base_path:root

@@ -176,7 +176,7 @@ let stop_while_dispatching env ~root ~workspace ~session_dir ~cancel_hook ~settl
     {ready=(fun ~keeper_name:_ -> true); execute;
      on_execution_settled=(fun ~keeper_name:_ ~claimed_operation_id:_ ~operations:_ ~execution:_ -> ())} in
   Registry.install_from_store ~sw ~operation_runner:(Some runner)
-    ~on_turn_slot_released:None workspace |> require "install Owner" |> ignore;
+    workspace |> require "install Owner" |> ignore;
   Keeper_direct_native_continuation.complete_restart_settlements
     ~runtime:(Runtime_agent_execution_runtime.get () |> Option.get) ~base_path:root
     |> require "complete startup native journal settlement" |> ignore;
@@ -289,7 +289,7 @@ let stop_while_dispatching env ~root ~workspace ~session_dir ~cancel_hook ~settl
    the stopped one left Running. No runner, so nothing claims a requeued row. *)
 let after_restart ~root ~workspace =
   Eio.Switch.run @@ fun sw ->
-  Registry.install_from_store ~sw ~operation_runner:None ~on_turn_slot_released:None
+  Registry.install_from_store ~sw ~operation_runner:None
     workspace |> require "reinstall Owner" |> ignore;
   Keeper_direct_native_continuation.complete_restart_settlements
     ~runtime:(Runtime_agent_execution_runtime.get () |> Option.get) ~base_path:root

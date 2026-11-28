@@ -113,7 +113,10 @@ let read store = match store.reactions_source with
         unavailable (Reactions_workspace_refused rejection)
       | Ok before ->
         let path = source_path store in
-        match Fs_compat.private_jsonl_snapshot_success_receipt (read_file store path) with
+        let seen, received = Source_file.around_read store.reactions_source_seen ~path (fun () ->
+          Fs_compat.private_jsonl_snapshot_success_receipt (read_file store path)) in
+        store.reactions_source_seen <- seen;
+        match received with
         | Error error ->
           diagnostics := [Reaction_file_diagnostic error];
           saw_present := Fs_compat.private_jsonl_transaction_error_is_incomplete_tail error;
@@ -195,14 +198,17 @@ let rec contradicts_observation = function
 
 (* #55449: a refusal that one more read of the same file can end is read
    again before the next operation, as the posts source is (task-4036). A
-   refusal for any other reason is not: the file would refuse again. *)
+   refusal for any other reason is read again once the file has changed since
+   this store last read it (#55465). *)
 let stale_observation = function
   | Reactions_transaction_failed error -> Board_posts_source.fresh_read_can_clear error
   | Reactions_not_observed | Reactions_rows_rejected _ | Reactions_missing | Reactions_binding_mismatch
   | Reactions_publication_pending | Reactions_workspace_refused _ | Reactions_raised _ -> false
 
 let reobservation_due store = match store.reactions_source with
-  | Reactions_refused { reaction_failure; _ } -> stale_observation reaction_failure
+  | Reactions_refused { reaction_failure; _ } ->
+    stale_observation reaction_failure
+    || Source_file.changed_since store.reactions_source_seen ~path:(source_path store)
   | Reactions_unobserved | Reactions_readable _ | Reactions_publishing _ | Reactions_unsettled _ -> false
 
 let not_written failure diagnostics = Not_written { failure; diagnostics }

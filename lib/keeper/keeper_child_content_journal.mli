@@ -55,7 +55,8 @@ val open_reader : base_path:string -> keeper_name:string -> receiver_generation:
 val reader_of_publication : publication -> reader
 val path : reader -> string
 val read : ?after:cursor -> reader -> snapshot outcome
-(** READONLY/no creation. Full semantic scope/key/sequence audit in one snapshot
+(** Opens with [Sqlite_file.open_reader (Owned Delete)]: read-write with
+    [PRAGMA query_only=1], no creation. Full semantic scope/key/sequence audit in one snapshot
     before suffix return; cursor must match actual store incarnation. Every row
     matches captured workspace/Keeper and all three ticket fields. This is not an
     automatic polling API: future repeated polling needs separate unchecked hints.
@@ -68,7 +69,7 @@ type change_hint = private { store_id : string; through_sequence : int }
     payload/sequence audit, quick_check, validation or liveness/completeness proof.
     Same hint can conceal semantic tampering; never clears a prior audit failure. *)
 val read_hint : reader -> change_hint outcome
-(** READONLY/no creation, existing typed failure and separate cleanup contract. *)
+(** Opens like {!read}, no creation, existing typed failure and separate cleanup contract. *)
 type discovery_entry = { receiver : receiver; state : (validation,error) result }
 type hint_entry = { receiver : receiver; state : (change_hint,error) result }
 val discover : base_path:string -> keeper_name:string -> discovery_entry list outcome

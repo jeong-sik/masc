@@ -163,10 +163,15 @@ let validate_candidate db cleanup =
     let* id = scalar db cleanup "PRAGMA application_id" |> fun result -> Result.bind result integer in
     let* version = scalar db cleanup "PRAGMA user_version" |> fun result -> Result.bind result integer in
     if id=0L && version=0L then Ok true else corrupt "empty store has foreign identity"
+(* The writer sets this journal and reads open with it. *)
+let sqlite_journal = Sqlite_file.Delete
+(* HIGH-RISK-UNREVIEWED: the journal mode decides how reads open this file (#36195). *)
 let configure db cleanup =
   let* () = exec db "immediate busy refusal" "PRAGMA busy_timeout=0" in
-  let* mode = scalar db cleanup "PRAGMA journal_mode=DELETE" |> fun result -> Result.bind result text in
-  let* () = if String.lowercase_ascii mode="delete" then Ok () else corrupt "DELETE journaling unavailable" in
+  let* () = Sqlite_file.set_journal db sqlite_journal |> Result.map_error (function
+    | Sqlite_file.Journal_pragma_failed detail -> sql_error ~operation:"journal mode" ~detail
+    | Sqlite_file.Journal_kept _ as refused ->
+        Corrupt {seq=0;detail=Sqlite_file.journal_error_to_string refused}) in
   let* () = exec db "durable synchronous mode" "PRAGMA synchronous=EXTRA" in
   let* mode = scalar db cleanup "PRAGMA synchronous" |> fun result -> Result.bind result integer in
   if mode=3L then Ok () else corrupt "EXTRA durability unavailable"
@@ -273,7 +278,8 @@ let with_database ?(io=sqlite_io) ~create reader f = protect_io (fun () ->
   let result =
     Keeper_sqlite_observation_io.with_database ~label:"child-content-sqlite"
       ~before_open:(fun () -> regular_file ~create reader.path) ~error:sql_error
-      ~on_cleanup:(cleanup_report cleanup) ~close:io.close ~create ~path:reader.path
+      ~on_cleanup:(cleanup_report cleanup) ~close:io.close ~journal:sqlite_journal ~create
+      ~path:reader.path
       (fun db -> f db cleanup) in
   {result;cleanup_failure=List.rev !cleanup})
 

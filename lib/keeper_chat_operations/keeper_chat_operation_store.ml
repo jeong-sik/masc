@@ -788,6 +788,11 @@ let validate_saved_state db =
       loop ())
 ;;
 
+(* The Owner writes this file and inspections read it with this journal. *)
+let sqlite_journal = Sqlite_file.Delete
+
+(* HIGH-RISK-UNREVIEWED: the journal mode decides how inspections open this
+   file (#36195). *)
 let configure db =
   (* Boot opens several stores at once; a sibling writer holding the lock for
      a moment must be waited out. Without this, the first concurrent commit
@@ -795,12 +800,9 @@ let configure db =
      process (install smoke, 2026-09-14). Same contract as
      keeper_tool_call_index and tool_metrics_store. *)
   let* () = exec db ~operation:"set busy timeout" "PRAGMA busy_timeout=5000" in
-  let* journal_mode =
-    single_text db ~operation:"set DELETE journal mode" "PRAGMA journal_mode=DELETE"
-  in
-  if not (String.equal (String.lowercase_ascii journal_mode) "delete")
-  then Error (Store_unavailable "SQLite refused journal_mode=DELETE")
-  else
+  match Sqlite_file.set_journal db sqlite_journal with
+  | Error error -> Error (Store_unavailable (Sqlite_file.journal_error_to_string error))
+  | Ok () ->
     (* DELETE-mode commit unlinks its rollback journal. EXTRA also syncs that
        directory; FULL alone may lose the last commit after power loss.
        See https://www.sqlite.org/pragma.html#pragma_synchronous. *)
@@ -1230,24 +1232,15 @@ let read_batch_member_inputs db =
       in read [])
 ;;
 
-(* The inspection opens the file read-write and sets query_only; it never
-   opens it READONLY. The Owner writes this file from the same process, and
-   with the macOS system SQLite (/usr/lib/libsqlite3, 3.54.0, built with
-   ENABLE_SETLK_TIMEOUT) a READONLY connection that took the file's shared
-   lock first makes the Owner's RESERVED lock fail with EBADF. The Owner then
-   sees SQLITE_IOERR_LOCK (3850) on BEGIN IMMEDIATE and fences its chat
-   (#36195). A read-write connection in the same place lets the lock through,
-   and query_only refuses any write this connection would make. *)
+(* HIGH-RISK-UNREVIEWED: every inspection of the Owner's file opens through
+   Sqlite_file.open_reader (#36195). *)
 let inspect_file ~path inspect =
   let inspect_existing () =
-    match Sqlite3.db_open ~mode:`NO_CREATE path with
-    | exception Sqlite3.Error detail -> Error (Store_unavailable detail)
-    | db ->
+    match Sqlite_file.open_reader (Sqlite_file.Owned sqlite_journal) path with
+    | Error detail -> Error (Store_unavailable detail)
+    | Ok db ->
       let result =
-        try
-          let* () = exec db ~operation:"set query-only inspection" "PRAGMA query_only=1" in
-          inspect db
-        with
+        try inspect db with
         | Sqlite3.Error detail -> Error (Store_unavailable detail)
       in
       if close_db db then result

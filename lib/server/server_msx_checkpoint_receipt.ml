@@ -65,17 +65,22 @@ let transaction db f =
   Fun.protect ~finally:(fun () ->
     if not !committed then ignore_sqlite_cleanup (fun () -> Sqlite3.exec db "ROLLBACK"))
     (fun () -> let* value = f () in let* () = exec db "COMMIT" in committed := true; Ok value)
-(* A read opens the file read-write with query_only, never READONLY: a write
-   runs in this same process, and with the macOS system SQLite a READONLY
-   connection holding the shared lock makes that write's lock fail as
-   SQLITE_IOERR_LOCK (#36195, see Keeper_chat_operation_store.inspect_file). *)
+(* Receipts are written and read with this journal. *)
+let sqlite_journal = Sqlite_file.Delete
+(* HIGH-RISK-UNREVIEWED: a read opens through Sqlite_file.open_reader, the
+   writer sets the same journal (#36195). *)
 let with_db ?(create=false) ~write ~path f =
   try
-    let db = if create then Sqlite3.db_open path
-      else Sqlite3.db_open ~mode:`NO_CREATE path in
+    let* db =
+      if not write then
+        Sqlite_file.open_reader (Sqlite_file.Owned sqlite_journal) path
+        |> Result.map_error (fun message -> Store_unavailable message)
+      else Ok (if create then Sqlite3.db_open path else Sqlite3.db_open ~mode:`NO_CREATE path) in
     Fun.protect ~finally:(fun () -> ignore_sqlite_cleanup (fun () -> Sqlite3.db_close db)) (fun () ->
       if write then begin
-        let* () = exec db "PRAGMA journal_mode=DELETE" in
+        let* () = Sqlite_file.set_journal db sqlite_journal
+          |> Result.map_error (fun error ->
+            Store_unavailable (Sqlite_file.journal_error_to_string error)) in
         let* () = exec db "PRAGMA synchronous=EXTRA" in
         let* () = statement db "PRAGMA synchronous" [] (fun stmt ->
           if Sqlite3.step stmt = Sqlite3.Rc.ROW && Sqlite3.column_int stmt 0 = 3
@@ -88,7 +93,6 @@ let with_db ?(create=false) ~write ~path f =
             else validate_schema db in
           f db)
       end else
-        let* () = exec db "PRAGMA query_only=1" in
         let* () = validate_schema db in f db)
   with
   | Sqlite3.Error message | Sqlite3.SqliteError message | Sqlite3.DataTypeError message

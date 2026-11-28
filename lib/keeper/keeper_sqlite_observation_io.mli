@@ -20,12 +20,13 @@ val bind : error:(operation:string -> detail:string -> 'e) ->
 val with_database : label:string -> before_open:(unit -> (unit, 'e) result) ->
   error:(operation:string -> detail:string -> 'e) ->
   on_cleanup:(operation:string -> detail:string -> unit) ->
-  close:(Sqlite3.db -> bool) -> create:bool -> path:string ->
+  close:(Sqlite3.db -> bool) -> journal:Sqlite_file.journal -> create:bool -> path:string ->
   (Sqlite3.db -> ('a, 'e) result) -> ('a, 'e) result
 (** Runs blocking database work in a systhread, closes its exact handle, retains
     cleanup separately from the returned result and does not swallow cancellation.
     Caller supplies pre-open/path/scope validation, run inside the same systhread. No leaf-open continuity claim.
-    [create:false] opens the existing file read-write with [PRAGMA query_only=1], not READONLY (#36195). *)
+    [journal] is the mode the store's writer sets. [create:false] opens the
+    existing file with [Sqlite_file.open_reader (Owned journal)]. *)
 val commit : error:(operation:string -> detail:string -> 'e) ->
   unconfirmed:(string -> 'e) -> show_error:('e -> string) ->
   commit:(Sqlite3.db -> Sqlite3.Rc.t) -> Sqlite3.db -> (unit, 'e) result

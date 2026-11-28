@@ -35,17 +35,20 @@ let bind ~error db stmt values =
         if Sqlite3.Rc.is_success rc then loop (index+1) rest
         else Error (sqlite_error error db "bind" rc) in
   loop 1 values
-let with_database ~label ~before_open ~error ~on_cleanup ~close ~create ~path f =
+(* HIGH-RISK-UNREVIEWED: a read opens through Sqlite_file.open_reader with the
+   journal the store's writer sets (#36195). *)
+let with_database ~label ~before_open ~error ~on_cleanup ~close ~journal ~create ~path f =
   Eio_guard.run_in_systhread ~label (fun () ->
     match before_open () with
     | Error error -> Error error
     | Ok () ->
-    (* A read opens the file read-write with query_only, never READONLY: the
-       journal's writes run in this same process, and with the macOS system
-       SQLite a READONLY connection holding the shared lock makes a write's
-       lock fail as SQLITE_IOERR_LOCK (#36195, see
-       Keeper_chat_operation_store.inspect_file). *)
-    let db=if create then Sqlite3.db_open path else Sqlite3.db_open ~mode:`NO_CREATE path in
+    let opened =
+      if create then Ok (Sqlite3.db_open path)
+      else Sqlite_file.open_reader (Sqlite_file.Owned journal) path
+        |> Result.map_error (fun detail -> error ~operation:"open reader" ~detail) in
+    match opened with
+    | Error failure -> Error failure
+    | Ok db ->
     Fun.protect ~finally:(fun () ->
       (match close db with
        | true -> ()
@@ -54,14 +57,8 @@ let with_database ~label ~before_open ~error ~on_cleanup ~close ~create ~path f 
            on_cleanup ~operation:"close" ~detail);
       ignore (Sys.opaque_identity db)) (fun () ->
         if create then Unix.chmod path 0o600;
-        let query_only =
-          if create then Ok ()
-          else exec ~error db ~operation:"query only" "PRAGMA query_only=1" in
-        match query_only with
-        | Error failure -> Error failure
-        | Ok () ->
-          (try f db with (Sqlite3.Error detail | Sqlite3.SqliteError detail) ->
-            Error (error ~operation:"SQLite" ~detail))))
+        try f db with (Sqlite3.Error detail | Sqlite3.SqliteError detail) ->
+          Error (error ~operation:"SQLite" ~detail)))
 let commit ~error ~unconfirmed ~show_error ~commit db =
   match commit db with
   | rc when Sqlite3.Rc.is_success rc -> Ok ()

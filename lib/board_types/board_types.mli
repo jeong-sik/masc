@@ -549,6 +549,45 @@ type flusher_msg =
   | Flush
   | Sweep
 
+(** What the directory said of a source's file and of the lock file its
+    transactions take, when a read of that source began (#55465).
+
+    A refused source is read again once either entry differs from the pair
+    its refusal carries. Only the types live here: [Board_source_file] in the
+    Board library takes the entries and compares them. *)
+module Source_file : sig
+  type entry =
+    | Absent  (** [lstat] found nothing at the path. *)
+    | Present of {
+        kind : Unix.file_kind;
+        permissions : int;
+        device : int;
+        inode : int;
+        size : int;
+        modified : float;
+        links : int;
+      }
+    | Uninspected of Unix.error
+    (** [lstat] failed for another reason than a missing entry. Two such
+        entries are the same when the error is. *)
+
+  type entries = { data : entry; lock : entry }
+  (** [lstat] of the source's file and of its lock file. Neither is followed
+      when it is a symbolic link. *)
+
+  type seen =
+    | Unread
+    (** The refusal was not made by a read that took the entries: a write, a
+        guard or a check refused the store, or a read was stopped before its
+        first step. Such a source is read again at the next call. *)
+    | Read_at of entries
+    (** A read made the refusal. The entries were taken as the first step of
+        that read, before the workspace was observed and before any lock, so
+        a change during the read shows as a change afterwards. The first
+        transaction on a file creates its lock file, which is such a change:
+        a source that read refused is read once more. *)
+end
+
 type posts_source_observation = {
   source_path : string;
   snapshot : Fs_compat.private_jsonl_snapshot;
@@ -624,6 +663,7 @@ type posts_source_state =
       last_observed : posts_source_history;
       failure : posts_source_failure;
       diagnostics : posts_source_diagnostic list;
+      seen : Source_file.seen;
     }
   | Posts_unsettled of {
       last_observed : posts_source_history;
@@ -648,16 +688,19 @@ type posts_source_read =
       observation : posts_source_observation;
       posts : post list;
       diagnostics : posts_source_diagnostic list;
+      entries : Source_file.entries;
     }
   | Posts_partial of {
       observation : posts_source_observation;
       posts : post list;
       errors : posts_row_error list;
       diagnostics : posts_source_diagnostic list;
+      entries : Source_file.entries;
     }
   | Posts_unavailable of {
       failure : posts_source_failure;
       diagnostics : posts_source_diagnostic list;
+      seen : Source_file.seen;
     }
 
 type posts_source_io = {
@@ -749,6 +792,7 @@ type comments_source_state =
       last_observed : comments_source_history;
       failure : comments_source_failure;
       diagnostics : comments_source_diagnostic list;
+      seen : Source_file.seen;
     }
   | Comments_unsettled of {
       pending : comments_unsettled_write;
@@ -814,6 +858,7 @@ type sub_boards_source_state =
       policy_history : sub_boards_source_history;
       policy_failure : sub_boards_source_failure;
       policy_diagnostics : sub_boards_source_diagnostic list;
+      policy_seen : Source_file.seen;
     }
   | Policy_unsettled of {
       policy_pending : sub_boards_pending_write;
@@ -878,6 +923,7 @@ type reactions_source_state =
       reaction_history : reactions_source_history;
       reaction_failure : reactions_source_failure;
       reaction_diagnostics : reactions_source_diagnostic list;
+      reaction_seen : Source_file.seen;
     }
   | Reactions_unsettled of {
       reaction_pending : reactions_pending_write;
@@ -1056,6 +1102,7 @@ type votes_source_state =
       vote_history : votes_source_history;
       vote_failure : votes_source_failure;
       vote_diagnostics : votes_source_diagnostic list;
+      vote_seen : Source_file.seen;
     }
   | Votes_unsettled of {
       vote_pending : votes_pending_write;
@@ -1066,50 +1113,11 @@ type votes_source_state =
     until model publication is acknowledged. Unknown writes and unfinished
     publication require a fresh store; an ordinary reload cannot clear them. *)
 
-(** Whether a source's file is still the one this store last read (#55465).
-
-    A refused source is read again once its file has changed. A store keeps,
-    for each source, the directory entry its last read saw; nothing here takes
-    a lock or opens a file. *)
-module Source_file : sig
-  type seen
-  (** The directory entry at a source's path when this store last read the
-      file: device, inode, size, modification time and link count, or its
-      absence. *)
-
-  val never_seen : seen
-  (** No read of this store has seen the file. *)
-
-  val around_read :
-    seen -> path:string ->
-    (unit -> ('a, Fs_compat.private_jsonl_transaction_error) result) ->
-    seen * ('a, Fs_compat.private_jsonl_transaction_error) result
-  (** Run one read of [path] and return what the store has seen after it. The
-      entry is taken by one [lstat] before the read, so a change during the
-      read shows as a change afterwards. A read that returned the file, or
-      refused it for what the file is (a torn last line, a second hard link,
-      not a regular file), saw that entry. A read that failed before that (a
-      contended lock, a failed operation, a lock file in a wrong state) keeps
-      the earlier [seen]. An exception of [read] passes through. *)
-
-  val changed_since : seen -> path:string -> bool
-  (** Whether the entry at [path] differs from the one last seen. [true]
-      without IO when no read has seen the file; otherwise one [lstat], on the
-      system thread {!Fs_compat.Systhread_host.run} picks, or in place outside
-      Eio. An entry that cannot be inspected counts as changed. *)
-end
-
 type store = {
   (** Canonical posts observation/refusal/uncertainty, owned by persist_mutex.
       Successful loads and writes advance it; dirty cards need not equal its bytes. *)
   mutable posts_source : posts_source_state;
   posts_source_io : posts_source_io;
-  (** The entry each source's last read saw, owned by persist_mutex. *)
-  mutable posts_source_seen : Source_file.seen;
-  mutable comments_source_seen : Source_file.seen;
-  mutable sub_boards_source_seen : Source_file.seen;
-  mutable votes_source_seen : Source_file.seen;
-  mutable reactions_source_seen : Source_file.seen;
   (** Comments' source, uncertainty and unfinished model publication are owned
       by persist_mutex; no separate load-success flag grants authority. *)
   mutable comments_source : comments_source_state;

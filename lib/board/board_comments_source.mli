@@ -7,21 +7,25 @@ type read =
       observation : comments_source_observation;
       comments : comment list;
       diagnostics : comments_source_diagnostic list;
+      entries : Source_file.entries;
     }
   | Partial of {
       observation : comments_source_observation;
       comments : comment list;
       errors : comments_row_error list;
       diagnostics : comments_source_diagnostic list;
+      entries : Source_file.entries;
     }
   | Unavailable of {
       failure : comments_source_failure;
       diagnostics : comments_source_diagnostic list;
+      seen : Source_file.seen;
     }
   | Display_only of {
       comments : comment list;
       failure : comments_source_failure;
       diagnostics : comments_source_diagnostic list;
+      entries : Source_file.entries;
     }
 (** Display-only complete prefix rows have no stable snapshot, durability or
     mutation/negative-read authority. A torn tail never permits truncation. *)
@@ -70,12 +74,11 @@ val rewrite : store -> snapshot -> unit write_outcome
     rewrite authority. Proven transient nonwrites retain the prior expectation. *)
 
 val require_readable : store -> (unit, board_error) result
-val reobservation_due : store -> bool
-(** Whether this source is read again, by the rule of
-    {!Board_posts_source.reobservation_due}: it is refused, and either its
-    cause is one {!Board_posts_source.fresh_read_can_clear} accepts (#55449)
-    or its file has changed since this store last read it (#55465). False,
-    without IO, for a pending publication or an unknown write. *)
+val refusal : store -> Board_source_file.refusal
+(** What this source's state says about reading it again, from its fields
+    alone: refused for a cause {!Board_posts_source.fresh_read_can_clear}
+    accepts (#55449), refused for any other cause together with what the
+    refusal saw of the file (#55465), or not refused. *)
 val observe_guard_refusal : store -> comments_source_observation ->
   Fs_compat.private_jsonl_guard_failure -> unit
 (** Notify only this exact current observation after a parent guard refusal.

@@ -197,13 +197,17 @@ let render_comments_snapshot ~base_bytes (table : (string, comment) Hashtbl.t) =
 
 type read =
   | Complete of { observation : comments_source_observation; comments : comment list;
-                  diagnostics : comments_source_diagnostic list }
+                  diagnostics : comments_source_diagnostic list;
+                  entries : Source_file.entries }
   | Partial of { observation : comments_source_observation; comments : comment list;
-                 errors : comments_row_error list; diagnostics : comments_source_diagnostic list }
+                 errors : comments_row_error list; diagnostics : comments_source_diagnostic list;
+                 entries : Source_file.entries }
   | Unavailable of { failure : comments_source_failure;
-                     diagnostics : comments_source_diagnostic list }
+                     diagnostics : comments_source_diagnostic list;
+                     seen : Source_file.seen }
   | Display_only of { comments : comment list; failure : comments_source_failure;
-                      diagnostics : comments_source_diagnostic list }
+                      diagnostics : comments_source_diagnostic list;
+                      entries : Source_file.entries }
 
 type 'a write_outcome =
   | Written of { value : 'a; diagnostics : comments_source_diagnostic list }
@@ -269,13 +273,13 @@ let history = function
   | Comments_refused { last_observed; _ } -> last_observed
   | Comments_unsettled { pending; _ } -> Comments_observed pending.expected
 
-let refuse store failure diagnostics = match store.comments_source with
+let refuse store ~seen failure diagnostics = match store.comments_source with
   | Comments_unsettled _ | Comments_publishing _ | Comments_recovered _ -> ()
   | Comments_unobserved | Comments_readable _ | Comments_refused _ ->
     store.comments_source <- Comments_refused {
-      last_observed = history store.comments_source; failure; diagnostics }
+      last_observed = history store.comments_source; failure; diagnostics; seen }
 
-let refuse_present store failure diagnostics =
+let refuse_present store ~seen failure diagnostics =
   let last_observed = match history store.comments_source with
     | No_comments_observation | Comments_present_without_snapshot -> Comments_present_without_snapshot
     | Comments_observed observation as previous ->
@@ -284,7 +288,7 @@ let refuse_present store failure diagnostics =
   match store.comments_source with
   | Comments_unsettled _ | Comments_publishing _ | Comments_recovered _ -> ()
   | Comments_unobserved | Comments_readable _ | Comments_refused _ ->
-    store.comments_source <- Comments_refused { last_observed; failure; diagnostics }
+    store.comments_source <- Comments_refused { last_observed; failure; diagnostics; seen }
 
 let expected store = match store.comments_source with
   | Comments_readable { observation; _ } ->
@@ -389,24 +393,29 @@ let read_display_prefix store path =
   rows, diagnostics
 
 let read store = match store.comments_source with
-  | Comments_unsettled { failure; _ } -> Unavailable { failure; diagnostics = [] }
-  | Comments_publishing _ -> Unavailable { failure = Comments_publication_pending; diagnostics = [] }
-  | Comments_recovered _ -> Unavailable { failure = Comments_reload_required; diagnostics = [] }
+  | Comments_unsettled { failure; _ } ->
+    Unavailable { failure; diagnostics = []; seen = Source_file.Unread }
+  | Comments_publishing _ ->
+    Unavailable { failure = Comments_publication_pending; diagnostics = []; seen = Source_file.Unread }
+  | Comments_recovered _ ->
+    Unavailable { failure = Comments_reload_required; diagnostics = []; seen = Source_file.Unread }
   | Comments_unobserved | Comments_readable _ | Comments_refused _ ->
     let diagnostics = ref [] and stage = ref Read_comments and saw_present = ref false in
+    let seen = ref Source_file.Unread in
     let unavailable failure =
-      (if !saw_present then refuse_present else refuse) store failure !diagnostics;
-      Unavailable { failure; diagnostics = !diagnostics } in
+      (if !saw_present then refuse_present else refuse) store ~seen:!seen failure !diagnostics;
+      Unavailable { failure; diagnostics = !diagnostics; seen = !seen } in
     try
+      (* #55465: the first step. Whatever this read then meets, its refusal
+         carries what the directory said before it. *)
+      let path = Board_paths.comments_path store in
+      let entries = Board_source_file.inspect ~path in
+      seen := Source_file.Read_at entries;
       match observe_workspace store with
       | Error rejection -> diagnostics := [Comments_workspace_diagnostic rejection];
         unavailable (Comments_workspace_refused rejection)
       | Ok before ->
-        let path = Board_paths.comments_path store in
-        let seen, received = Source_file.around_read store.comments_source_seen ~path (fun () ->
-          Fs_compat.private_jsonl_snapshot_success_receipt (read_file store path)) in
-        store.comments_source_seen <- seen;
-        match received with
+        match Fs_compat.private_jsonl_snapshot_success_receipt (read_file store path) with
         | Error error ->
           diagnostics := [Comments_file_diagnostic error];
           let failure = Comments_transaction_failed error in
@@ -414,7 +423,7 @@ let read store = match store.comments_source with
           then unavailable failure
           else (
             saw_present := true;
-            refuse_present store failure !diagnostics;
+            refuse_present store ~seen:!seen failure !diagnostics;
             match reserved_diagnostics !diagnostics with
             | Some _ -> unavailable failure
             | None ->
@@ -430,8 +439,8 @@ let read store = match store.comments_source with
                 | Ok _ ->
                   stage := Decode_comments;
                   Board_content_diagnostics.emit (List.rev content_diagnostics);
-                  refuse_present store failure !diagnostics;
-                  Display_only { comments = List.rev comments; failure; diagnostics = !diagnostics })
+                  refuse_present store ~seen:!seen failure !diagnostics;
+                  Display_only { comments = List.rev comments; failure; diagnostics = !diagnostics; entries })
         | Ok receipt ->
           diagnostics := receipt_diagnostics receipt.settlement_error;
           saw_present := not (Fs_compat.Private_jsonl_cursor.is_missing receipt.value.cursor);
@@ -487,8 +496,10 @@ let read store = match store.comments_source with
                 | [] ->
                   register_comments_snapshot ~bytes:raw_bytes ~by_id:!by_id
                     ~slices:!slices ~covered_bytes:!covered;
-                  Complete { observation; comments = List.rev !comments; diagnostics = !diagnostics }
-                | errors -> Partial { observation; comments = List.rev !comments; errors; diagnostics = !diagnostics })
+                  Complete { observation; comments = List.rev !comments; diagnostics = !diagnostics; entries }
+                | errors ->
+                  Partial { observation; comments = List.rev !comments; errors; diagnostics = !diagnostics;
+                            entries })
     with exception_ ->
       let backtrace = Printexc.get_raw_backtrace () in
       diagnostics := !diagnostics @ [Comments_raised_diagnostic { stage = !stage; exception_; backtrace }];
@@ -500,28 +511,33 @@ let publish_read store outcome = match store.comments_source with
     match outcome with
     | Complete { observation; diagnostics; _ } ->
       store.comments_source <- Comments_readable { observation; diagnostics }
-    | Partial { observation; errors; diagnostics; _ } ->
+    | Partial { observation; errors; diagnostics; entries; _ } ->
       store.comments_source <- Comments_refused { last_observed = Comments_observed observation;
-        failure = Comments_rows_rejected errors; diagnostics }
-    | Display_only { failure; diagnostics; _ } -> refuse_present store failure diagnostics
-    | Unavailable { failure; diagnostics } -> refuse store failure diagnostics
+        failure = Comments_rows_rejected errors; diagnostics; seen = Source_file.Read_at entries }
+    | Display_only { failure; diagnostics; entries; _ } ->
+      refuse_present store ~seen:(Source_file.Read_at entries) failure diagnostics
+    | Unavailable { failure; diagnostics; seen } -> refuse store ~seen failure diagnostics
 
 let fail_read store outcome ~stage exception_ backtrace =
   let diagnostics = read_diagnostics outcome @ [Comments_raised_diagnostic { stage; exception_; backtrace }] in
   let failure = match outcome with
     | Unavailable { failure; _ } | Display_only { failure; _ } -> failure
     | Complete _ | Partial _ -> Comments_raised { exception_; backtrace } in
+  let seen = match outcome with
+    | Complete { entries; _ } | Partial { entries; _ } | Display_only { entries; _ } ->
+      Source_file.Read_at entries
+    | Unavailable { seen; _ } -> seen in
   (match outcome, store.comments_source with
    | (Complete { observation; _ } | Partial { observation; _ }),
      (Comments_unobserved | Comments_readable _ | Comments_refused _) ->
      store.comments_source <- Comments_refused { last_observed = Comments_observed observation;
-       failure; diagnostics }
+       failure; diagnostics; seen }
    | (Complete _ | Partial _), (Comments_unsettled _ | Comments_publishing _ | Comments_recovered _)
    | (Unavailable _ | Display_only _),
      (Comments_unobserved | Comments_readable _ | Comments_refused _
       | Comments_unsettled _ | Comments_publishing _ | Comments_recovered _) ->
-     refuse store failure diagnostics);
-  Unavailable { failure; diagnostics }
+     refuse store ~seen failure diagnostics);
+  Unavailable { failure; diagnostics; seen }
 
 let rec contradicts_observation = function
   | Fs_compat.Cursor_mismatch _ | Transaction_content_changed _ | Transaction_path_binding_changed _
@@ -535,27 +551,27 @@ let rec contradicts_observation = function
 
 (* #55449: a refusal that one more read of the same file can end is read
    again before the next operation, as the posts source is (task-4036). A
-   refusal for any other reason is read again once the file has changed since
-   this store last read it (#55465). *)
+   refusal for any other reason is read again once its file or its lock file
+   is no longer what the refusal carries (#55465). *)
 let stale_observation = function
   | Comments_transaction_failed error -> Board_posts_source.fresh_read_can_clear error
   | Comments_not_observed | Comments_rows_rejected _ | Comments_missing
   | Comments_source_binding_mismatch | Comments_snapshot_stale | Comments_publication_pending
   | Comments_reload_required | Comments_workspace_refused _ | Comments_raised _ -> false
 
-let reobservation_due store = match store.comments_source with
-  | Comments_refused { failure; _ } ->
-    stale_observation failure
-    || Source_file.changed_since store.comments_source_seen ~path:(Board_paths.comments_path store)
+let refusal store = match store.comments_source with
+  | Comments_refused { failure; seen; _ } ->
+    if stale_observation failure then Board_source_file.Read_again
+    else Board_source_file.Read_again_once_changed seen
   | Comments_unobserved | Comments_readable _ | Comments_publishing _ | Comments_recovered _
-  | Comments_unsettled _ -> false
+  | Comments_unsettled _ -> Board_source_file.Not_refused
 
 let observe_guard_refusal store observation failure =
   match store.comments_source with
   | Comments_readable current when current.observation == observation
       && String.equal failure.Fs_compat.guard_path observation.source_path
       && contradicts_observation failure.guard_error ->
-    refuse store (Comments_transaction_failed failure.guard_error) [Comments_guard_diagnostic failure]
+    refuse store ~seen:Source_file.Unread (Comments_transaction_failed failure.guard_error) [Comments_guard_diagnostic failure]
   | Comments_readable _ | Comments_unobserved | Comments_publishing _
   | Comments_refused _ | Comments_unsettled _ | Comments_recovered _ -> ()
 
@@ -588,7 +604,7 @@ let write store ~(before : comments_source_observation) ~kind ~bytes perform =
       let diagnostics = Comments_file_diagnostic error :: guard_diagnostics in
       let failure = Comments_transaction_failed error in
       if Board_posts_source.definitely_not_written error then (
-        if contradicts_observation error then refuse store failure diagnostics;
+        if contradicts_observation error then refuse store ~seen:Source_file.Unread failure diagnostics;
         not_written failure diagnostics)
       else unknown failure diagnostics in
   let guard_refused failure cleanup =
@@ -627,7 +643,7 @@ let write store ~(before : comments_source_observation) ~kind ~bytes perform =
 let workspace_failure store rejection =
   let failure = Comments_workspace_refused rejection in
   let diagnostics = [Comments_workspace_diagnostic rejection] in
-  refuse store failure diagnostics;
+  refuse store ~seen:Source_file.Unread failure diagnostics;
   not_written failure diagnostics
 
 let guard_with_io io path ~expected ~f = match io with
@@ -776,7 +792,8 @@ let settle store = match store.comments_source with
 let acknowledge_recovery store receipt = match store.comments_source with
   | Comments_recovered current when current == receipt ->
     store.comments_source <- Comments_refused { last_observed = Comments_observed receipt.fence;
-      failure = Comments_reload_required; diagnostics = receipt.diagnostics };
+      failure = Comments_reload_required; diagnostics = receipt.diagnostics;
+      seen = Source_file.Unread };
     Ok ()
   | Comments_unobserved | Comments_readable _ | Comments_refused _
   | Comments_unsettled _ | Comments_publishing _ | Comments_recovered _ ->

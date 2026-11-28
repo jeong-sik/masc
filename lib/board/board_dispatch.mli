@@ -165,11 +165,16 @@ type board_backend = Board.store
 
 val backend : unit -> board_backend
 (** Returns the currently-active [Board.store], lazy-initialising it on
-    first call. A source refused for a cause one more read can end (another
-    writer moved its file, or held its lock during a read) is read again
-    first, so the caller's operation is not refused until a restart (#55449).
-    The caller must hold no Board lock. Exposed so the dispatch test suite can
-    reach into the underlying [Board.store] directly. *)
+    first call. A refused source that is due is read again first
+    ({!Board_store_load.reobserve}), so the caller's operation is not refused
+    until a restart: one refused for a cause one more read can end (another
+    writer moved its file, or held its lock during a read, #55449), one that
+    a write or a guard refused, and one whose file or lock file is no longer
+    what the refusing read found (#55465). A source that waits for its file
+    to change costs one [lstat] of each of the two files, run on a system
+    thread, so this call can suspend the calling fiber. The caller must hold
+    no Board lock. Exposed so the dispatch test suite can reach into the
+    underlying [Board.store] directly. *)
 
 type initialization_error =
   | Workspace_mismatch of

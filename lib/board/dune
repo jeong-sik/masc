@@ -25,6 +25,7 @@
   board_comments
   board_posts_source
   board_comments_source
+  board_source_file
   board_vote_row
   board_store_load
   board_store_lifecycle)
@@ -55,6 +56,7 @@
   board_post_publication_failure
   board_posts_source
   board_comments_source
+  board_source_file
   board_snapshot_batch
   board_snapshot_rows
   board_sort
@@ -80,6 +82,8 @@
   uucp
   re
   eio
+  ;; [lstat] of a refused source's file and lock file (Board_source_file).
+  unix
   time_compat
   fs_compat
   masc_random_id

@@ -2,11 +2,14 @@ open Board_types
 
 type read =
   | Complete of { observation : sub_boards_source_observation; rows : sub_board list;
-                  diagnostics : sub_boards_source_diagnostic list }
+                  diagnostics : sub_boards_source_diagnostic list;
+                  entries : Source_file.entries }
   | Partial of { observation : sub_boards_source_observation; rows : sub_board list;
-                 errors : sub_boards_row_error list; diagnostics : sub_boards_source_diagnostic list }
+                 errors : sub_boards_row_error list; diagnostics : sub_boards_source_diagnostic list;
+                 entries : Source_file.entries }
   | Unavailable of { failure : sub_boards_source_failure;
-                     diagnostics : sub_boards_source_diagnostic list }
+                     diagnostics : sub_boards_source_diagnostic list;
+                     seen : Source_file.seen }
 
 type publication = sub_boards_publication
 type write =
@@ -36,14 +39,14 @@ let history = function
   | Policy_refused { policy_history; _ } -> policy_history
   | Policy_unsettled { policy_pending; _ } -> Policy_observed policy_pending.policy_before
 
-let refuse store failure diagnostics = match store.sub_boards_source with
+let refuse store ~seen failure diagnostics = match store.sub_boards_source with
   | Policy_publishing _ | Policy_unsettled _ -> ()
   | Policy_unobserved | Policy_readable _ | Policy_refused _ ->
     store.sub_boards_source <- Policy_refused {
       policy_history = history store.sub_boards_source;
-      policy_failure = failure; policy_diagnostics = diagnostics }
+      policy_failure = failure; policy_diagnostics = diagnostics; policy_seen = seen }
 
-let refuse_present store failure diagnostics =
+let refuse_present store ~seen failure diagnostics =
   let policy_history = match history store.sub_boards_source with
     | No_policy_observation | Policy_present_without_snapshot -> Policy_present_without_snapshot
     | Policy_observed observation as previous ->
@@ -53,7 +56,7 @@ let refuse_present store failure diagnostics =
   | Policy_publishing _ | Policy_unsettled _ -> ()
   | Policy_unobserved | Policy_readable _ | Policy_refused _ ->
     store.sub_boards_source <- Policy_refused {
-      policy_history; policy_failure = failure; policy_diagnostics = diagnostics }
+      policy_history; policy_failure = failure; policy_diagnostics = diagnostics; policy_seen = seen }
 
 let expected store = match store.sub_boards_source with
   | Policy_readable observation ->
@@ -94,23 +97,27 @@ let finish_workspace store before =
     (Board_workspace_binding.revalidate store.workspace_binding before)
 
 let read store = match store.sub_boards_source with
-  | Policy_unsettled { policy_failure; _ } -> Unavailable { failure = policy_failure; diagnostics = [] }
-  | Policy_publishing _ -> Unavailable { failure = Policy_publication_pending; diagnostics = [] }
+  | Policy_unsettled { policy_failure; _ } ->
+    Unavailable { failure = policy_failure; diagnostics = []; seen = Source_file.Unread }
+  | Policy_publishing _ ->
+    Unavailable { failure = Policy_publication_pending; diagnostics = []; seen = Source_file.Unread }
   | Policy_unobserved | Policy_readable _ | Policy_refused _ ->
     let diagnostics = ref [] and saw_present = ref false in
+    let seen = ref Source_file.Unread in
     let unavailable failure =
-      (if !saw_present then refuse_present else refuse) store failure !diagnostics;
-      Unavailable { failure; diagnostics = !diagnostics } in
+      (if !saw_present then refuse_present else refuse) store ~seen:!seen failure !diagnostics;
+      Unavailable { failure; diagnostics = !diagnostics; seen = !seen } in
     try
+      (* #55465: the first step. Whatever this read then meets, its refusal
+         carries what the directory said before it. *)
+      let path = Board_paths.sub_boards_path store in
+      let entries = Board_source_file.inspect ~path in
+      seen := Source_file.Read_at entries;
       match observe_workspace store with
       | Error rejection -> diagnostics := [Policy_workspace_diagnostic rejection];
         unavailable (Policy_workspace_refused rejection)
       | Ok before ->
-        let path = Board_paths.sub_boards_path store in
-        let seen, received = Source_file.around_read store.sub_boards_source_seen ~path (fun () ->
-          Fs_compat.private_jsonl_snapshot_success_receipt (read_file store path)) in
-        store.sub_boards_source_seen <- seen;
-        match received with
+        match Fs_compat.private_jsonl_snapshot_success_receipt (read_file store path) with
         | Error error ->
           diagnostics := [Policy_file_diagnostic error];
           saw_present := Fs_compat.private_jsonl_transaction_error_is_incomplete_tail error;
@@ -140,8 +147,9 @@ let read store = match store.sub_boards_source with
                       errors := Invalid_policy_json { line = index + 1; detail } :: !errors);
                 let observation = { policy_path = path; policy_snapshot = receipt.value; policy_workspace } in
                 match List.rev !errors with
-                | [] -> Complete { observation; rows = List.rev !rows; diagnostics = !diagnostics }
-                | errors -> Partial { observation; rows = List.rev !rows; errors; diagnostics = !diagnostics })
+                | [] -> Complete { observation; rows = List.rev !rows; diagnostics = !diagnostics; entries }
+                | errors ->
+                  Partial { observation; rows = List.rev !rows; errors; diagnostics = !diagnostics; entries })
     with exception_ ->
       let backtrace = Printexc.get_raw_backtrace () in
       diagnostics := !diagnostics @ [Policy_raised_diagnostic { exception_; backtrace }];
@@ -152,27 +160,29 @@ let publish_read store outcome = match store.sub_boards_source with
   | Policy_unobserved | Policy_readable _ | Policy_refused _ ->
     match outcome with
     | Complete { observation; _ } -> store.sub_boards_source <- Policy_readable observation
-    | Partial { observation; errors; diagnostics; _ } ->
+    | Partial { observation; errors; diagnostics; entries; _ } ->
       store.sub_boards_source <- Policy_refused {
         policy_history = Policy_observed observation;
-        policy_failure = Policy_rows_rejected errors; policy_diagnostics = diagnostics }
-    | Unavailable { failure; diagnostics } -> refuse store failure diagnostics
+        policy_failure = Policy_rows_rejected errors; policy_diagnostics = diagnostics;
+        policy_seen = Source_file.Read_at entries }
+    | Unavailable { failure; diagnostics; seen } -> refuse store ~seen failure diagnostics
 
 let fail_read store outcome exception_ backtrace =
-  let diagnostics, observation = match outcome with
-    | Complete { observation; diagnostics; _ } | Partial { observation; diagnostics; _ } ->
-      diagnostics, Some observation
-    | Unavailable { diagnostics; _ } -> diagnostics, None in
+  let diagnostics, observation, seen = match outcome with
+    | Complete { observation; diagnostics; entries; _ }
+    | Partial { observation; diagnostics; entries; _ } ->
+      diagnostics, Some observation, Source_file.Read_at entries
+    | Unavailable { diagnostics; seen; _ } -> diagnostics, None, seen in
   let failure = Policy_raised { exception_; backtrace } in
   let diagnostics = diagnostics @ [Policy_raised_diagnostic { exception_; backtrace }] in
   (match observation, store.sub_boards_source with
    | Some observation, (Policy_unobserved | Policy_readable _ | Policy_refused _) ->
      store.sub_boards_source <- Policy_refused { policy_history = Policy_observed observation;
-       policy_failure = failure; policy_diagnostics = diagnostics }
+       policy_failure = failure; policy_diagnostics = diagnostics; policy_seen = seen }
    | Some _, (Policy_publishing _ | Policy_unsettled _)
    | None, (Policy_unobserved | Policy_readable _ | Policy_refused _ | Policy_publishing _ | Policy_unsettled _) ->
-     refuse store failure diagnostics);
-  Unavailable { failure; diagnostics }
+     refuse store ~seen failure diagnostics);
+  Unavailable { failure; diagnostics; seen }
 
 let finish_read = function
   | Complete { rows; diagnostics; _ } -> finish (Ok (List.length rows)) diagnostics
@@ -192,18 +202,19 @@ let rec contradicts_observation = function
 
 (* #55449: a refusal that one more read of the same file can end is read
    again before the next operation, as the posts source is (task-4036). A
-   refusal for any other reason is read again once the file has changed since
-   this store last read it (#55465). *)
+   refusal for any other reason is read again once its file or its lock file
+   is no longer what the refusal carries (#55465). *)
 let stale_observation = function
   | Policy_transaction_failed error -> Board_posts_source.fresh_read_can_clear error
   | Policy_not_observed | Policy_rows_rejected _ | Policy_missing | Policy_binding_mismatch
   | Policy_publication_pending | Policy_workspace_refused _ | Policy_raised _ -> false
 
-let reobservation_due store = match store.sub_boards_source with
-  | Policy_refused { policy_failure; _ } ->
-    stale_observation policy_failure
-    || Source_file.changed_since store.sub_boards_source_seen ~path:(Board_paths.sub_boards_path store)
-  | Policy_unobserved | Policy_readable _ | Policy_publishing _ | Policy_unsettled _ -> false
+let refusal store = match store.sub_boards_source with
+  | Policy_refused { policy_failure; policy_seen; _ } ->
+    if stale_observation policy_failure then Board_source_file.Read_again
+    else Board_source_file.Read_again_once_changed policy_seen
+  | Policy_unobserved | Policy_readable _ | Policy_publishing _ | Policy_unsettled _ ->
+    Board_source_file.Not_refused
 
 let not_written failure diagnostics = Not_written { failure; diagnostics }
 
@@ -212,7 +223,7 @@ let observe_guard_refusal store observation failure =
   | Policy_readable current when current == observation
       && String.equal failure.Fs_compat.guard_path current.policy_path
       && contradicts_observation failure.guard_error ->
-    refuse store (Policy_transaction_failed failure.guard_error)
+    refuse store ~seen:Source_file.Unread (Policy_transaction_failed failure.guard_error)
       [Policy_file_diagnostic failure.guard_error]
   | Policy_unobserved | Policy_readable _ | Policy_publishing _
   | Policy_refused _ | Policy_unsettled _ -> ()
@@ -236,7 +247,7 @@ let write store ~before ~kind ~bytes perform =
       let diagnostics = [Policy_file_diagnostic error] in
       let failure = Policy_transaction_failed error in
       if Board_posts_source.definitely_not_written error then (
-        if contradicts_observation error then refuse store failure diagnostics;
+        if contradicts_observation error then refuse store ~seen:Source_file.Unread failure diagnostics;
         not_written failure diagnostics)
       else unknown failure diagnostics
   with exception_ ->
@@ -250,13 +261,13 @@ let before_write store f = match expected store with
     | Error rejection ->
       let failure = Policy_workspace_refused rejection in
       let diagnostics = [Policy_workspace_diagnostic rejection] in
-      refuse store failure diagnostics;
+      refuse store ~seen:Source_file.Unread failure diagnostics;
       not_written failure diagnostics
     | Ok () -> f before
     | exception exception_ ->
       let backtrace = Printexc.get_raw_backtrace () in
       let diagnostics = [Policy_raised_diagnostic { exception_; backtrace }] in
-      refuse store (Policy_raised { exception_; backtrace }) diagnostics;
+      refuse store ~seen:Source_file.Unread (Policy_raised { exception_; backtrace }) diagnostics;
       not_written (Policy_raised { exception_; backtrace }) diagnostics
 
 let append store row = before_write store (fun before ->

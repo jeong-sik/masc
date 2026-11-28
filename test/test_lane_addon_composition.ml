@@ -860,10 +860,13 @@ print(json.dumps(ProtocolCase().call("vst-phrase", json.loads(sys.argv[2]), json
     | _ -> fail "vst-phrase observer stdio process failed")
 
 (* One rendered vst-phrase state in the snapshot_file envelope. The tool result
-   and the Lane source both carry these exact bytes. *)
+   and the Lane source both carry these exact bytes. The indentation and final
+   newline make them differ from both Yojson.Safe.to_string and pretty_to_string
+   output, so a host that stored a re-encoded copy fails the retention checks.
+   The preset name keeps multi-byte UTF-8 in the bytes. *)
 let phrase_snapshot =
   let digest c = `String (String.make 64 c) in
-  Yojson.Safe.to_string (`Assoc [
+  Yojson.Safe.pretty_to_string (`Assoc [
     "source_id",`String "vst-phrase"; "incarnation",`String "native-session";
     "cursor",`String "7"; "complete",`Bool true; "detail",`String "Latest local phrase state";
     "observations",`List [`Assoc [
@@ -871,9 +874,10 @@ let phrase_snapshot =
       "actor",`Null; "evidence",`List [`Assoc ["uri",`String "file:///audio.wav"; "sha256",digest 'a']];
       "fields",`Assoc [
         "state",`String "rendered";
-        "selection",`Assoc ["name",`String "Retrologue"; "plugin_path",`String "/synth.vst3";
+        "selection",`Assoc ["name",`String "Retrologue 따뜻한 패드"; "plugin_path",`String "/synth.vst3";
           "plugin_name",`Null; "preset_path",`String "/sound.vstpreset"];
         "render",`Assoc ["midi_sha256",digest 'b'; "wav_sha256",digest 'a'; "duration_ms",`Int 2000]]]]])
+  ^ "\n"
 
 let test_snapshot_file_and_post_tool_use_agree () =
   with_fixture ~produce:phrase_observer (fun clock config root _directory _received _stopped ->
@@ -933,8 +937,8 @@ let test_snapshot_file_and_post_tool_use_agree () =
       (Some (text "cursor" source)) hook_cursor;
     check string "the Lane path keeps the same snapshot cursor"
       (text "cursor" source)
-      (inspect config |> list "coverage" |> List.find (fun item ->
-        text "source_id" item = "vst-phrase") |> text "cursor");
+      (dispatch config Runtime.Inspect ["instance_id",`String id] |> list "coverage"
+        |> List.find (fun item -> text "source_id" item = "vst-phrase") |> text "cursor");
     ignore (dispatch config Runtime.Detach ["instance_id",`String id]);
     await clock (fun () ->
       text "kind" (member "phase" (instance config id)) = "detached"))

@@ -11,6 +11,8 @@
  */
 
 import { decodeDiscordReplyOrigin } from './discord-reply'
+import { decodePromptCapture, type PromptCapture } from './prompt-capture-wire'
+import { decodeProviderInputSnapshot, type ProviderInputSnapshot } from '../../api/dashboard-provider-input'
 import {
   contextSeverityTone,
   decodeKeeperLaneFailures,
@@ -121,7 +123,6 @@ import type {
   KeeperToolResultResponse,
   KeeperWaitingInventoryData,
   KeeperWaitingRow,
-  KeeperLastPromptData,
   KeeperLaneFailure,
   KeeperLinkedTasksData,
   KeeperMemoryFactsData,
@@ -143,8 +144,6 @@ import type {
   MemoryActPayload,
   OrdinaryMemoryBranch,
   PortraitSlot,
-  ProviderInputData,
-  ProviderInputPartSummary,
   QueuedChatOperation,
   RawTraceTurnItem,
   RosterMode,
@@ -2465,66 +2464,21 @@ export function fetchKeeperToolStatsApi(keeper: string, windowHours = 24, signal
   )
 }
 
-export function fetchKeeperLastPromptApi(keeper: string): Promise<Result<KeeperLastPromptData, ApiError>> {
-  return apiGet<KeeperLastPromptData>(
+export function fetchKeeperLastPromptApi(keeper: string): Promise<Result<PromptCapture, ApiError>> {
+  return apiGet<PromptCapture>(
     `/api/v1/keepers/${encodeURIComponent(keeper)}/last-prompt`,
-    {
-      decode: (raw) => {
-        const rec = isRecord(raw) ? raw : {}
-        const blocks = Array.isArray(rec.blocks)
-          ? rec.blocks.filter(isRecord).map((b) => ({
-              id: asStr(b.id) ?? 'block',
-              bytes: asNum(b.bytes) ?? 0,
-              text: typeof b.text === 'string' ? b.text : '',
-            }))
-          : []
-        return {
-          keeper: asStr(rec.keeper) ?? keeper,
-          captured_at: asNum(rec.captured_at) ?? 0,
-          trace_id: asStr(rec.trace_id) ?? '',
-          absolute_turn: asNum(rec.absolute_turn) ?? 0,
-          assembled: typeof rec.assembled === 'string' ? rec.assembled : null,
-          assembled_bytes: asNum(rec.assembled_bytes) ?? 0,
-          system_prompt: typeof rec.system_prompt === 'string' ? rec.system_prompt : null,
-          blocks,
-        }
-      },
-    },
+    { decode: decodePromptCapture },
   )
 }
 
-export function fetchKeeperProviderInputApi(keeper: string, turnRef: string): Promise<Result<ProviderInputData, ApiError>> {
-  return apiGet<ProviderInputData>(
+export function fetchKeeperProviderInputApi(keeper: string, turnRef: string): Promise<Result<ProviderInputSnapshot, ApiError>> {
+  return apiGet<ProviderInputSnapshot>(
     `/api/v1/keepers/${encodeURIComponent(keeper)}/provider-input?turn_ref=${encodeURIComponent(turnRef)}`,
     {
       decode: (raw) => {
-        const rec = isRecord(raw) ? raw : {}
-        const wire = isRecord(rec.wire) ? rec.wire : {}
-        const parts: ProviderInputPartSummary[] = Array.isArray(rec.parts)
-          ? rec.parts.filter(isRecord).map((p, idx) => ({
-              index: asNum(p.index) ?? idx,
-              kind:
-                p.kind === 'system_prompt' || p.kind === 'tool_schema'
-                  ? p.kind
-                  : 'message',
-              role: asStr(p.role) ?? undefined,
-              name: asStr(p.name) ?? undefined,
-              bytes: asNum(p.bytes) ?? 0,
-              sha256: asStr(p.sha256) ?? '',
-            }))
-          : []
-        return {
-          keeper: asStr(rec.keeper) ?? keeper,
-          turn_ref: asStr(rec.turn_ref) ?? turnRef,
-          runtime_profile: asStr(rec.runtime_profile) ?? '',
-          wire: {
-            provider: asStr(wire.provider) ?? 'unknown',
-            model: asStr(wire.model) ?? 'unknown',
-            http_codec: asStr(wire.http_codec) ?? '',
-            body_bytes: asNum(wire.body_bytes) ?? 0,
-          },
-          parts,
-        }
+        const snapshot = decodeProviderInputSnapshot(raw)
+        if (snapshot === null) throw new Error('provider-input manifest does not match masc.provider-input-manifest.v1')
+        return snapshot
       },
     },
   )

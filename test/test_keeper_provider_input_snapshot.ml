@@ -111,6 +111,33 @@ let blob_path store sha256 =
     sha256
 ;;
 
+(* The manifest is what a client parses, so its [wire] is pinned here as
+   JSON rather than through the observation's own encoder. *)
+let test_manifest_wire_is_public_json () =
+  with_workspace (fun config ->
+    write config 7;
+    let manifest = read config 7 in
+    match Snapshot.manifest_to_json manifest with
+    | `Assoc fields ->
+      (match List.assoc_opt "wire" fields with
+       | Some (`Assoc wire) ->
+         check (list string) "wire keys"
+           [ "body_bytes"; "body_sha256"; "capture_id"; "http_codec"; "model"
+           ; "phase"; "provider"; "stream" ]
+           (List.sort String.compare (List.map fst wire));
+         (match List.assoc_opt "phase" wire with
+          | Some (`String "Pre_dispatch_serialization") -> ()
+          | Some other ->
+            failf "phase is not the constructor name as a string: %s"
+              (Yojson.Safe.to_string other)
+          | None -> fail "phase is missing");
+         (match List.assoc_opt "body_bytes" wire with
+          | Some (`Int 8192) -> ()
+          | Some _ | None -> fail "body_bytes is not the observed size")
+       | Some _ | None -> fail "wire is not an object")
+    | _ -> fail "the manifest is not an object")
+;;
+
 let test_exact_turn_round_trip () =
   with_workspace (fun config ->
     write config 7;
@@ -530,6 +557,8 @@ let () =
     "keeper provider input snapshot"
     [ ( "round trip"
       , [ test_case "exact turn lists and reads every part" `Quick test_exact_turn_round_trip
+        ; test_case "the manifest writes wire.phase as a string" `Quick
+            test_manifest_wire_is_public_json
         ; test_case "snapshot field sets reject missing, unknown and duplicate keys" `Quick
             test_exact_snapshot_field_sets
         ; test_case

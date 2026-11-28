@@ -717,6 +717,41 @@ let part_to_json part =
      @ [ "bytes", `Int part.part_bytes; "sha256", `String part.part_sha256 ])
 ;;
 
+(* The manifest is an HTTP answer, so its [wire] is written field by field.
+   The observation's derived encoder writes the constant constructor of
+   [phase] as a one-element list, ["Pre_dispatch_serialization"]: that is how
+   a row is stored, and [of_json] reads it back, but a client reading the
+   answer expects a string, and both clients refused every real manifest for
+   it. The record pattern names every field, so a field added to the
+   observation fails to build here until it is given its public name. *)
+let public_phase : Llm_provider.Request_wire_observer.phase -> string = function
+  | Llm_provider.Request_wire_observer.Pre_dispatch_serialization ->
+    "Pre_dispatch_serialization"
+;;
+
+let public_wire_to_json
+    { Llm_provider.Request_wire_observer.phase
+    ; capture_id
+    ; provider
+    ; model
+    ; http_codec
+    ; stream
+    ; body_bytes
+    ; body_sha256
+    }
+  =
+  `Assoc
+    [ "phase", `String (public_phase phase)
+    ; "capture_id", (match capture_id with None -> `Null | Some id -> `String id)
+    ; "provider", `String provider
+    ; "model", `String model
+    ; "http_codec", `String http_codec
+    ; "stream", `Bool stream
+    ; "body_bytes", `Int body_bytes
+    ; "body_sha256", `String body_sha256
+    ]
+;;
+
 let manifest_to_json manifest =
   let snapshot = manifest.mf_snapshot in
   `Assoc
@@ -727,8 +762,7 @@ let manifest_to_json manifest =
     ; "turn_ref", Ids.Turn_ref.to_yojson snapshot.turn_ref
     ; "runtime_profile", `String snapshot.runtime_profile
     ; "captured_at", `Float snapshot.captured_at
-    ; ( "wire"
-      , Llm_provider.Request_wire_observer.observation_to_yojson snapshot.wire )
+    ; "wire", public_wire_to_json snapshot.wire
     ; "parts", `List (List.map part_to_json manifest.mf_parts)
     ]
 ;;

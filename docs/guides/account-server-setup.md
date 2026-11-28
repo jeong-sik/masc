@@ -10,13 +10,14 @@ signed in. Two other guides go on from there:
 
 - It answers the health probes (`GET /health`, `/health/live`,
   `/health/ready`), the login routes of the login clients in `config.json`,
-  the sign-in page at `/`, a person's console at `/accounts/console`, the
-  routes of invitations and of the allowlist,
-  and the MCP endpoint of a person (`POST /mcp`).
+  the sign-in page at `/`, the dashboard at `/dashboard`, the routes of
+  invitations, of the allowlist and of members, and the MCP endpoint of a
+  person (`POST /mcp`). `/accounts/console` sends a browser to
+  `/dashboard#account`.
 - It serves only routes that are public or that check a browser session or
   a personal access token themselves. No route of the single-user server is
-  there: the TUI and the operator's dashboard do not connect to it, and it
-  starts none of the operator's Keepers.
+  there, and it starts none of the operator's Keepers. The dashboard shows a
+  signed-in person what the account server's own routes answer.
 - A workspace that is activated no longer boots as a single user. Turning
   the accounts off and taking `account_mode` out of `config.json` brings
   back a single-user boot (see [Turn the accounts off](#turn-the-accounts-off)),
@@ -140,6 +141,19 @@ masc start --base-path <base> --port <port>
   process changed the file) or the two stop matching
   (`AuthorizationUncertain`). It stays so until a restart reads the files
   again.
+- The dashboard is read from the first of these that is a directory:
+  `MASC_ASSETS_DIR`, the `assets` directory three levels above the binary's
+  directory (a checkout's `_build/default/bin`), `assets` beside the binary,
+  and `assets` in the working directory, which is the base path once
+  `masc start` runs. A binary installed in `~/.local/bin` finds none of them
+  for a new base path. Set `MASC_ASSETS_DIR` to an `assets` directory that
+  holds `dashboard/index.html`, such as `assets` of the checkout the binary
+  was built from. Without one, `/dashboard` answers 503.
+- The server binds the TLS listener of `[transport] https_port` in
+  `<base>/.masc/config/runtime.toml` (8938 when the file sets none, `0`
+  turns it off). `MASC_HTTPS_PORT` in the environment comes before the file.
+  On a host that also runs a single-user server on 8938, give the account
+  server another port or `0`.
 - `masc restart` replaces it as it replaces a single-user server. The new
   server takes the environment of the shell that runs `masc restart`, so
   export `MASC_HTTP_BASE_URL` and the client secrets there too.
@@ -231,11 +245,16 @@ signed in: its panels 초대 링크 (invitations), 허용 목록 (the allowlist)
   row does not set `tools-support = true`.
 - The person makes Keepers on their own Runtimes, from the console or from
   an MCP client. See [The MCP endpoint of a person](account-server-mcp.md).
-- A browser that is signed in and opens `/` goes on to `/accounts/console`.
-  A login that starts at `/` or at an invitation link comes back there.
-  When the server cannot give the console, `/` says so and offers the
-  sign-out in its place: the console is read from the dashboard bundle of
-  the binary, and the server logs once at its start when it cannot read it.
+- Runtime → Quotas lists the subscriptions a signed-in person may connect,
+  with a button for each way the server offers (a login through the
+  official client, an API key). The list opens by itself while the person
+  has no account.
+- A browser that is signed in and opens `/` goes on to `/accounts/console`,
+  which sends it to `/dashboard#account`. A login that starts at `/` or at
+  an invitation link comes back there. When the server cannot give the
+  dashboard, `/` says so and offers the sign-out in its place: the dashboard
+  is read from the bundle of step 3, and the server logs once at its start
+  when it cannot read it.
 
 ## 7. API keys of people
 
@@ -311,9 +330,6 @@ base path.
 
 ## What is not there yet
 
-- The TUI and the operator's dashboard do not connect to the account server.
-- The 들어온 사람 panel only reads: no screen changes the role or the
-  status of a person.
 - `masc auth invite` writes Admin invitations only, and no command revokes
   one.
 - A workspace whose accounts were turned off is not activated again.

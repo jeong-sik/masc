@@ -3596,8 +3596,10 @@ let marker_lifts_it = "; only the operator allows it, with operator_authority = 
 
 type declared_authority = { executes_as : Lane_addon_sources.access; reads_as : Lane_addon_sources.access }
 
-(* What the binding's own Fusion runs say about one Keeper. A run's owner is
-   fixed when the run registers, so the bytes name it through the registry. *)
+(* What the binding's own Fusion runs say about one Keeper, by the owner the
+   registry names now. The save path admits a run only from its owner, so the
+   bytes name their saver through it; registering the same run id again
+   replaces that owner (RFC lane-declaration-operator-authority 8). *)
 type fusion_owner_evidence =
   | Reads_keeper_run (* one of its Fusion runs is that Keeper's *)
   | Reads_other_keeper_run (* it reads Fusion runs and none is that Keeper's *)

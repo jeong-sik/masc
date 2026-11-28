@@ -220,3 +220,8 @@ memory/
 # SwiftPM build output of the native clients (apps/apple).
 /apps/apple/**/.build/
 /apps/apple/**/.swiftpm/
+
+# Gradle output of the native clients (apps/android).
+/apps/android/.gradle/
+/apps/android/**/build/
+/apps/android/**/.kotlin/

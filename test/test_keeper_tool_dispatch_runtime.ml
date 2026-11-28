@@ -6289,14 +6289,17 @@ let test_direct_execute_artifact_manifest_survives_maintenance () =
          | Ok output -> output.Agent_core.Types.content
          | Error error -> fail error.Agent_core.Types.message
        in
+       (* The output is over the lane's ceiling, so the payload holds three
+          artifact references instead of the text. That payload is small and
+          reaches the model beside its manifest's reference. *)
        let manifest_ref =
-         match Tool_output.decode_from_agent_core output with
-         | Tool_output.Decoded reference
-           when String.equal reference.mime Tool_output.artifact_manifest_mime ->
-           reference
-         | Tool_output.Decoded _ -> fail "direct Execute returned a non-manifest marker"
-         | Tool_output.Not_marker -> fail "direct Execute artifact result stayed inline"
-         | Tool_output.Invalid_marker { detail } -> fail detail
+         match Tool_output.decode_structured_reference output with
+         | Tool_output.Result_envelope_manifest reference -> reference
+         | Tool_output.No_structured_reference
+         | Tool_output.Structured_handle _
+         | Tool_output.Invalid_structured_handle _
+         | Tool_output.Invalid_result_envelope_manifest _ ->
+           fail "direct Execute did not send its artifact result as an envelope"
        in
        let durable_checkpoint =
          Filename.concat
@@ -6319,6 +6322,23 @@ let test_direct_execute_artifact_manifest_survives_maintenance () =
            fail "direct Execute manifest lost its child output reference"
          | Tool_output.Invalid_normalized_artifact_ref { detail } -> fail detail
        in
+       check bool
+         "the model reads that the command succeeded without a second call"
+         true
+         (Yojson.Safe.equal (Yojson.Safe.Util.member "ok" structured) (`Bool true));
+       check bool "the output's preview reaches the model" true
+         (String.length output_ref.preview > 0);
+       (* stderr is empty, so stdout is the same bytes as the output. *)
+       (match
+          Yojson.Safe.Util.member "stdout_artifact" structured
+          |> Tool_output.normalized_artifact_ref_of_json
+        with
+        | Tool_output.Decoded_normalized_artifact_ref stdout_ref ->
+          check string "stdout has the output's address" output_ref.sha256 stdout_ref.sha256;
+          check string "and does not repeat its preview" "" stdout_ref.preview
+        | Tool_output.Not_normalized_artifact_ref ->
+          fail "direct Execute result has no stdout reference"
+        | Tool_output.Invalid_normalized_artifact_ref { detail } -> fail detail);
        let maintenance mode =
          match Tool_blob_maintenance.run ~scope:Server_tool_blob_scope.scope ~base_path:config.base_path ~mode with
          | Ok report -> report

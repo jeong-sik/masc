@@ -12,7 +12,12 @@
 
 import { decodeDiscordReplyOrigin } from './discord-reply'
 import { decodePromptCapture, type PromptCapture } from './prompt-capture-wire'
-import { decodeProviderInputSnapshot, type ProviderInputSnapshot } from '../../api/dashboard-provider-input'
+import {
+  decodeProviderInputPart,
+  decodeProviderInputSnapshot,
+  type ProviderInputPart,
+  type ProviderInputSnapshot,
+} from '../../api/dashboard-provider-input'
 import {
   contextSeverityTone,
   decodeKeeperLaneFailures,
@@ -2464,21 +2469,44 @@ export function fetchKeeperToolStatsApi(keeper: string, windowHours = 24, signal
   )
 }
 
-export function fetchKeeperLastPromptApi(keeper: string): Promise<Result<PromptCapture, ApiError>> {
+export function fetchKeeperLastPromptApi(keeper: string, signal?: AbortSignal): Promise<Result<PromptCapture, ApiError>> {
   return apiGet<PromptCapture>(
     `/api/v1/keepers/${encodeURIComponent(keeper)}/last-prompt`,
-    { decode: decodePromptCapture },
+    { signal, decode: decodePromptCapture },
   )
 }
 
-export function fetchKeeperProviderInputApi(keeper: string, turnRef: string): Promise<Result<ProviderInputSnapshot, ApiError>> {
+export function fetchKeeperProviderInputApi(
+  keeper: string,
+  turnRef: string,
+  signal?: AbortSignal,
+): Promise<Result<ProviderInputSnapshot, ApiError>> {
   return apiGet<ProviderInputSnapshot>(
     `/api/v1/keepers/${encodeURIComponent(keeper)}/provider-input?turn_ref=${encodeURIComponent(turnRef)}`,
     {
+      signal,
       decode: (raw) => {
         const snapshot = decodeProviderInputSnapshot(raw)
         if (snapshot === null) throw new Error('provider-input manifest does not match masc.provider-input-manifest.v1')
         return snapshot
+      },
+    },
+  )
+}
+
+/** One part's text; the decoder checks it is the part the manifest named, byte for byte. */
+export function fetchKeeperProviderInputPartApi(
+  keeper: string,
+  turnRef: string,
+  part: ProviderInputPart,
+): Promise<Result<string, ApiError>> {
+  return apiGet<string>(
+    `/api/v1/keepers/${encodeURIComponent(keeper)}/provider-input/part?turn_ref=${encodeURIComponent(turnRef)}&index=${part.index}`,
+    {
+      decode: (raw) => {
+        const text = decodeProviderInputPart(raw, { keeper, turnRef, part })
+        if (text === null) throw new Error(`provider-input part ${part.index} does not match the manifest`)
+        return text
       },
     },
   )

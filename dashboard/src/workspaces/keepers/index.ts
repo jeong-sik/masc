@@ -58,6 +58,9 @@ const keeperConfigTab = createPreloadableLazy<{
   readonly keeperName: string
   readonly onMutated: () => void
 }>(async () => (await import('./keeper-config-tab')).KeeperConfigTab)
+const keeperPromptTab = createPreloadableLazy<{
+  readonly keeperName: string
+}>(async () => (await import('./keeper-prompt-tab')).KeeperPromptTab)
 
 export function preloadKeeperEntityTab(tab: KeeperEntityTab | string): Promise<void> {
   switch (parseKeeperEntityTab(tab)) {
@@ -69,6 +72,8 @@ export function preloadKeeperEntityTab(tab: KeeperEntityTab | string): Promise<v
       return keeperWorkSandboxTab.preload()
     case 'config':
       return keeperConfigTab.preload()
+    case 'prompt':
+      return keeperPromptTab.preload()
     default:
       return Promise.resolve()
   }
@@ -410,6 +415,12 @@ export function KeepersWorkspace(props: WorkspaceViewProps) {
                         key=${`cfg:${epoch}:${activeKeeper.name}`}
                         keeperName=${activeKeeper.name}
                         onMutated=${() => void refreshRoster('manual')}
+                      />
+                    `}
+                    ${activeTab === 'prompt' && html`
+                      <${keeperPromptTab.Component}
+                        key=${`prompt:${epoch}:${activeKeeper.name}`}
+                        keeperName=${activeKeeper.name}
                       />
                     `}
                   <//>

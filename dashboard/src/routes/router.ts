@@ -76,6 +76,7 @@ export const KEEPER_ENTITY_TABS = [
   'portrait-candle',
   'work-sandbox',
   'config',
+  'prompt',
 ] as const
 
 export type KeeperEntityTab = (typeof KEEPER_ENTITY_TABS)[number]
@@ -86,6 +87,7 @@ export const KEEPER_ENTITY_TAB_LABELS: Readonly<Record<KeeperEntityTab, string>>
   'portrait-candle': 'Portrait & Candle',
   'work-sandbox': 'Work & Sandbox',
   config: 'Config',
+  prompt: 'Prompt',
 })
 
 export const ACCOUNT_SUBTABS = [

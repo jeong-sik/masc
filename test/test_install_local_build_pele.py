@@ -23,7 +23,7 @@ def checkout(root, installer_status):
     scripts = repo / "scripts"
     (scripts / "lib").mkdir(parents=True)
     shutil.copy2(local_build.SCRIPT, scripts / local_build.SCRIPT.name)
-    shutil.copy2(local_build.REPO / "scripts/lib/install-workspace-dashboard.sh", scripts / "lib")
+    shutil.copy2(local_build.REPO / "scripts/lib/install-dashboard-beside-binary.sh", scripts / "lib")
     local_build.executable(scripts / "check-runtime-deployment-preflight.sh", "fixture-preflight")
     installer = scripts / "install-pele.sh"
     installer.write_text(FAKE_INSTALLER.format(status=installer_status))

@@ -169,6 +169,9 @@ ln -sf "$PWD/_build/default/bin/masc_tui.exe" ~/.local/bin/masc-tui
 
 Alternatively, `scripts/install-local-build.sh` builds and copies `masc`,
 `masc-tui` and the deployment preflight tools into `~/.local/bin` in one step.
+It puts the dashboard bundle that `make build` made beside them, in
+`~/.local/bin/assets/dashboard`, so every workspace you start with that `masc`
+serves the same bundle.
 Run it in the shell where you applied `eval "$(opam env)"`. If an update
 changes `masc.opam.locked`, rerun `opam install ./masc.opam --deps-only --locked`
 in that switch before rebuilding. For a new workspace:

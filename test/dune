@@ -4548,7 +4548,8 @@
   test_install_local_build.py
   ../scripts/install-local-build.sh
   ../scripts/check-runtime-deployment-preflight.sh
-  ../scripts/dune-local.sh)
+  ../scripts/dune-local.sh
+  ../scripts/lib/install-dashboard-beside-binary.sh)
  (action
   (run python3 %{dep:test_install_local_build.py})))
 
@@ -4566,7 +4567,7 @@
   test_install_local_build_checkout_shim.py
   test_install_local_build.py
   ../scripts/install-local-build.sh
-  ../scripts/lib/install-workspace-dashboard.sh)
+  ../scripts/lib/install-dashboard-beside-binary.sh)
  (action
   (run python3 %{dep:test_install_local_build_checkout_shim.py})))
 
@@ -4582,13 +4583,30 @@
   test_install_local_build_pele.py
   test_install_local_build.py
   ../scripts/install-local-build.sh
-  ../scripts/lib/install-workspace-dashboard.sh)
+  ../scripts/lib/install-dashboard-beside-binary.sh)
  (action
   (run python3 %{dep:test_install_local_build_pele.py})))
 
 (alias
  (name runtest)
  (deps (alias runtest-test_install_local_build_pele)))
+
+; The dashboard step of a local install puts the bundle beside the binaries,
+; so every workspace a prefix serves reads the bundle of the same install
+; (#55405). The suite also runs the installer from a fixture checkout.
+(rule
+ (alias runtest-test_install_dashboard_beside_binary)
+ (deps
+  test_install_dashboard_beside_binary.sh
+  ../scripts/install-local-build.sh
+  ../scripts/check-runtime-deployment-preflight.sh
+  ../scripts/lib/install-dashboard-beside-binary.sh)
+ (action
+  (run bash %{dep:test_install_dashboard_beside_binary.sh})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_install_dashboard_beside_binary)))
 
 ; Download verification uses trusted candidate Git objects; extraction refuses
 ; traversal, links, duplicate members and overwrite before writing any member.
@@ -4600,7 +4618,7 @@
   ../scripts/ci/runtime-install-artifact.py
   ../scripts/install-local-build.sh
   ../scripts/check-runtime-deployment-preflight.sh
-  ../scripts/lib/install-workspace-dashboard.sh)
+  ../scripts/lib/install-dashboard-beside-binary.sh)
  (action
   (run python3 %{dep:test_runtime_install_artifact.py})))
 

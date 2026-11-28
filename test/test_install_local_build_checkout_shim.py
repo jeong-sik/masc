@@ -132,7 +132,7 @@ def checkout(root, built=lambda machine: elf(machine, BUILD_SOURCE), build_fails
     (scripts / "lib").mkdir(parents=True)
     (scripts / "remote-ssh").mkdir()
     shutil.copy2(local_build.SCRIPT, scripts / local_build.SCRIPT.name)
-    shutil.copy2(local_build.REPO / "scripts/lib/install-workspace-dashboard.sh", scripts / "lib")
+    shutil.copy2(local_build.REPO / "scripts/lib/install-dashboard-beside-binary.sh", scripts / "lib")
     local_build.executable(scripts / "check-runtime-deployment-preflight.sh", "fixture-preflight")
     stub = scripts / "remote-ssh/build-shim.sh"
     stub.write_text(FAKE_BUILD_SHIM)

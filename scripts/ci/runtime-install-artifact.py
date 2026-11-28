@@ -17,7 +17,7 @@ import tarfile
 
 
 SOURCES = ("scripts/install-local-build.sh", "scripts/check-runtime-deployment-preflight.sh",
-           "scripts/ci/runtime-install-artifact.py")
+           "scripts/lib/install-dashboard-beside-binary.sh", "scripts/ci/runtime-install-artifact.py")
 RECORDS = ("build-targets.txt", "dependencies.txt")
 FLAGS = ("behavior_executed", "installed", "release_verified", "relocatable_runtime_verified")
 

@@ -733,8 +733,7 @@ let make_tool_bundle_for_descriptors_with_policy
             ()
         in
         let loading =
-          Tool_loading_declarations.declared Keeper_instruction_skill.skill_tool_name
-          |> Option.value ~default:Tool_definition_toml.Always_loaded
+          Tool_loading_declarations.required Keeper_instruction_skill.skill_tool_name
         in
         let projection =
           Tool_output.Inline_up_to { maximum_bytes = Common.max_tool_result_wire_bytes }

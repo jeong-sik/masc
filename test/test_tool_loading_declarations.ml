@@ -167,10 +167,14 @@ defer_loading = true
 ;;
 
 (* The way out of a listing. A deferred tool is named but not described, and
-   the model reaches it by asking one of these three. Deferring one of them
-   would leave its own name in the listing that only it can read: the tools
-   below it become unreachable, and nothing reports it, because a name in a
-   listing is a live tool as far as every other check can tell. *)
+   the model reaches it by asking [keeper_tool_search], which carries the
+   listing, or [keeper_capability_search]. Deferring one of them would leave
+   its own name in the listing that only it can read: the tools below it
+   become unreachable, and nothing reports it, because a name in a listing is
+   a live tool as far as every other check can tell.
+
+   [keeper_tools_list] is not one of them. #54350 deferred it, and it is
+   reached through the listing like any other deferred tool. *)
 (* [keeper_skill] is here for the same reason, arrived at from the other side.
    It reads a Skill body, so it looks like an ordinary tool to defer. But the
    list of Skills it can read lives in its description (tool_schemas_skill.mli:
@@ -186,17 +190,15 @@ let test_the_tools_that_load_deferred_tools_are_never_deferred () =
          Tool_definition_toml.Always_loaded
          (Tool_loading_declarations.required name))
     [ "keeper_tool_search"
-    ; "keeper_tools_list"
     ; "keeper_capability_search"
     ; "keeper_skill"
     ]
 ;;
 
-(* The two request controls beside the Skill compositions declare deferral in
-   their own files, and the composition surface reads it from there by these
-   names. If either file went missing, [Tool_loading_declarations.required]
-   would raise when the surface is built. *)
-let test_the_composition_request_controls_are_deferred () =
+(* The tool bundle reads the Skill reader's declaration from its own file by
+   this name. If the file went missing, [Tool_loading_declarations.required]
+   would raise when the bundle is built. *)
+let test_the_skill_reader_declaration_is_readable () =
   check loading "keeper_skill declaration is readable"
     Tool_definition_toml.Always_loaded
     (Tool_loading_declarations.required Keeper_instruction_skill.skill_tool_name)
@@ -219,8 +221,8 @@ let () =
             test_a_well_formed_file_reads_through_the_same_door
         ; test_case "the tools that load deferred tools are never deferred" `Quick
             test_the_tools_that_load_deferred_tools_are_never_deferred
-        ; test_case "the composition request controls are deferred" `Quick
-            test_the_composition_request_controls_are_deferred
+        ; test_case "the Skill reader declaration is readable" `Quick
+            test_the_skill_reader_declaration_is_readable
         ] )
     ]
 ;;

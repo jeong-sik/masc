@@ -45,7 +45,8 @@
 val declared : string -> Tool_definition_toml.loading option
 
 (** [required name] is what [config/tools/<name>.toml] declares, for a name
-    that must have that file: a tool descriptor's internal name.
+    that must have that file: a tool descriptor's internal name, or the Skill
+    reader the tool bundle builds.
 
     @raise Failure naming the file when it is missing. Answering
     [Always_loaded] there would let a descriptor looked up under a name with

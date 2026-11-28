@@ -7250,6 +7250,9 @@ let test_typesafeai_refuses_a_value_that_names_nothing () =
     "[typesafeai]\ndestinations = \"http://127.0.0.1:9/judge\"\n" "destinations must be an array of tables";
   typesafeai_rejects ~what:"a keeper name with whitespace"
     "[typesafeai]\nexcluded_keepers = [\"a b\"]\n" "must be non-empty without whitespace";
+  typesafeai_rejects ~what:"a blank keeper name"
+    "[typesafeai]\nexcluded_keepers = [\"\"]\n"
+    "typesafeai.excluded_keepers: keeper name \"\" must be non-empty without whitespace";
   typesafeai_rejects ~what:"a non-string keeper list"
     "[typesafeai]\nexcluded_keepers = [1]\n" "excluded_keepers must be an array of strings";
   typesafeai_rejects ~what:"a non-boolean switch" "[typesafeai]\nenabled = \"yes\"\n" "enabled must be a boolean"

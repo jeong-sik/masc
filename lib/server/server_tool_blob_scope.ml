@@ -92,9 +92,6 @@ let workspace =
          Their bodies live in [Tool_blob_store] and may embed [Attachment_store]
          media, so attachment GC dereferences their live body blobs too. *)
     ; tree_with_blob_bodies Published_artifact_store.dirname
-      (* Imported project sources can outlive their tool or chat row. *)
-    ; tree Artifact_project_source_store.dirname
-    ; tree Artifact_project_build_store.dirname
     ; file (Board.persisted_filename Board.Posts)
     ; file (Board.persisted_filename Board.Comments)
     ; lane_addons

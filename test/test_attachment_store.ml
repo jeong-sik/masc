@@ -332,6 +332,12 @@ let test_documents_by_structure () =
     (match put ~declared_mime:"application/x-hwpx" (hwpx "") with
      | Ok meta -> Alcotest.(check string) "hwpx declared by its shared-mime-info name" "application/hwp+zip" meta.mime_type
      | Error err -> Alcotest.fail (A.put_error_to_string err));
+    Alcotest.(check (list (option string)))
+      "the shared-mime-info and Tika HWP names read as HWP"
+      [ Some "application/x-hwp"; Some "application/x-hwp" ]
+      (List.map
+         (fun declared -> Option.map A.mime_to_string (A.mime_of_string declared))
+         [ "application/vnd.haansoft-hwp"; "application/x-hwp-v5" ]);
     (match put ~declared_mime:"application/msword" docx with
      | Error (A.Mime_mismatch { declared = "application/msword"; sniffed }) ->
        Alcotest.(check string) "mismatch names the DOCX" docx_mime sniffed

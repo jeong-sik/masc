@@ -938,10 +938,9 @@ let retained_image_rows ~(theme : Theme.t) ~lang ~width ~height images =
               "MIDI"
           | Wire_attachment.Kind_audio, _ -> "AUDIO"
           | Wire_attachment.Kind_video, _ -> "VIDEO"
-          | Wire_attachment.Kind_document, Some m
-            when String.equal (String.lowercase_ascii m) "application/pdf" ->
-              "pdf"
-          | Wire_attachment.Kind_document, _ -> "file"
+          | Wire_attachment.Kind_document, Some m ->
+              Wire_attachment.document_chip_label m
+          | Wire_attachment.Kind_document, None -> "file"
           | Wire_attachment.Kind_image, Some m -> m
           | Wire_attachment.Kind_image, None -> "img"
         in

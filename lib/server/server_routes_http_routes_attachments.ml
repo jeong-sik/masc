@@ -101,22 +101,9 @@ let ascii_fallback_filename ~fallback_name fname =
 
 let content_disposition_of ~download ~(meta : Attachment_store.meta) =
   let ext =
-    match meta.mime_type with
-    | "image/png" -> ".png"
-    | "image/jpeg" -> ".jpg"
-    | "image/webp" -> ".webp"
-    | "image/gif" -> ".gif"
-    | "application/pdf" -> ".pdf"
-    | "audio/mpeg" -> ".mp3"
-    | "audio/wav" -> ".wav"
-    | "audio/ogg" -> ".ogg"
-    | "audio/midi" -> ".mid"
-    | "audio/mp4" -> ".m4a"
-    | "audio/webm" -> ".webm"
-    | "video/mp4" -> ".mp4"
-    | "video/webm" -> ".webm"
-    | "video/quicktime" -> ".mov"
-    | _ -> ".bin"
+    match Attachment_store.mime_of_string meta.mime_type with
+    | Some mime -> Attachment_store.extension_of_mime mime
+    | None -> ".bin"
   in
   let fallback_name = meta.id ^ ext in
   let fname =

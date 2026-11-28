@@ -96,12 +96,11 @@ related: ["a-persons-keeper-runs-on-the-engine", "board-has-one-writer-and-one-l
 - 177개 경로의 기록에 주인 칸이 있다. 값은 Keeper 이름이거나 token 에 붙은 agent 이름이다. 다계정의 사람을 적는 칸은 없다.
 - 예외가 하나 있다. `POST /api/v1/gate/message` 는 요청 몸에서 받은 채널 사용자 id 를 적는다.
 - 읽기를 보는 이로 거르는 곳은 하나다. Board 의 읽기 규칙(`lib/board/board_access.ml:16-26`)이다.
-- 쓰기에서 호출자를 저장된 이름과 견주는 곳은 여섯이다. 여섯 모두 agent 이름 글자를 견준다.
+- 쓰기에서 호출자를 저장된 이름과 견주는 곳은 다섯이다. 다섯 모두 agent 이름 글자를 견준다.
   - run-next(`lib/server/server_routes_http_keeper_control.ml:394-395`)
   - 일정 바꾸기(`lib/tool_schedule.ml:842-846`)
   - sub-board 바꾸기와 지우기(`lib/server/server_routes_http_routes_activity.ml:521-522`)
   - sub-board 에 글쓰기(`lib/board/board_access.ml:30-38`)
-  - artifact draft presence(`lib/artifact_draft_live.ml:49-55`)
   - MCP session 지우기(`lib/server/server_mcp_transport_http.ml:1278-1284`)
 - Keeper 기록을 쓰는 경로 가운데 `CanBroadcast` 만 요구하는 것이 있다. 일정 만들기, 바꾸기, 취소가 그렇다(`lib/tool/tool_catalog.ml:455-459`). Worker 는 `CanBroadcast` 를 가진다.
 - 승인 대기에 답하는 경로는 `CanAdmin` 이다. 주인이 없어서 Worker 가 남의 Keeper 에 답하지 못하게 막은 것이다(`lib/tool/tool_catalog.ml:292-297`).

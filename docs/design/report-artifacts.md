@@ -63,17 +63,13 @@ existing publication endpoints.
 
 ## HTTP and tool contracts
 
-The artifact catalog and shared-draft routes are registered on both the HTTP/1
-router and the h2c gateway. Both apply the same workspace, token and
-allowed-origin checks.
+The artifact catalog routes are registered on both the HTTP/1 router and the
+h2c gateway. Both apply the same workspace, token and allowed-origin checks.
 
 The h2c listener reserves its configured shared response capacity for the
-encoded response and an in-flight chunk. If capacity is unavailable, a normal
-response gets an empty 503; a live draft stream is reset and reconnecting
-attempts a fresh snapshot. If one snapshot exceeds the configured capacity,
-reconnecting cannot deliver it until the capacity changes. A write may already
-have been applied before a 503 or lost connection, so clients must read back its
-outcome before retrying.
+encoded response and an in-flight chunk. If capacity is unavailable, the
+response gets an empty 503. A write may already have been applied before a 503
+or lost connection, so clients must read back its outcome before retrying.
 
 - `GET /api/v1/published-artifacts`: metadata list plus per-entry diagnostics.
 - `GET /api/v1/published-artifacts/<id>?revision=<n>`: selected revision, exact

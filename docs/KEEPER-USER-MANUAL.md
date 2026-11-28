@@ -1141,7 +1141,7 @@ revision; read that publication to inspect it.
 
 `action: "published"` reads an artifact's latest published source and revision
 history. `action: "open"` joins its shared draft, including edits by other
-Keepers or people. Compare the draft's `base_revision` with the latest publication
+Keepers. Compare the draft's `base_revision` with the latest publication
 before publishing its contents; a draft can remain based on an older revision.
 After publishing an exact draft snapshot, use `action: "checkpoint"` with its
 `target`, observed `expected_sequence` and the returned publication `revision`.

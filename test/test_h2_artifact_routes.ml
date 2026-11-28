@@ -1,17 +1,12 @@
 (* Exercise artifact routes through the production H2 connection runner and
-   compare their observable contract with the H1 router. The default live
-   transport fixture uses a minimal synthetic transformer; the optional run
-   uses the actual masc-artifact-document executable. *)
+   compare their observable contract with the H1 router. *)
 open Alcotest
 module Http = Masc.Http_server_eio
-module Live = Masc.Artifact_draft_live
-module Draft = Masc.Artifact_draft
 
 type reply = { status : int; headers : (string * string) list; body : string }
 type transport = H1 | H2
 type gateway =
   { client : H2_eio.Client.t
-  ; flow : Eio_unix.Net.stream_socket_ty Eio.Resource.t
   ; router : Http.Router.t
   ; state : Masc.Mcp_server.server_state
   ; authority : Server_request_authority.authority
@@ -48,7 +43,7 @@ let token base_path ~actor ~role = match Auth.create_token base_path ~agent_name
   | Ok (token, _) -> token
   | Error error -> fail (Masc_domain.masc_error_to_string error)
 
-let with_gateway ?(runtime = false) ?resources ?(zero_window = false) run =
+let with_gateway ?resources run =
   let base_path = Filename.temp_dir "h2-artifacts-" "" |> Unix.realpath in
   let previous_state = Server_auth.For_testing.snapshot_server_state () in
   let previous_startup = Masc.Server_startup_state.snapshot () in
@@ -64,17 +59,7 @@ let with_gateway ?(runtime = false) ?resources ?(zero_window = false) run =
         Eio.Switch.run (fun sw ->
           Eio_context.with_test_env ~sw ~net:(Eio.Stdenv.net env)
             ~clock:(Eio.Stdenv.clock env) ~mono_clock:(Eio.Stdenv.mono_clock env) (fun () ->
-              if runtime then Process_eio.init ~cwd_default:(Eio.Stdenv.fs env)
-                ~proc_mgr:(Eio.Stdenv.process_mgr env) ~clock:(Eio.Stdenv.clock env);
-              Fun.protect ~finally:(fun () -> if runtime then Process_eio.reset_for_testing ()) (fun () ->
-                if runtime then (
-                  Masc.Board.reset_global_for_test ();
-                  Masc.Board_dispatch.reset_for_test ());
-                let state = if runtime then Masc.Mcp_server.create_state_eio ~sw
-                  ~proc_mgr:(Eio.Stdenv.process_mgr env) ~fs:(Eio.Stdenv.fs env)
-                  ~clock:(Eio.Stdenv.clock env) ~mono_clock:(Eio.Stdenv.mono_clock env)
-                  ~net:(Eio.Stdenv.net env) ~base_path
-                else Masc.Mcp_server.For_testing.create_state ~base_path in
+                let state = Masc.Mcp_server.For_testing.create_state ~base_path in
                 ignore (Masc.Workspace.init (Masc.Mcp_server.workspace_config state) ~agent_name:None);
                 Auth.save_auth_config base_path
                   { Masc_domain.default_auth_config with enabled = true; require_token = true };
@@ -93,8 +78,6 @@ let with_gateway ?(runtime = false) ?resources ?(zero_window = false) run =
                 let router = Http.Router.create ()
                   |> Server_routes_http_routes_artifacts.add_routes
                   |> Server_routes_http_routes_published_artifacts.add_routes
-                  |> Server_routes_http_routes_artifact_drafts.add_routes
-                  |> Server_routes_http_routes_artifact_draft_live.add_routes
                   |> Server_routes_http_routes_verification.add_routes
                   |> Server_routes_http_routes_dashboard.add_routes ~sw ~clock:(Eio.Stdenv.clock env) in
                 let handler = Server_h2_gateway.make_request_handler ~routes:router ~trust_policy in
@@ -105,13 +88,12 @@ let with_gateway ?(runtime = false) ?resources ?(zero_window = false) run =
                       ~h2_request_handler:handler ~h2_error_handler:(Server_h2_gateway.make_error_handler ())
                       (`Tcp (Eio.Net.Ipaddr.V4.loopback, 54321)) server_flow)) in
                 let closing = ref false in
-                let config = if zero_window then { H2.Config.default with initial_window_size = 0l } else H2.Config.default in
-                let client = H2_eio.Client.create_connection ~sw ~config
+                let client = H2_eio.Client.create_connection ~sw
                   ~error_handler:(fun _ -> if not !closing then fail "H2 connection failed") client_flow in
-                let gateway = { client; flow = client_flow; router; state; authority; next_stream = 1 } in
+                let gateway = { client; router; state; authority; next_stream = 1 } in
                 Fun.protect ~finally:(fun () -> closing := true; Eio.Flow.shutdown client_flow `All) (fun () ->
                   run ~base_path ~worker ~player ~admin gateway);
-                Eio.Promise.await_exn server))))))
+                Eio.Promise.await_exn server)))))
 
 let auth_headers = function None -> [] | Some token -> ["authorization", "Bearer " ^ token]
 let split_h1 wire =
@@ -203,8 +185,6 @@ let publication_body ?id ?revision content = body
 let list = "/api/v1/published-artifacts"
 let checks = "/api/v1/published-artifact-checks"
 let shares = "/api/v1/published-artifact-shares"
-let drafts = "/api/v1/artifact-drafts"
-let checkpoints = "/api/v1/artifact-draft-checkpoints"
 
 let test_schedule_workspace_read_h1_h2 () =
   with_gateway (fun ~base_path ~worker:_ ~player:_ ~admin gateway ->
@@ -476,7 +456,7 @@ let test_access_and_preconditions () = with_gateway (fun ~base_path ~worker ~pla
      case runs. *)
   let parser_admin = token base_path ~actor:"parser-admin" ~role:Masc_domain.Admin in
   let refused_admin = token base_path ~actor:"refused-admin" ~role:Masc_domain.Admin in
-  let write_paths = [list; drafts; checkpoints; "/api/v1/artifact-draft-presence"] in
+  let write_paths = [list] in
   List.iter (fun path ->
     List.iter (fun (label, token, expected) ->
       pair_status (path ^ " " ^ label) expected (both gateway ?token ~meth:`POST ~body:"{}" path))
@@ -487,30 +467,6 @@ let test_access_and_preconditions () = with_gateway (fun ~base_path ~worker ~pla
       pair_status (path ^ " " ^ label) expected (both gateway ?token ~meth:`POST ~body:"{}" path))
       ["Worker", Some worker, 403; "Player", Some player, 403;
        "anonymous", None, 401; "Admin reaches parser", Some parser_admin, 400]) [checks; shares];
-  let draft_path = drafts ^ "/" ^ id in
-  List.iter (fun (label, token, expected) -> pair_status label expected (both gateway ?token draft_path))
-    ["Admin reaches draft store", Some admin, 404; "Worker draft", Some worker, 403; "Player draft", Some player, 403;
-     "anonymous draft", None, 401; "invalid draft credential", Some "invalid", 401];
-  let events = "/api/v1/artifact-draft-events/" ^ id ^ "?generation=019f0000-0000-7000-8000-000000000000" in
-  List.iter (fun (label, token, expected) -> pair_status label expected (both gateway ?token events))
-    ["Admin reaches SSE admission without runtime", Some admin, 503; "Worker SSE", Some worker, 403; "Player SSE", Some player, 403;
-     "anonymous SSE", None, 401; "invalid SSE credential", Some "invalid", 401];
-  let target = `Assoc ["artifact_id", `String id; "generation", `String "019f0000-0000-7000-8000-000000000000"] in
-  let invalid_checkpoint = body ["target", target; "expected_sequence", `Int (-1); "revision", `Int 1] in
-  let target_text = Yojson.Safe.to_string target in
-  let invalid_bodies = [invalid_checkpoint;
-    "{\"target\":" ^ target_text ^ ",\"expected_sequence\":0,\"revision\":1,\"extra\":true}";
-    "{\"target\":" ^ target_text ^ ",\"expected_sequence\":0,\"revision\":1,\"revision\":1}";
-    "{\"target\":" ^ target_text ^ ",\"expected_sequence\":9007199254740992,\"revision\":1}";
-    "{\"target\":" ^ target_text ^ ",\"expected_sequence\":0,\"revision\":1.0}"] in
-  List.iter (fun invalid ->
-    let rejected = both gateway ~token:refused_admin ~meth:`POST ~body:invalid checkpoints in
-    pair_status "checkpoint validates its exact fields and safe integers" 400 rejected;
-    pair_code "checkpoint validation code" "invalid_artifact_draft" rejected) invalid_bodies;
-  let valid_checkpoint = body ["target", target; "expected_sequence", `Int 0; "revision", `Int 1] in
-  let missing = both gateway ~token:admin ~meth:`POST ~body:valid_checkpoint checkpoints in
-  pair_status "valid checkpoint reaches store" 404 missing;
-  pair_code "missing checkpoint" "artifact_draft_not_found" missing;
   let expected = match Server_workspace_precondition.served_workspace () with
     | Some value -> value | None -> fail "workspace unavailable" in
   let h2_headers = ["x-masc-expected-base-path", expected.base_path; "x-masc-expected-masc-root", expected.masc_root] in
@@ -639,13 +595,11 @@ let test_access_and_preconditions () = with_gateway (fun ~base_path ~worker ~pla
         (header "access-control-allow-origin" reply);
       check bool "untrusted 409 varies by Origin" true (header_has_token "vary" "origin" reply)) [h1; h2]);
   List.iter (fun path ->
-    pair_status "workspace query also guards catalog/check/draft reads" 409
+    pair_status "workspace query also guards catalog and check reads" 409
       (both gateway ~token:admin (path ^ query "/foreign-workspace" expected.masc_root)))
-    [list; checks; draft_path];
+    [list; checks];
   let incomplete_query = both gateway ~token:admin (doc ^ "?expected_base_path=" ^ encode expected.base_path) in
   pair_status "incomplete GET workspace query" 400 incomplete_query;
-  let no_draft_foreign = both gateway ~token:refused_admin ~meth:`POST ~headers:foreign_headers ~body:valid_checkpoint checkpoints in
-  pair_status "foreign checkpoint refused before store" 409 no_draft_foreign;
   let foreign_workspace = `Assoc ["base_path", `String "/foreign-workspace"; "masc_root", `String expected.masc_root] in
   let with_foreign body_text = match Yojson.Safe.from_string body_text with
     | `Assoc fields -> body (("expected_workspace", foreign_workspace) :: fields)
@@ -654,9 +608,7 @@ let test_access_and_preconditions () = with_gateway (fun ~base_path ~worker ~pla
     let rejected = both gateway ~token:refused_admin ~meth:`POST ~body:(with_foreign text) path in
     pair_status "body workspace rejects mutation on both transports" 409 rejected;
     pair_code "body workspace rejection code" "workspace_precondition_failed" rejected)
-    [list, update; drafts, body ["action", `String "open"; "artifact_id", `String id; "revision", `Int 1];
-     checkpoints, valid_checkpoint;
-     "/api/v1/artifact-draft-presence", body ["action", `String "leave"; "target", target; "session_id", `String "missing"]];
+    [list, update];
   let check_body = body ["id", `String id; "revision", `Int 1; "body_sha256", `String digest;
     "checked", `Bool true; "expected_change_id", `Null] in
   let denied_check = request H2 gateway ~token:worker ~meth:`POST ~body:check_body checks in
@@ -716,11 +668,6 @@ let test_access_and_preconditions () = with_gateway (fun ~base_path ~worker ~pla
   check_status "H1 split-body share with Origin succeeds" 200 origin_share;
   check (option string) "H1 delayed share retains admitted Origin" (Some same_origin)
     (header "access-control-allow-origin" origin_share);
-  let origin_checkpoint = request H1 gateway ~token:admin ~headers:origin_headers ~meth:`POST
-    ~body:valid_checkpoint checkpoints in
-  check_status "H1 split-body checkpoint reaches store" 404 origin_checkpoint;
-  check (option string) "H1 delayed checkpoint retains admitted Origin" (Some same_origin)
-    (header "access-control-allow-origin" origin_checkpoint);
   let permitted_h1, permitted_h2 = both gateway ~headers:["origin", same_origin] doc in
   List.iter (fun reply ->
     check_status "same-origin shared read" 200 reply;
@@ -759,335 +706,53 @@ let test_access_and_preconditions () = with_gateway (fun ~base_path ~worker ~pla
   check string "oversize request did not mutate H1 readback" large_source (field_string "content" (json h1));
   check string "oversize request did not mutate H2 readback" large_source (field_string "content" (json h2)))
 
-let reset_frame stream_id =
-  let frame = Bytes.of_string "\000\000\004\003\000\000\000\000\000\000\000\000\008" in
-  Bytes.set_int32_be frame 5 (Int32.of_int stream_id);
-  Bytes.to_string frame
-
-let open_draft_stream gateway ~worker ~headers ~path =
-  let stream_id = gateway.next_stream in
-  gateway.next_stream <- stream_id + 2;
-  let first, resolve = Eio.Promise.create () in
-  let buffer = Buffer.create 1024 in
-  let request = H2.Request.create ~scheme:"http" `GET path
-    ~headers:(H2.Headers.of_list ((":authority", "localhost:8935") ::
-      ("authorization", "Bearer " ^ worker) :: headers)) in
-  let writer = H2_eio.Client.request gateway.client ~flush_headers_immediately:true request
-    ~error_handler:(fun _ -> if not (Eio.Promise.is_resolved first) then Eio.Promise.resolve resolve (Error "SSE stream failed"))
-    ~response_handler:(fun response reader ->
-      if H2.Status.to_code response.status <> 200 then (
-        if not (Eio.Promise.is_resolved first) then Eio.Promise.resolve resolve (Error "SSE admission refused"))
-      else
-        let rec read () = H2.Body.Reader.schedule_read reader
-          ~on_eof:(fun () -> if not (Eio.Promise.is_resolved first) then Eio.Promise.resolve resolve (Error "SSE closed before initial frame"))
-          ~on_read:(fun chunk ~off ~len ->
-            Buffer.add_string buffer (Bigstringaf.substring chunk ~off ~len);
-            if not (Eio.Promise.is_resolved first) then (
-              (* The trailing split element is incomplete until a newline. *)
-              let complete = String.split_on_char '\n' (Buffer.contents buffer) |> List.rev |> List.tl |> List.rev in
-              match List.find_opt (String.starts_with ~prefix:"data: ") complete with
-              | None -> ()
-              | Some line ->
-                check bool "first SSE event is a draft frame" true
-                  (String.starts_with ~prefix:"event: draft\n" (Buffer.contents buffer));
-                let payload = String.sub line 6 (String.length line - 6) in
-                Eio.Promise.resolve resolve (Ok (response, Yojson.Safe.from_string payload)));
-            read ()) in
-        read ()) in
-  H2.Body.Writer.flush writer (fun _ -> H2.Body.Writer.close writer);
-  match Eio.Promise.await first with
-  | Error message -> fail message
-  | Ok (response, frame) -> stream_id, response, frame
-
-let test_live_checkpoint () = with_gateway ~runtime:true (fun ~base_path ~worker:_ ~player:_ ~admin gateway ->
-  let worker = admin in
-  let source = "published shared source\r\n한글 😀\n" in
-  let created = request H2 gateway ~token:worker ~meth:`POST ~body:(publication_body source) list in
-  check_status "publish draft base over H2" 201 created;
-  let id = member "artifact" (json created) |> field_string "id" in
-  let opened = request H2 gateway ~token:worker ~meth:`POST
-    ~body:(body ["action", `String "open"; "artifact_id", `String id; "revision", `Int 1]) drafts in
-  check_status "open a real shared draft over H2" 200 opened;
-  let document = json opened in
-  let draft = member "draft" document in
-  let target_json = member "target" draft in
-  let target = match Draft.target_of_json target_json with Ok target -> target | Error message -> fail message in
-  check int "new draft sequence" 0 (field_int "sequence" draft);
-  let h1, h2 = both gateway ~token:worker (drafts ^ "/" ^ id) in
-  check_status "H1 reads real draft" 200 h1;
-  check_status "H2 reads real draft" 200 h2;
-  check_json "same draft over both transports" (json h1) (json h2);
-  check string "draft source preserved" source (field_string "content" (json h2));
-  let observer = Live.join ~base_path ~actor:"other-worker" ~source:Live.Dashboard_connection ~target in
-  Fun.protect ~finally:(fun () -> Live.leave observer) (fun () ->
-    let path = "/api/v1/artifact-draft-events/" ^ id ^ "?generation=" ^ target.generation in
+(* The listener's shared response capacity refuses an answer after its handler
+   ran, so a write can commit before its 503. One byte of capacity refuses
+   every H2 answer with a body; setup and recovery go through H1, which does
+   not draw on that capacity. *)
+let test_write_commits_before_response_capacity_refusal () =
+  let resources = Masc.Http_h2_response_ledger.create ~max_pending_bytes:1 in
+  with_gateway ~resources (fun ~base_path:_ ~worker:_ ~player:_ ~admin gateway ->
+    let source = String.make (32 * 1024) 's' in
+    let created = request H1 gateway ~token:admin ~meth:`POST ~body:(publication_body source) list in
+    check_status "setup publishes without using H2 response budget" 201 created;
+    let id = member "artifact" (json created) |> field_string "id" in
+    let limited = request H2 gateway ~token:admin (list ^ "/" ^ id) in
+    check_status "oversized ordinary response is an explicit refusal" 503 limited;
+    check string "capacity refusal is not a short successful document" "" limited.body;
+    let unchanged = request H1 gateway ~token:admin (list ^ "/" ^ id) in
+    check string "capacity refusal leaves the publication intact" source (field_string "content" (json unchanged));
+    let uncertain = request H2 gateway ~token:admin ~meth:`POST
+      ~body:(publication_body ~id ~revision:1 "committed before response capacity failed") list in
+    check_status "response capacity may fail after publication commits" 503 uncertain;
+    check string "post-commit 503 does not invent a receipt" "" uncertain.body;
+    let recovered = request H1 gateway ~token:admin (list ^ "/" ^ id) in
+    check_status "H1 can recover publication after H2 503" 200 recovered;
+    check int "publication committed despite H2 503" 2 (member "artifact" (json recovered) |> field_int "revision");
+    check string "readback recovers exact committed content" "committed before response capacity failed"
+      (field_string "content" (json recovered));
     let expected = match Server_workspace_precondition.served_workspace () with
       | Some value -> value | None -> fail "workspace unavailable" in
-    let encode = Uri.pct_encode ~component:`Query_value in
-    let bound base root = path ^ "&expected_base_path=" ^ encode base
-      ^ "&expected_masc_root=" ^ encode root in
-    let receipt = "x-masc-workspace-read" in
-    let origin_headers = ["origin", "http://localhost:8935"] in
-    let leave_h1_session () =
-      let peers = match Live.observe observer with
-        | None -> fail "observer unexpectedly closed"
-        | Some (frame, _) -> member "peers" frame |> Yojson.Safe.Util.to_list in
-      let workers = List.filter (fun peer -> field_string "actor" peer = "admin") peers in
-      check int "one H1 session to clean up" 1 (List.length workers);
-      let session_id = field_string "session_id" (List.hd workers) in
-      (match Live.find ~base_path ~actor:"admin" ~target ~session_id with
-       | Error _ -> fail "H1 session missing before cleanup"
-       | Ok session -> Live.leave session);
-      Eio.Fiber.yield ();
-      let remaining = match Live.observe observer with
-        | None -> fail "observer unexpectedly closed"
-        | Some (frame, _) -> member "peers" frame |> Yojson.Safe.Util.to_list in
-      check bool "H1 session left before the next request" false
-        (List.exists (fun peer -> field_string "actor" peer = "admin") remaining) in
-    let unbound_h1 = request H1 gateway ~token:worker path in
-    check_status "unbound H1 SSE" 200 unbound_h1;
-    check (option string) "unbound H1 SSE has no admission receipt" None (header receipt unbound_h1);
-    leave_h1_session ();
-    let bound_h1 = request H1 gateway ~token:worker ~headers:origin_headers
-      (bound expected.base_path expected.masc_root) in
-    check_status "workspace-bound H1 SSE" 200 bound_h1;
-    check (option string) "H1 SSE carries its workspace admission" (Some "matched-v1") (header receipt bound_h1);
-    check int "H1 SSE admission is not duplicated" 1
-      (List.length (List.filter (fun (name, _) -> String.lowercase_ascii name = receipt) bound_h1.headers));
-    check bool "H1 SSE exposes workspace admission to allowed Origin" true
-      (header_has_token "access-control-expose-headers" receipt bound_h1);
-    leave_h1_session ();
-    pair_status "foreign workspace cannot open SSE" 409
-      (both gateway ~token:worker (bound "/foreign-workspace" expected.masc_root));
-    let unbound_id, unbound_response, _ = open_draft_stream gateway ~worker ~headers:[] ~path in
-    check (option string) "unbound H2 SSE has no admission receipt" None
-      (H2.Headers.get unbound_response.headers receipt);
-    Eio.Flow.copy_string (reset_frame unbound_id) gateway.flow;
-    let stream_id, response, frame = open_draft_stream gateway ~worker ~headers:origin_headers
-      ~path:(bound expected.base_path expected.masc_root) in
-    check (option string) "H2 SSE carries its workspace admission" (Some "matched-v1")
-      (H2.Headers.get response.headers receipt);
-    check int "H2 SSE admission is not duplicated" 1
-      (List.length (List.filter (fun (name, _) -> String.lowercase_ascii name = receipt)
-        (H2.Headers.to_list response.headers)));
-    check bool "H2 SSE exposes workspace admission to allowed Origin" true
-      (H2.Headers.to_list response.headers |> List.exists (fun (name, value) ->
-        String.lowercase_ascii name = "access-control-expose-headers"
-        && (String.split_on_char ',' value |> List.exists (fun part ->
-          String.lowercase_ascii (String.trim part) = receipt))));
-    check (option string) "SSE type" (Some "text/event-stream") (H2.Headers.get response.headers "content-type");
-    check (option string) "SSE is not cached" (Some "private, no-store") (H2.Headers.get response.headers "cache-control");
-    check string "SSE frame schema" "masc.artifact_draft_live.v1" (field_string "schema" frame);
-    check_json "SSE frame names the same draft generation" target_json (member "target" frame);
-    check string "SSE initial draft contains the real source" source
-      (member "document" frame |> field_string "content");
-    let session_id = field_string "session_id" frame in
-    let peers = member "peers" frame |> Yojson.Safe.Util.to_list in
-    check bool "frame owns worker presence" true
-      (List.exists (fun peer -> field_string "session_id" peer = session_id && field_string "actor" peer = "admin") peers);
-    check bool "another active peer remains visible" true
-      (List.exists (fun peer -> field_string "actor" peer = "other-worker") peers);
-    Eio.Flow.copy_string (reset_frame stream_id) gateway.flow;
-    (match Eio.Promise.await (H2_eio.Client.ping gateway.client) with
-     | Ok () -> () | Error `EOF -> fail "connection closed after reset");
-    let rec wait_for_departure () = match Live.observe observer with
-      | None -> fail "observer unexpectedly closed"
-      | Some (frame, pulse) ->
-        let peers = member "peers" frame |> Yojson.Safe.Util.to_list in
-        if List.exists (fun peer -> field_string "session_id" peer = session_id) peers
-        then (Eio.Promise.await pulse; wait_for_departure ())
-        else check bool "other peer survives reset" true
-          (List.exists (fun peer -> field_string "actor" peer = "other-worker") peers) in
-    wait_for_departure ();
-    check bool "reset session no longer belongs to worker" true
-      (Result.is_error (Live.find ~base_path ~actor:"admin" ~target ~session_id)));
-  let revised = request H2 gateway ~token:worker ~meth:`POST
-    ~body:(publication_body ~id ~revision:1 source) list in
-  check_status "publish exact draft as next revision" 201 revised;
-  let checkpoint = body ["target", target_json; "expected_sequence", `Int 0; "revision", `Int 2] in
-  let saved = request H2 gateway ~token:worker ~meth:`POST ~body:checkpoint checkpoints in
-  check_status "checkpoint real shared draft over H2" 200 saved;
-  check string "checkpoint performed" "checkpointed" (field_string "checkpoint" (json saved));
-  let saved_draft = member "document" (json saved) |> member "draft" in
-  check int "checkpoint advances base" 2 (field_int "base_revision" saved_draft);
-  check int "checkpoint advances sequence" 1 (field_int "sequence" saved_draft);
-  check string "authenticated checkpoint actor" "admin" (field_string "updated_by" saved_draft);
-  let replay = request H1 gateway ~token:worker ~meth:`POST ~body:checkpoint checkpoints in
-  check_status "H1 sees same current checkpoint" 200 replay;
-  check string "repeat is observation only" "already_current" (field_string "checkpoint" (json replay));
-  check_json "H1 and H2 checkpoint document is identical" (member "document" (json saved)) (member "document" (json replay));
-  let revised = request H2 gateway ~token:worker ~meth:`POST
-    ~body:(publication_body ~id ~revision:2 source) list in
-  check_status "another publication advances history" 201 revised;
-  let stale = body ["target", target_json; "expected_sequence", `Int 0; "revision", `Int 3] in
-  let stale = both gateway ~token:worker ~meth:`POST ~body:stale checkpoints in
-  pair_status "both transports refuse stale checkpoint sequence" 409 stale;
-  pair_code "same checkpoint conflict" "artifact_draft_sequence_conflict" stale;
-  let h1, h2 = both gateway ~token:worker (drafts ^ "/" ^ id) in
-  check_json "stale checkpoint kept the same draft" (json h1) (json h2);
-  check int "stale checkpoint retained prior base" 2 (member "draft" (json h2) |> field_int "base_revision"))
+    let artifact = member "artifact" (json recovered) in
+    let digest = member "body" artifact |> member "_blob" |> field_string "sha256" in
+    let share_body = body ["id", `String id; "shared", `Bool true;
+      "operation_id", `String "019f0000-0000-7000-8000-000000000002"; "expected_version", `Int 0;
+      "expected_artifact_revision", `Int 2; "expected_artifact_sha256", `String digest;
+      "expected_workspace", `Assoc ["base_path", `String expected.base_path; "masc_root", `String expected.masc_root]] in
+    let uncertain_share = request H2 gateway ~token:admin ~meth:`POST ~body:share_body shares in
+    check_status "sharing may commit before H2 capacity refusal" 503 uncertain_share;
+    let recovered_share = request H1 gateway ~token:admin ~meth:`POST ~body:share_body shares in
+    check_status "identical H1 operation recovers sharing receipt" 200 recovered_share;
+    check string "recovered sharing operation was applied" "applied" (member "receipt" (json recovered_share) |> field_string "outcome");
+    let replay_share = request H1 gateway ~token:admin ~meth:`POST ~body:share_body shares in
+    check_json "share replay preserves receipt" (json recovered_share) (json replay_share))
 
-type pending_stream =
-  { stream_id : int
-  ; headers : H2.Response.t Eio.Promise.t
-  ; error : H2.Client_connection.error Eio.Promise.t
-  }
-
-let open_pending_stream gateway ~worker path =
-  let stream_id = gateway.next_stream in
-  gateway.next_stream <- stream_id + 2;
-  let headers, put_headers = Eio.Promise.create () in
-  let error, put_error = Eio.Promise.create () in
-  let request = H2.Request.create ~scheme:"http" `GET path
-    ~headers:(H2.Headers.of_list [":authority", "localhost:8935"; "authorization", "Bearer " ^ worker]) in
-  let writer = H2_eio.Client.request gateway.client ~flush_headers_immediately:true request
-    ~error_handler:(fun problem -> if not (Eio.Promise.is_resolved error) then Eio.Promise.resolve put_error problem)
-    ~response_handler:(fun response reader ->
-      Eio.Promise.resolve put_headers response;
-      let rec read () = H2.Body.Reader.schedule_read reader ~on_eof:(fun () -> ())
-        ~on_read:(fun _ ~off:_ ~len:_ -> read ()) in
-      read ()) in
-  H2.Body.Writer.flush writer (fun _ -> H2.Body.Writer.close writer);
-  { stream_id; headers; error }
-
-type capacity_mode = Overflow | Peer_reset
-let test_sse_capacity mode () =
-  let module Resources = Masc.Http_h2_response_ledger in
-  let capacity = match mode with Overflow -> 1 | Peer_reset -> 256 * 1024 in
-  let resources = Resources.create ~max_pending_bytes:capacity in
-  with_gateway ~runtime:true ~resources ~zero_window:(mode = Peer_reset)
-    (fun ~base_path ~worker:_ ~player:_ ~admin gateway ->
-      let worker = admin in
-      let source = String.make (32 * 1024) 's' in
-      let created = request H1 gateway ~token:worker ~meth:`POST ~body:(publication_body source) list in
-      check_status "setup publishes without using H2 response budget" 201 created;
-      let id = member "artifact" (json created) |> field_string "id" in
-      let opened = request H1 gateway ~token:worker ~meth:`POST
-        ~body:(body ["action", `String "open"; "artifact_id", `String id; "revision", `Int 1]) drafts in
-      check_status "setup opens draft without using H2 response budget" 200 opened;
-      let target_json = member "draft" (json opened) |> member "target" in
-      let target = match Draft.target_of_json target_json with Ok target -> target | Error message -> fail message in
-      let observer = Live.join ~base_path ~actor:"other-worker" ~source:Live.Dashboard_connection ~target in
-      Fun.protect ~finally:(fun () -> Live.leave observer) (fun () ->
-        let path = "/api/v1/artifact-draft-events/" ^ id ^ "?generation=" ^ target.generation in
-        let stream = open_pending_stream gateway ~worker path in
-        let response = Eio.Promise.await stream.headers in
-        check int "SSE headers committed before its payload" 200 (H2.Status.to_code response.status);
-        let rec wait_for_actor present = match Live.observe observer with
-          | None -> fail "observer unexpectedly closed"
-          | Some (frame, pulse) ->
-            let peers = member "peers" frame |> Yojson.Safe.Util.to_list in
-            let worker_present = List.exists (fun peer -> field_string "actor" peer = "admin") peers in
-            if worker_present <> present then (Eio.Promise.await pulse; wait_for_actor present)
-            else check bool "other observer remains connected" true
-              (List.exists (fun peer -> field_string "actor" peer = "other-worker") peers) in
-        (match mode with
-         | Overflow ->
-           (match Eio.Promise.await stream.error with
-            | `Protocol_error (code, _) ->
-              check bool "capacity refusal resets only this stream" true (code = H2.Error_code.InternalError)
-            | `Malformed_response _ | `Invalid_response_body_length _ | `Exn _ ->
-              fail "capacity exhaustion must reset the stream");
-           wait_for_actor false
-         | Peer_reset ->
-           wait_for_actor true;
-           let rec await_reserved () =
-             let pending = Resources.pending_bytes resources in
-             if pending = 0 then (Eio.Fiber.yield (); await_reserved ())
-             else (
-               check bool "blocked response stays within its budget" true (pending <= capacity);
-               check bool "blocked response accounts for at least the complete source" true
-                 (pending >= String.length source)) in
-           await_reserved ();
-           Eio.Flow.copy_string (reset_frame stream.stream_id) gateway.flow;
-           wait_for_actor false);
-        (match Eio.Promise.await (H2_eio.Client.ping gateway.client) with
-         | Ok () -> () | Error `EOF -> fail "capacity or reset killed the connection");
-        let rec await_release () =
-          if Resources.pending_bytes resources <> 0 then (Eio.Fiber.yield (); await_release ()) in
-        await_release ();
-        check int "stream cancellation releases all reserved response bytes" 0 (Resources.pending_bytes resources);
-        (match mode with
-         | Peer_reset -> ()
-         | Overflow ->
-           let limited = request H2 gateway ~token:worker (list ^ "/" ^ id) in
-           check_status "oversized ordinary response is an explicit refusal" 503 limited;
-           check string "capacity refusal is not a short successful document" "" limited.body;
-           let unchanged = request H1 gateway ~token:worker (list ^ "/" ^ id) in
-           check string "capacity refusal leaves the publication intact" source (field_string "content" (json unchanged));
-           let uncertain = request H2 gateway ~token:worker ~meth:`POST
-             ~body:(publication_body ~id ~revision:1 "committed before response capacity failed") list in
-           check_status "response capacity may fail after publication commits" 503 uncertain;
-           check string "post-commit 503 does not invent a receipt" "" uncertain.body;
-           let recovered = request H1 gateway ~token:worker (list ^ "/" ^ id) in
-           check_status "H1 can recover publication after H2 503" 200 recovered;
-           check int "publication committed despite H2 503" 2 (member "artifact" (json recovered) |> field_int "revision");
-           check string "readback recovers exact committed content" "committed before response capacity failed"
-             (field_string "content" (json recovered));
-           let expected = match Server_workspace_precondition.served_workspace () with
-             | Some value -> value | None -> fail "workspace unavailable" in
-           let artifact = member "artifact" (json recovered) in
-           let digest = member "body" artifact |> member "_blob" |> field_string "sha256" in
-           let share_body = body ["id", `String id; "shared", `Bool true;
-             "operation_id", `String "019f0000-0000-7000-8000-000000000002"; "expected_version", `Int 0;
-             "expected_artifact_revision", `Int 2; "expected_artifact_sha256", `String digest;
-             "expected_workspace", `Assoc ["base_path", `String expected.base_path; "masc_root", `String expected.masc_root]] in
-           let uncertain_share = request H2 gateway ~token:worker ~meth:`POST ~body:share_body shares in
-           check_status "sharing may commit before H2 capacity refusal" 503 uncertain_share;
-           let recovered_share = request H1 gateway ~token:worker ~meth:`POST ~body:share_body shares in
-           check_status "identical H1 operation recovers sharing receipt" 200 recovered_share;
-           check string "recovered sharing operation was applied" "applied" (member "receipt" (json recovered_share) |> field_string "outcome");
-           let replay_share = request H1 gateway ~token:worker ~meth:`POST ~body:share_body shares in
-           check_json "share replay preserves receipt" (json recovered_share) (json replay_share))))
-
-(* This is intentionally not a Yjs implementation. It supports only seed
-   and no-op merge, so the default test exercises transport, persistence and
-   checkpoint admission without claiming real CRDT semantics. *)
-let run_synthetic_transformer () =
-  let input = Yojson.Safe.from_channel stdin in
-  let kind = field_string "kind" input in
-  let state, content = match kind with
-    | "seed" ->
-      let content = field_string "content" input in Base64.encode_string content, content
-    | "merge" when member "updates" input = `List [] ->
-      let state = field_string "state" input in
-      (match Base64.decode state with
-       | Ok content -> state, content
-       | Error (`Msg message) -> fail message)
-    | _ -> fail "synthetic transformer received an unsupported operation" in
-  Yojson.Safe.to_channel stdout (`Assoc ["ok", `Bool true; "state", `String state; "content", `String content]);
-  flush stdout
-
-let with_synthetic_transformer run =
-  let directory = Filename.temp_dir "h2-artifact-transformer-" "" |> Unix.realpath in
-  let executable = Unix.realpath Sys.executable_name in
-  let link = Filename.concat directory "masc-artifact-document" in
-  Unix.symlink executable link;
-  Fun.protect ~finally:(fun () -> Unix.unlink link; Unix.rmdir directory) (fun () ->
-    let original_path = Option.value ~default:"" (Sys.getenv_opt "PATH") in
-    Masc_test_deps.with_process_env "PATH" (Some (directory ^ ":" ^ original_path)) run)
-
-let () = if Filename.basename Sys.argv.(0) = "masc-artifact-document" then run_synthetic_transformer () else (
-  let runtime, argv =
-    if Array.length Sys.argv = 3 && String.equal Sys.argv.(1) "--transformer-dir" then
-      let directory = Sys.argv.(2) in
-      let binary = Filename.concat directory "masc-artifact-document" in
-      if not (Sys.file_exists binary) then failf "transformer not found: %s" binary;
-      let original_path = Option.value ~default:"" (Sys.getenv_opt "PATH") in
-      ["live checkpoint and SSE reset", `Quick, (fun () ->
-        Masc_test_deps.with_process_env "PATH" (Some (directory ^ ":" ^ original_path)) test_live_checkpoint)],
-      [|Sys.argv.(0)|]
-    else [], Sys.argv in
-  run ~argv "H2 artifact gateway"
+let () =
+  run "H2 artifact gateway"
     ["access and workspace", ["H1/H2 parity, publication, body admission", `Quick, test_access_and_preconditions;
        "Schedule reads bind workspaces on H1 and H2", `Quick, test_schedule_workspace_read_h1_h2;
        "Goal planning binds workspace reads on H1 and H2", `Quick, test_goal_planning_workspace_read_h1_h2;
        "Goal Candle is admin and workspace bound with fresh ledger reads", `Quick, test_goal_candle_access_and_fresh_read;
        "Goal confirmation shares H1 and H2 authority and completion", `Quick, test_goal_confirmation_h1_h2];
-     "synthetic transformer transport", ["checkpoint and SSE reset", `Quick,
-       (fun () -> with_synthetic_transformer test_live_checkpoint);
-       "SSE response capacity exhaustion resets the stream", `Quick,
-       (fun () -> with_synthetic_transformer (test_sse_capacity Overflow));
-       "peer reset releases a zero-window SSE response", `Quick,
-       (fun () -> with_synthetic_transformer (test_sse_capacity Peer_reset))];
-     "optional real transformer integration", runtime])
+     "response capacity", ["a write commits before its H2 capacity refusal", `Quick,
+       test_write_commits_before_response_capacity_refusal]]

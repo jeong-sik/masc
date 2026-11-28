@@ -224,8 +224,10 @@ let test_configured_mention_alias_resolves_and_stamps_feed_target () =
     let mentions =
       List.map Keeper_identity.Keeper_id.to_string message.mentions
     in
-    check bool "persisted row carries configured feed target" true
-      (List.mem delivery_target mentions)
+    (* The row carries the Keeper's addresses. Its own name is not one of them,
+       because the list leaves it out. *)
+    check (list string) "persisted row carries exactly the configured feed target"
+      [ delivery_target ] mentions
 ;;
 
 let test_canonical_delivery_stamps_configured_feed_target () =
@@ -234,8 +236,8 @@ let test_canonical_delivery_stamps_configured_feed_target () =
   let alias = "alpha" in
   let request_id = "wmsg-8877665544332211" in
   persist_meta config keeper_name;
-  configure_mention_targets config keeper_name [ alias ];
-  check_effective_mention_targets config keeper_name [ alias ];
+  configure_mention_targets config keeper_name [ keeper_name; alias ];
+  check_effective_mention_targets config keeper_name [ keeper_name; alias ];
   ignore
     (Broadcast_wakeup.deliver_broadcast_mention
        ~config
@@ -250,8 +252,8 @@ let test_canonical_delivery_stamps_configured_feed_target () =
     let mentions =
       List.map Keeper_identity.Keeper_id.to_string message.mentions
     in
-    check bool "canonical row carries configured feed target" true
-      (List.mem alias mentions)
+    check (list string) "canonical row carries every configured feed target"
+      [ alias; keeper_name ] mentions
 ;;
 
 let queued_workspace_messages ~base_path ~keeper_name =
@@ -447,6 +449,33 @@ let test_stopped_keeper_keeps_queue_entry () =
   check int "stopped Keeper still holds the queue entry" 1
     (List.length
        (queued_workspace_messages ~base_path:config.base_path ~keeper_name:target))
+;;
+
+(* A Keeper whose [mention_targets] leave its own name out does not answer to
+   that name, on the Board or here. Nobody else claims it, so the mention is
+   rejected and neither the transcript nor the queue receives it. *)
+let test_own_name_left_out_of_the_targets_is_not_an_address () =
+  with_workspace @@ fun config ->
+  let keeper_name = "beta" in
+  let request_id = "wmsg-8877665544332212" in
+  persist_meta config keeper_name;
+  configure_mention_targets config keeper_name [ "alpha" ];
+  check_effective_mention_targets config keeper_name [ "alpha" ];
+  let outcome =
+    Broadcast_wakeup.deliver_broadcast_mention
+      ~config
+      ~base_path:config.base_path
+      ~is_running:(fun _ -> true)
+      ~is_registered_keeper:(fun _ -> false)
+      ~wakeup:(fun _ -> fail "a name the Keeper does not answer to must not wake it")
+      (delivery ~target:keeper_name ~request_id ~seq:9 ~content:"own name only")
+  in
+  check bool "own name outside the targets is not configured" true
+    (outcome = Workspace_broadcast.Rejected Workspace_broadcast.Target_not_configured);
+  check int "no transcript row" 0
+    (count_delivery_rows ~base_path:config.base_path ~keeper_name ~request_id);
+  check int "no queue entry" 0
+    (List.length (queued_workspace_messages ~base_path:config.base_path ~keeper_name))
 ;;
 
 let fleet_delivery ~request_id ~from_agent ~content
@@ -1034,6 +1063,8 @@ let () =
             test_delivery_enqueues_linear_queue_entry
         ; test_case "stopped Keeper keeps the queue entry" `Quick
             test_stopped_keeper_keeps_queue_entry
+        ; test_case "own name left out of the targets is not an address" `Quick
+            test_own_name_left_out_of_the_targets_is_not_an_address
         ; test_case "indexed retry after exact ack does not wake" `Quick
             test_indexed_retry_after_ack
         ; test_case "indexed retry keeps answers before ack" `Quick

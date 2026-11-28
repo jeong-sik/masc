@@ -366,18 +366,13 @@ let match_targets_of_ids ~(meta : keeper_meta) ~author target_ids =
   if Message_scope.is_self_author ~self_ids author
   then { explicit_mention = false; matched_targets = [] }
   else (
-    let targets =
-      if meta.mention_targets <> [] then meta.mention_targets else [ meta.name ]
-    in
     let matched_targets =
-      targets
-      |> List.filter (fun target ->
-        match Keeper_identity.Keeper_id.of_string target with
-        | None -> false
-        | Some target_id ->
-          List.exists
-            (Keeper_identity.Keeper_id.equal target_id)
-            target_ids)
+      Keeper_lane_mentions.effective_target_ids
+        ~keeper_name:meta.name
+        ~mention_targets:meta.mention_targets
+      |> List.filter (fun own_id ->
+        List.exists (Keeper_identity.Keeper_id.equal own_id) target_ids)
+      |> List.map Keeper_identity.Keeper_id.to_string
     in
     if matched_targets <> []
     then { explicit_mention = true; matched_targets }

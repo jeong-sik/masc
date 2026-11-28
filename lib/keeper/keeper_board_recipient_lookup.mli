@@ -8,6 +8,15 @@
     the router matches a recorded target against those names.  The server
     hands this to {!Board_dispatch.init_jsonl}. *)
 
+val answers : Keeper_meta_contract.keeper_meta -> Keeper_identity.Keeper_id.t -> bool
+(** [answers meta id] is [true] when [id] is one of the names the Keeper with
+    effective settings [meta] answers to
+    ({!Keeper_lane_mentions.effective_target_ids}). The lookup below and the
+    broadcast mention path both take a Keeper's own name only when this holds.
+    A broadcast names one Keeper; the Board router delivers a recorded name to
+    every Keeper that answers to it, so when an own name is also another
+    Keeper's alias the Board reaches both and the broadcast the owner alone. *)
+
 val make : config:Workspace.config -> Recipient_lookup.t
 (** [make ~config] retains the resolved workspace configuration for the lookup's
     lifetime. Each write reads fresh Keeper settings from that same workspace;

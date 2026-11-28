@@ -169,14 +169,27 @@ let broadcast_mention_wakeup_action = function
   | Some target when String.trim target <> "" -> `Wake_keeper target
   | Some _ | None -> `Suppress_no_target
 
+(* A mention reaches a Keeper the Board router delivers the same name to. The
+   written name is folded to its id first, as the Board lookup folds it, and a
+   Keeper name is that lower-case id. The settings under that name are taken
+   only when they belong to that Keeper and it answers to the name
+   ([Keeper_board_recipient_lookup.answers]). A Keeper whose [mention_targets]
+   leave its own name out is looked up among the aliases like any other name. *)
 let resolve_broadcast_mention_target ~config target =
-  match Keeper_meta_store.read_effective_meta config target with
-  | Error detail -> Error detail
-  | Ok (Some meta) -> Ok (Some (target, meta))
-  | Ok None ->
-    Keeper_meta_store.persisted_keeper_for_mention_target
-      config
-      ~mention_target:target
+  match Keeper_identity.Keeper_id.of_string target with
+  | None -> Ok None
+  | Some id ->
+    let name = Keeper_identity.Keeper_id.to_string id in
+    (match Keeper_meta_store.read_effective_meta config name with
+     | Error detail -> Error detail
+     | Ok (Some meta)
+       when String.equal meta.Keeper_meta_contract.name name
+            && Keeper_board_recipient_lookup.answers meta id ->
+       Ok (Some (name, meta))
+     | Ok (Some _ | None) ->
+       Keeper_meta_store.persisted_keeper_for_mention_target
+         config
+         ~mention_target:name)
 
 (* Who wrote a workspace message, as the recipient's transcript records it.
    A sender the Keeper registry holds under exactly this name is that Keeper;
@@ -222,7 +235,7 @@ let deliver_broadcast_mention
        Workspace_broadcast.Deferred Workspace_broadcast.Target_state_unavailable
      | Ok None ->
        Log.Keeper.warn
-         "broadcast mention target has no persisted Keeper metadata; delivery rejected keeper=%s request_id=%s seq=%d"
+         "broadcast mention target is a name no persisted Keeper answers to; delivery rejected keeper=%s request_id=%s seq=%d"
          requested_target delivery.request_id delivery.seq;
        Workspace_broadcast.Rejected Workspace_broadcast.Target_not_configured
      | Ok (Some (target, meta)) ->
@@ -244,9 +257,9 @@ let deliver_broadcast_mention
               ~from_agent:delivery.from_agent
           in
           let mention_ids =
-            target :: meta.Keeper_meta_contract.mention_targets
-            |> List.filter_map Keeper_identity.Keeper_id.of_string
-            |> List.sort_uniq Keeper_identity.Keeper_id.compare
+            Keeper_lane_mentions.effective_target_ids
+              ~keeper_name:meta.Keeper_meta_contract.name
+              ~mention_targets:meta.mention_targets
           in
           let sender_kind =
             if is_registered_keeper delivery.from_agent

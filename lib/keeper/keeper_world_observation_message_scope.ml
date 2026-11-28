@@ -7,7 +7,10 @@ open Keeper_memory_recall
 open Keeper_context_runtime
 
 let message_feed_targets (meta : keeper_meta) =
-  if meta.mention_targets <> [] then meta.mention_targets else [ meta.name ]
+  Keeper_lane_mentions.effective_target_ids
+    ~keeper_name:meta.name
+    ~mention_targets:meta.mention_targets
+  |> List.map Keeper_identity.Keeper_id.to_string
 ;;
 
 (* Identities are minted once at the parse boundary by

@@ -391,14 +391,6 @@ let test_projection_names_equal_turn_surface_authority () =
           |> Yojson.Safe.Util.member "properties"
           |> Yojson.Safe.Util.member "content_revision"
           <> `Null);
-       check (list string) "inside identity only the name is required"
-         [ "name" ]
-         (input_schema
-          |> Yojson.Safe.Util.member "properties"
-          |> Yojson.Safe.Util.member "identity"
-          |> Yojson.Safe.Util.member "required"
-          |> Yojson.Safe.Util.to_list
-          |> List.map Yojson.Safe.Util.to_string);
        (* A bare top-level name is still not the input shape: the name goes
           inside [identity], beside the source and package that tell two
           same-named Skills apart when one list holds both. *)

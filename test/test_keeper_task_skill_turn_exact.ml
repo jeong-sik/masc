@@ -712,6 +712,18 @@ let test_instruction_tool_reads_by_name_and_refuses_a_written_mismatch () =
     (has
        tool.schema.description
        (Yojson.Safe.to_string (Reference.identity_to_yojson solo.Reference.identity)));
+  let identity_required =
+    match tool.schema.input_schema with
+    | None -> fail "keeper_skill omitted its input schema"
+    | Some input_schema ->
+      input_schema
+      |> Yojson.Safe.Util.member "properties"
+      |> Yojson.Safe.Util.member "identity"
+      |> Yojson.Safe.Util.member "required"
+      |> Yojson.Safe.Util.to_list
+      |> List.map Yojson.Safe.Util.to_string
+  in
+  check (list string) "inside identity only the name is required" [ "name" ] identity_required;
   let by_name = call [ "name", `String "solo" ] in
   check bool "a name the list holds once reads that Skill" true (has by_name "SOLO_BODY");
   let exact = run_skill_tool tool (Reference.to_yojson solo) in

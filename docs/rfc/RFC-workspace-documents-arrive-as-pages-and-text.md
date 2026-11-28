@@ -47,7 +47,8 @@ MIME 문자열 비교도 흩어져 있다.
 
 - 아홉 형식이 업로드에서 받아들여진다. 형식은 파일 이름이 아니라 내용 구조로 정한다.
   `.doc` 라는 이름의 DOCX 도 DOCX 로 받는다.
-- 암호가 걸린 문서는 업로드할 때 `Encrypted_document` 로 거절한다. 메시지는 「암호를 푼 뒤 다시 올려 주세요」다.
+- PDF 가 아닌 암호 문서는 업로드할 때 `Encrypted_document` 로 거절한다. 메시지는 「암호를 푼 뒤 다시 올려 주세요」다.
+  PDF 는 `%PDF-` 로 판별하고 암호를 보지 않는다. 지금처럼 받는다.
 - Dashboard 는 첨부 카드에 첫 페이지와 쪽수를 보여 준다. 누르면 페이지 보기가 열린다.
 - TUI 는 첫 페이지를 Kitty·iTerm2·반블록으로 그리고, `/page <n>` 으로 넘긴다.
 - Keeper 는 아홉 형식의 글을 읽는다. 표는 Markdown 표로, 슬라이드는 슬라이드마다 절로 나뉜다.
@@ -91,14 +92,22 @@ ZIP 의 목차는 파일 끝에 있으므로, TUI 는 최대 크기 안에서 �
   `mimetype` 과 `[Content_Types].xml` 이 함께 있거나 main part 가 둘이면 여기에 걸린다.
 - 공개 HWPX 표본 521개 중 61개는 `mimetype` 이 첫 항목이 아니거나 압축되어 있었다. 그래서 HWPX 는 위치와 압축을 보지 않는다.
 - 매크로가 든 OOXML(`…macroEnabled.main+xml`)은 닫힌 집합 밖이라 `Unsupported_or_unknown_format` 이다.
-- XML 은 이미 쓰는 `markup` 으로 읽는다. 부분 문자열로 찾지 않는다.
+- XML 은 `xmlm`(ISC, 순수 OCaml)으로 한 번에 읽는다. 부분 문자열로 찾지 않는다.
+  DTD 선언이 있거나 한 요소에 같은 속성을 두 번 쓴 part 는 깨진 컨테이너다.
+  이미 쓰는 `markup` 1.0.3 은 속성 하나를 읽을 때마다 앞의 속성을 모두 훑는다.
+  시작 태그 하나에 속성 3만 개를 넣은 256 KiB manifest 를 읽는 데 CPU 14초가 들었다. `xmlm` 은 같은 part 를 0.03초에 읽었다.
 - ZIP 은 `zipc`(ISC, 순수 OCaml)로 읽는다. 펼치는 항목은 `_rels/.rels`·`[Content_Types].xml`·`mimetype`·`META-INF/manifest.xml` 넷뿐이다.
   적힌 크기가 `part_max_bytes` 를 넘으면 펼치지 않고 깨진 컨테이너로 본다. 상한은 항목마다 다르다.
   `_rels/.rels` 64 KiB, `[Content_Types].xml` 256 KiB, `mimetype` 1 KiB, `META-INF/manifest.xml` 256 KiB 다.
   표본에서 가장 큰 것은 727 B·14.5 KB(40쪽 발표 문서)·19 B·4.9 KB 였다.
-  엄격 XML 읽기는 1 MiB 에 CPU 0.21~0.43초가 들었고, 그런 1 MiB 는 약 2 KB 로 압축된다. 그래서 상한으로 한 업로드의 XML 을 320 KiB(약 0.13초)로 묶는다.
+  같은 태그를 되풀이한 1 MiB 는 약 2 KB 로 압축된다. 그래서 상한은 적힌 펼친 크기에 건다.
+  한 업로드가 읽는 XML 은 `_rels/.rels` 와 256 KiB part 하나, 합쳐 320 KiB 를 넘지 않는다.
+  재 본 모양 가운데 가장 비싼 것(속성 3만 개짜리 시작 태그, 3만 7천 겹 중첩)도 256 KiB 에 CPU 0.03초였다(`Sys.time`, M3 Max).
+  central directory 의 항목 수가 서로 다른 이름 수보다 많으면, 곧 같은 이름이 두 번 적혀 있으면 깨진 컨테이너다. 읽는 쪽마다 다른 사본을 고를 수 있어서다.
+  main part 는 패키지 안을 가리키는 `officeDocument` 관계로 고른다. `TargetMode="External"` 관계는 세지 않는다.
+  Target 은 패키지 루트에서 RFC 3986 §5.2.4 대로 `.`·`..` 를 지운 이름이다.
   OPC 이름(`_rels/.rels`·`[Content_Types].xml`·주 part)은 대소문자를 가리지 않고 찾는다. 대소문자만 다른 항목이 둘이면 깨진 컨테이너다. HWPX 의 두 항목은 이름이 정확히 같아야 한다.
-  zipc 0.2.0 의 inflate 는 깨진 Deflate 에서 `Invalid_argument` 를 던진다. 판별은 그 호출에서만 이 예외를 깨진 항목으로 바꾼다. decompress 1.6.1 도 같은 종류의 예외를 던져서 inflate 를 바꾸지 않았다.
+  zipc 0.2.0 의 inflate 는 깨진 Deflate 에서 `Invalid_argument` 를 던진다(dbuenzli/zipc#13, 고침 dbuenzli/zipc#14). 판별은 그 호출에서만 이 예외를 깨진 항목으로 바꾼다. decompress 1.6.1 도 같은 종류의 예외를 던져서 inflate 를 바꾸지 않았다.
   펼친 크기가 central directory 에 적힌 크기와 달라도 깨진 컨테이너다.
 - CFB 를 읽는 OCaml 라이브러리는 찾지 못했다. 그래서 작은 reader 를 둔다.
   이 reader 는 header·FAT·miniFAT·디렉터리를 읽고, 이름이 정해진 stream 의 앞부분을 읽는다.
@@ -123,6 +132,9 @@ L2 가 이 표를 명세와 표본으로 시험 표에 고정한다.
 wire MIME 은 IANA 등록 값을 쓴다. HWP 와 HWPX 는 IANA 에 등록된 값이 없다
 ([libmagic 논의](https://bugs.astron.com/view.php?id=467)).
 그래서 HWPX 는 파일이 스스로 적는 `application/hwp+zip` 을, HWP 는 `application/x-hwp` 를 쓴다.
+선언 MIME 으로는 freedesktop shared-mime-info 와 Apache Tika 가 쓰는 다른 이름도 받는다.
+HWP 는 `application/vnd.haansoft-hwp`·`application/x-hwp-v5`, HWPX 는 `application/x-hwpx`·`application/vnd.hancom.hwpx`·`application/x-hwp+zip` 이다.
+출처가 없는 이름은 받지 않는다.
 
 클라이언트는 문서의 MIME 을 확장자로 정하지 않는다.
 Dashboard 와 TUI 는 문서를 `application/octet-stream` 으로 보내고, 서버가 판별한다(`attachment_store.ml:1310`).
@@ -332,7 +344,10 @@ Claude API 는 document 블록에 DOCX·XLSX 같은 바이너리 형식을 받�
 원본 블록으로 보내면 턴이 provider 의 400 으로 끝난다.
 이 규칙은 첨부 저장소가 문서를 받기 시작하는 L2 층에 같이 넣는다.
 L5 의 reader 가 생기기 전까지 여덟 형식은 `no_matching_reader` 로 「읽을 수 없음」 표시가 된다.
-DOCX 처럼 모델이 받지 못하는 형식은 지금의 「원본을 못 받는 후보」 경로로 reading 이 들어간다.
+
+- 여덟 형식은 입력 modality 를 요구하지 않는다. 그래서 이 문서 때문에 턴을 다른 runtime 으로 옮기지 않는다.
+- Keeper 의 두 입구(`project_input_for_attempt`, `prepare_request_media`)는 이 문서가 있으면 runtime 과 상관없이 투영한다. goal·history·checkpoint 와 도구 결과 안이 모두 대상이다.
+- provider 호출 직전의 capability 검사는 아직 읽지 않은 이 문서 블록을 거절한다. 투영을 거치지 않은 호출도 provider 400 대신 그 자리에서 끝난다.
 
 ### 3.6 클라이언트
 
@@ -424,7 +439,7 @@ upstream `main` 의 `981ce66b41`(v0.9.1, 11-18)을 이 맥에서 빌드해 쟀�
 - `failure_keeps_evidence`: `Corrupt` 는 변환기 stderr 를 evidence 로 갖는다. 실패한 출력은 저장하지 않는다.
 - `no_wall_clock_death`: 캐시는 원본이 없어질 때와 변환기 판이 바뀔 때만 지운다.
 - `budget_gate`: `render_wall_clock_bound`, `render_output_max_bytes`, `package_part_max_bytes` 는 안전·자원 경계다. Keeper 행동을 제한하지 않는다.
-- `libraries`: LibreOffice, rhwp, Poppler, pandoc, `zipc`, `markup` 을 쓴다. 새로 만드는 것은 CFB reader 뿐이다.
+- `libraries`: LibreOffice, rhwp, Poppler, pandoc, `zipc`, `xmlm` 을 쓴다. 새로 만드는 것은 CFB reader 뿐이다.
 - 번들: Dashboard 에 변환 라이브러리를 넣지 않는다. 배포 자산과 첫 화면 `index.js` gzip 바이트를 `main` 과 비교해 PR 에 남긴다.
 
 ## 6. Stack 계획
@@ -432,7 +447,7 @@ upstream `main` 의 `981ce66b41`(v0.9.1, 11-18)을 이 맥에서 빌드해 쟀�
 | 층 | 범위 | 확인 |
 |---|---|---|
 | L1 | 이 RFC, §4 측정값 | `python3 scripts/rfc-generate-index.py --check` |
-| L2 | `media_format`(ZIP·CFB 판별, 암호 bit), `document_format`, `Encrypted_document`, MIME 문자열 비교 세 곳 교체. `zipc` 를 `dune-project`·`masc.opam`·`masc.opam.locked` 에 더한다 | PR `type-check`, 생성 표본과 깨진 표본의 시험 표 |
+| L2 | `media_format`(ZIP·CFB 판별, 암호 bit), `document_format`, `Encrypted_document`, MIME 문자열 비교 세 곳 교체. `zipc`·`xmlm` 을 `dune-project`·`masc.opam`·`masc.opam.locked` 에 더한다 | PR `type-check`, 생성 표본과 깨진 표본의 시험 표 |
 | L3 | 이미지 입력과 worker(`render`·`page`), `masc document-renderer-setup`, 격리 인자 함수 분리, tar 검증, 실행 | PR `type-check`, 이미지 빌드 workflow, 표본 열두 개 변환 결과, 한국어 표본의 `pdffonts` CJK 글꼴, Docker·Apple container 기동 비용 |
 | L4 | rendition·페이지 캐시, single-flight·순서 대기, 시작 시 정리, GC 연결, HTTP 네 경로 | PR `type-check`, 캐시·GC 시험 |
 | L5 | `builtin.document_text` reader | PR `type-check`, reader identity 와 캐시 재사용 시험 |

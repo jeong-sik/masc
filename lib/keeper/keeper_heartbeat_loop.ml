@@ -992,6 +992,64 @@ let pending_stimulus_remains ~ctx ~keeper_name =
     false
 ;;
 
+(* What the autonomous line has waiting when the Owner chooses the next turn
+   (RFC a-keeper-takes-every-waiting-message-in-one-turn 4.1-3): a run that
+   needs no row (a deferred runtime suffix or a due periodic boundary), board
+   activity this cycle collected, or an Event Queue row that intake admits
+   now. The Owner calls this on its own fiber whenever it chooses, so it reads
+   the queue's store and waits on no other fiber. A queue it cannot read
+   counts as waiting: the turn's own intake then meets the failure and
+   records it. *)
+let autonomous_input ~(ctx : _ context) ~keeper_name ~wake ~pending_board_events () =
+  match (wake : Keeper_world_observation.cycle_wake) with
+  | Keeper_world_observation.Periodic_tick
+  | Keeper_world_observation.Deferred_runtime_lane _ ->
+    Keeper_owner.Autonomous_input_waiting
+  | Keeper_world_observation.Attention_wake ->
+    (match pending_board_events with
+     | _ :: _ -> Keeper_owner.Autonomous_input_waiting
+     | [] ->
+       let base_path = ctx.config.base_path in
+       (match
+          Keeper_registry_event_queue.peek_when_result
+            ~base_path
+            keeper_name
+            ~now:(Time_compat.now ())
+            ~ready:(Stimulus_intake.stimulus_ready_for_intake ~base_path)
+        with
+        | Ok (Some _) -> Keeper_owner.Autonomous_input_waiting
+        | Ok None -> Keeper_owner.No_autonomous_input
+        | Error detail ->
+          Log.Keeper.warn
+            ~keeper_name
+            "event queue peek for the turn slot failed; the autonomous line counts as waiting: %s"
+            detail;
+          Keeper_owner.Autonomous_input_waiting))
+;;
+
+(* The meta an autonomous turn starts from. The Owner can hold the offer while
+   a chat turn runs, and that turn commits meta of its own, so the turn reads
+   the Keeper's meta again as the cycle did instead of keeping the copy taken
+   when the cycle offered it. *)
+let meta_at_turn_start ~(ctx : _ context) ~(offered : keeper_meta) =
+  let owner_meta =
+    match
+      Keeper_owner_registry.get ~base_path:ctx.config.base_path ~keeper_name:offered.name
+    with
+    | Ok owner -> (Keeper_owner.projection owner).meta
+    | Error error ->
+      Log.Keeper.error
+        "%s: owner projection unavailable at autonomous turn start: %s"
+        offered.name
+        (Keeper_owner_registry.lookup_error_to_string error);
+      None
+  in
+  effective_keepalive_meta
+    ~base_path:ctx.config.base_path
+    ~fallback:offered
+    ~disk_meta_opt:owner_meta
+;;
+
 (* Whether the event queue holds an [At_tick] coalesced entry (non-Low
    urgency) that should wake on this Keeper's deterministic staggered tick
    grid rather than sleeping the full adaptive idle interval. *)
@@ -1182,14 +1240,34 @@ let run_keepalive_unified_turn
        forward. Admission and HITL revalidation can still end the cycle. *)
     let decided_channel = ref None in
     match
-      Keeper_owner_registry.run_autonomous_if_idle
+      Keeper_owner_registry.run_autonomous_turn
         ~base_path:ctx.config.base_path
         ~keeper_name:meta_after_triage.name
+        ~input:
+          (autonomous_input
+             ~ctx
+             ~keeper_name:meta_after_triage.name
+             ~wake
+             ~pending_board_events)
         (* Keep the caller's Tool/HTTP observer bindings captured before the
            Owner forks its child. *)
         (Keeper_tool_call_log.capture_commit_observer
          @@ Llm_provider.Http_request_observer.capture (fun () ->
            Keeper_turn_dispatch_authority.run (fun admission_token ->
+    let meta_after_triage = meta_at_turn_start ~ctx ~offered:meta_after_triage in
+    (* A runtime assignment that changed while the offer waited drops the
+       suffix recorded for the old one, as [Deferred_lane_slot.for_assignment]
+       does at the next cycle. *)
+    let deferred_runtime_lane =
+      match deferred_runtime_lane with
+      | Some (hint : Keeper_turn_driver.deferred_runtime_lane)
+        when not
+               (String.equal
+                  hint.assignment_id
+                  (Keeper_meta_contract.runtime_id_of_meta meta_after_triage)) ->
+        None
+      | Some _ | None -> deferred_runtime_lane
+    in
     let source_batch = ref Keeper_heartbeat_source_batch.empty in
     let pulse_cause = ref None in
     let diagnostic_selection = ref None in
@@ -1670,7 +1748,7 @@ let run_keepalive_unified_turn
     | exn when Keeper_registry_types.is_operator_interrupt exn ->
       (* The Owner failed the child switch with this exception, so
          [Switch.run] re-raises it whatever this body returns. Let it
-         propagate; [run_autonomous_if_idle] answers [`Interrupted] and the
+         propagate; [run_autonomous_turn] answers [`Interrupted] and the
          outcome is built once, below. *)
       let backtrace = Printexc.get_raw_backtrace () in
       Printexc.raise_with_backtrace exn backtrace

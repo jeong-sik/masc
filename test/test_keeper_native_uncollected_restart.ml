@@ -161,8 +161,8 @@ let run_phase ~child root =
     {ready=(fun ~keeper_name:_ -> true); execute;
      on_execution_settled=(fun ~keeper_name:_ ~claimed_operation_id:_ ~operations:_ ~execution ->
        Eio.Promise.resolve resolve_settled execution)} in
-  Registry.install_from_store ~sw ~operation_runner:(Some runner)
-    ~on_turn_slot_released:None workspace |> require "install Owner" |> ignore;
+  Registry.install_from_store ~sw ~operation_runner:(Some runner) workspace
+  |> require "install Owner" |> ignore;
   Native.complete_restart_settlements ~runtime ~base_path:root
     |> require "complete startup native journal settlement" |> ignore;
   if child then (

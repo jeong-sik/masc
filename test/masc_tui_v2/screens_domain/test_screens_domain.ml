@@ -321,6 +321,11 @@ let make_rich_model ~lang ~cols ~rows =
     {
       broken_link = 1;
       unsupported_link = 0;
+      broken_media_embed = 0;
+      broken_wiki_embed = 0;
+      broken_artifact_embed = 0;
+      invalid_embed = 0;
+      unsupported_embed = 0;
       orphan = 1;
       orphan_unconfirmed = 0;
       missing_sources = 0;
@@ -2185,6 +2190,11 @@ let test_p1_p2_verifier_regressions () =
         {
           broken_link = 0;
           unsupported_link = 0;
+          broken_media_embed = 0;
+          broken_wiki_embed = 0;
+          broken_artifact_embed = 0;
+          invalid_embed = 0;
+          unsupported_embed = 0;
           orphan = 1;
           orphan_unconfirmed = 0;
           missing_sources = 0;
@@ -3680,6 +3690,11 @@ let test_nav_display_order_monotonic_screen_rows () =
         {
           broken_link = 0;
           unsupported_link = 0;
+          broken_media_embed = 0;
+          broken_wiki_embed = 0;
+          broken_artifact_embed = 0;
+          invalid_embed = 0;
+          unsupported_embed = 0;
           orphan = 0;
           orphan_unconfirmed = 0;
           missing_sources = 0;
@@ -4838,6 +4853,11 @@ let test_wiki_card_scroll_matches_the_drawn_card () =
             {
               broken_link = 0;
               unsupported_link = 0;
+              broken_media_embed = 0;
+              broken_wiki_embed = 0;
+              broken_artifact_embed = 0;
+              invalid_embed = 0;
+              unsupported_embed = 0;
               orphan = 0;
               orphan_unconfirmed = 0;
               missing_sources = 0;

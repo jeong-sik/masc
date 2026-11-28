@@ -1571,6 +1571,35 @@ let draw_wiki_preview ~show_inline_rail ~zoomed ~scroll ~grid ~cache
                 H.draw_observed_placeholder ~grid ~rect:content ~theme ~lang
                   k.wiki_index))
 
+(* The name of a lint kind. A kind this build does not know is shown as the
+   server wrote it. *)
+let wiki_lint_kind_say = function
+  | Wire_knowledge.Broken_link -> Say.make ~ko:"깨진 링크" ~en:"Broken link"
+  | Wire_knowledge.Unsupported_link ->
+      Say.make ~ko:"지원하지 않는 링크" ~en:"Unsupported link"
+  | Wire_knowledge.Broken_media_embed ->
+      Say.make ~ko:"없는 그림 임베드" ~en:"Missing image embed"
+  | Wire_knowledge.Broken_wiki_embed ->
+      Say.make ~ko:"없는 문서 임베드" ~en:"Missing page embed"
+  | Wire_knowledge.Broken_artifact_embed ->
+      Say.make ~ko:"없는 아티팩트 임베드" ~en:"Missing artifact embed"
+  | Wire_knowledge.Invalid_embed -> Say.make ~ko:"잘못 쓴 임베드" ~en:"Invalid embed"
+  | Wire_knowledge.Unsupported_embed ->
+      Say.make ~ko:"지원하지 않는 임베드" ~en:"Unsupported embed"
+  | Wire_knowledge.Orphan_page -> Say.make ~ko:"고아 문서" ~en:"Orphan page"
+  | Wire_knowledge.Orphan_unconfirmed ->
+      Say.make ~ko:"고아 후보" ~en:"Possible orphan"
+  | Wire_knowledge.Missing_sources -> Say.make ~ko:"출처 없음" ~en:"No sources"
+  | Wire_knowledge.Hearsay_only ->
+      Say.make ~ko:"들은 말(said:)만 출처로 있음" ~en:"Hearsay sources only"
+  | Wire_knowledge.Unreadable_page ->
+      Say.make ~ko:"읽을 수 없는 문서" ~en:"Unreadable page"
+  | Wire_knowledge.Revision_log_gap ->
+      Say.make ~ko:"로그 리비전이 문서보다 앞섬" ~en:"Log ahead of page"
+  | Wire_knowledge.Revision_log_hole ->
+      Say.make ~ko:"로그에 빠진 리비전" ~en:"Revision missing from log"
+  | Wire_knowledge.Other_lint raw -> Say.literal raw
+
 let draw_wiki_links_lint_card ~slug ~lang ~(k : Knowledge_store.t) ~cache
     ~(rect : Rect.t) ~(theme : Theme.t) ~bp grid =
   let side_inner =
@@ -1669,10 +1698,15 @@ let draw_wiki_links_lint_card ~slug ~lang ~(k : Knowledge_store.t) ~cache
                   if !y < bottom then begin
                     Card.draw_left_rail ~tone:Theme.Status_attention grid
                       ~x:side_inner.x ~y:!y ~h:1 ~theme;
+                    (* The card is about one page, so the row names the
+                       finding and what it points at, not the page again. *)
                     let txt =
-                      Printf.sprintf "%s %s"
+                      Printf.sprintf "%s %s%s"
                         (Glyph.to_utf8 Glyph.Warning_triangle)
-                        lf.subject
+                        (Say.resolve lang (wiki_lint_kind_say lf.kind))
+                        (match lf.target with
+                         | Some target -> " · " ^ target
+                         | None -> "")
                     in
                     ignore
                       (H.put_clipped ~grid ~clip:side_inner
@@ -1712,12 +1746,16 @@ let render_wiki ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~b
                   | Some _ | None -> Some f.subject)
               | Wire_knowledge.Broken_link
               | Wire_knowledge.Unsupported_link
+              | Wire_knowledge.Broken_media_embed
+              | Wire_knowledge.Broken_wiki_embed
+              | Wire_knowledge.Broken_artifact_embed
+              | Wire_knowledge.Invalid_embed
+              | Wire_knowledge.Unsupported_embed
               | Wire_knowledge.Missing_sources
               | Wire_knowledge.Hearsay_only
               | Wire_knowledge.Unreadable_page
               | Wire_knowledge.Revision_log_gap
               | Wire_knowledge.Revision_log_hole
-              | Wire_knowledge.Duplicate_title_candidate
               | Wire_knowledge.Other_lint _ ->
                   None)
             rep.findings
@@ -1731,20 +1769,15 @@ let render_wiki ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~b
             | None -> []
         in
         Some
-          ( rep.counts.duplicate_title_candidates
-          , rep.counts.orphan
-          , rep.counts.broken_link
-          , rep.pages_unreadable
+          ( Wire_knowledge.wiki_lint_tally rep.counts ~findings:rep.findings
           , rep.duplicate_title_candidates
           , orphans )
     | None -> (
         match Observed.to_option k.wiki_index with
         | Some idx ->
             Some
-              ( idx.lint.counts.duplicate_title_candidates
-              , idx.lint.counts.orphan
-              , idx.lint.counts.broken_link
-              , idx.pages_unreadable
+              ( Wire_knowledge.wiki_lint_tally idx.lint.counts
+                  ~findings:idx.lint.findings
               , idx.lint.duplicate_title_candidates
               , idx.lint.orphans )
         | None -> None)
@@ -1758,22 +1791,29 @@ let render_wiki ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~b
     | None ->
         Say.resolve lang
           (Say.make ~ko:"wiki-lint: 미보고" ~en:"wiki-lint: Unreported")
-    | Some (dup, orph, broken, unread, _, _) ->
-        if dup + orph + broken + unread = 0 then
+    | Some ({ Wire_knowledge.duplicates; orphans; broken; other }, _, _) ->
+        if duplicates + orphans + broken + other = 0 then
           Printf.sprintf "%s %s"
             (Glyph.to_utf8 Glyph.Check_mark)
             (Say.resolve lang
-               (Say.make ~ko:"wiki-lint 정상 (중복 0 · 고아 0)"
-                  ~en:"wiki-lint clean (0 dup · 0 orphans)"))
+               (Say.make ~ko:"wiki-lint 정상" ~en:"wiki-lint clean"))
         else
-          Printf.sprintf "%s lint: %s %d · %s %d · %s %d"
+          (* The hint gets a third of the bar, so a zero count is left out. *)
+          let part ~ko ~en n =
+            if n > 0 then
+              Some (Printf.sprintf "%s %d" (Say.resolve lang (Say.make ~ko ~en)) n)
+            else None
+          in
+          Printf.sprintf "%s lint: %s"
             (Glyph.to_utf8 Glyph.Warning_triangle)
-            (Say.resolve lang (Say.make ~ko:"중복" ~en:"dup"))
-            dup
-            (Say.resolve lang (Say.make ~ko:"고아" ~en:"orphan"))
-            orph
-            (Say.resolve lang (Say.make ~ko:"깨짐" ~en:"broken"))
-            (broken + unread)
+            (String.concat " · "
+               (List.filter_map Fun.id
+                  [
+                    part ~ko:"중복" ~en:"dup" duplicates;
+                    part ~ko:"고아" ~en:"orphan" orphans;
+                    part ~ko:"깨짐" ~en:"broken" broken;
+                    part ~ko:"그 밖" ~en:"other" other;
+                  ]))
   in
   let mode_pills =
     [
@@ -1822,8 +1862,8 @@ let render_wiki ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~b
       in
       let lint_rows =
         match lint_summary with
-        | Some (dup, orph, _, _, dups, orphs)
-          when (dup > 0 || orph > 0) && left_inner.h >= 10 ->
+        | Some ({ Wire_knowledge.duplicates; orphans; _ }, dups, orphs)
+          when (duplicates > 0 || orphans > 0) && left_inner.h >= 10 ->
             Int.min 3 (1 + List.length dups + if orphs <> [] then 1 else 0)
         | Some _ | None -> 0
       in
@@ -1958,7 +1998,7 @@ let render_wiki ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~b
         let tx = l_rect.x + pad_x in
         let tw = Int.max 0 (l_rect.w - (2 * pad_x)) in
         match lint_summary with
-        | Some (_, _, _, _, dups, orphs) ->
+        | Some (_, dups, orphs) ->
             List.iter
               (fun (d : Wire_knowledge.wiki_duplicate_candidate) ->
                 if !ly < l_bot then begin

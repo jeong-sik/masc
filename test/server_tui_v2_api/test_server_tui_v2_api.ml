@@ -251,6 +251,43 @@ let test_workspace_guard_headers () =
 
 (* ── 2. Contract 1 — Wiki HTTP API ─────────────────────────────────────── *)
 
+(* The TUI reads every lint kind the server writes. A kind missing from
+   [Wire_knowledge] decodes as [Other_lint] and loses its count key, which
+   is how the embed kinds stayed out of the TUI wiki header. *)
+let test_tui_reads_every_wiki_lint_kind () =
+  let module Wire = Masc_tui_protocol.Wire_knowledge in
+  List.iter
+    (fun kind ->
+       let report =
+         `Assoc
+           [ "pages_total", `Int 1
+           ; "pages_unreadable", `Int 0
+           ; "log_hole_suppressed", `Bool false
+           ; "log_unknown_action", `Int 0
+           ; "log_unreadable_line", `Int 0
+           ; "counts", `Assoc [ kind, `Int 1 ]
+           ; "duplicate_title_candidates", `List []
+           ; ( "findings"
+             , `List [ `Assoc [ "kind", `String kind; "subject", `String "page" ] ] )
+           ]
+       in
+       match Wire.decode_wiki_lint report with
+       | Error message -> Alcotest.failf "%s does not decode: %s" kind message
+       | Ok lint ->
+         (match lint.findings with
+          | [ { Wire.kind = Wire.Other_lint _; _ } ] ->
+            Alcotest.failf "%s decodes as Other_lint" kind
+          | [ _ ] -> ()
+          | findings ->
+            Alcotest.failf "%s decodes to %d findings" kind (List.length findings));
+         let tally = Wire.wiki_lint_tally lint.counts ~findings:lint.findings in
+         Alcotest.(check int)
+           (kind ^ " is counted once in the header")
+           1
+           (tally.duplicates + tally.orphans + tally.broken + tally.other))
+    Wiki_lint.all_kinds
+;;
+
 let test_wiki_api_roundtrip_and_lint () =
   with_temp_workspace (fun config ->
     let base_path = config.Workspace.base_path in
@@ -3938,7 +3975,9 @@ let () =
     [ ( "guard_headers"
       , [ Alcotest.test_case "X-Masc-Expected-Instance/Workspace" `Quick test_workspace_guard_headers ] )
     ; ( "wiki_api"
-      , [ Alcotest.test_case "CRUD, CAS, search, log, lint" `Quick test_wiki_api_roundtrip_and_lint ] )
+      , [ Alcotest.test_case "CRUD, CAS, search, log, lint" `Quick test_wiki_api_roundtrip_and_lint
+        ; Alcotest.test_case "TUI reads every lint kind" `Quick test_tui_reads_every_wiki_lint_kind
+        ] )
     ; ( "infra_sandboxes"
       , [ Alcotest.test_case "non-blocking fleet + 24h failures" `Quick test_infra_sandboxes_api ] )
     ; ( "memory_v2"

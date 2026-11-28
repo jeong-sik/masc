@@ -263,6 +263,11 @@ let empty_wiki_lint : Wire_knowledge.wiki_index_lint =
       {
         broken_link = 0;
         unsupported_link = 0;
+        broken_media_embed = 0;
+        broken_wiki_embed = 0;
+        broken_artifact_embed = 0;
+        invalid_embed = 0;
+        unsupported_embed = 0;
         orphan = 0;
         orphan_unconfirmed = 0;
         missing_sources = 0;

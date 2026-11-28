@@ -33,15 +33,23 @@ const CAUSE_LABELS: Readonly<Record<RevokeAdminCause, string>> = Object.freeze({
   operational: 'operational — 운영 권한 조정',
 })
 
+// The row actions that wait for a second click. One confirmation is open at a
+// time, so opening one closes whichever was open.
+type ConfirmAction = 'grant-admin' | 'revoke-admin' | 'delete'
+
+interface Confirming {
+  readonly action: ConfirmAction
+  readonly userId: string
+}
+
 export function MembersTab(): VNode {
   const epoch = sessionEpoch.value
   const [members, setMembers] = useState<readonly MemberRecord[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [busyUserIds, setBusyUserIds] = useState<ReadonlySet<string>>(() => new Set())
-  const [revokeTargetId, setRevokeTargetId] = useState<string | null>(null)
+  const [confirming, setConfirming] = useState<Confirming | null>(null)
   const [revokeCause, setRevokeCause] = useState<RevokeAdminCause | ''>('')
-  const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null)
   const [loadedOnce, setLoadedOnce] = useState(false)
   const mountedRef = useRef(true)
   const loadAbortRef = useRef<AbortController | null>(null)
@@ -70,9 +78,8 @@ export function MembersTab(): VNode {
     setLoadedOnce(false)
     setError(null)
     setBusyUserIds(new Set())
-    setRevokeTargetId(null)
+    setConfirming(null)
     setRevokeCause('')
-    setDeleteTargetId(null)
     void reload()
     return () => {
       mountedRef.current = false
@@ -96,9 +103,8 @@ export function MembersTab(): VNode {
         return
       }
       pushShellToast(`${label}: ${userId}`, 'success')
-      setRevokeTargetId(null)
+      setConfirming(null)
       setRevokeCause('')
-      setDeleteTargetId(null)
       await reload()
     } finally {
       if (mountedRef.current) {
@@ -110,6 +116,11 @@ export function MembersTab(): VNode {
         })
       }
     }
+  }
+
+  const toggleConfirm = (action: ConfirmAction, userId: string) => {
+    setRevokeCause('')
+    setConfirming((prev) => (prev !== null && prev.action === action && prev.userId === userId ? null : { action, userId }))
   }
 
   return html`
@@ -134,8 +145,7 @@ export function MembersTab(): VNode {
               <ul class="ap-acct-list">
                 ${members.map((member) => {
                   const busy = busyUserIds.has(member.userId)
-                  const revoking = revokeTargetId === member.userId
-                  const deleting = deleteTargetId === member.userId
+                  const confirmingHere = confirming !== null && confirming.userId === member.userId ? confirming.action : null
                   return html`
                     <li key=${member.userId} class="ap-acct-row ap-acct-row--col" data-member-id=${member.userId}>
                       <div class="ap-acct-row-split">
@@ -187,8 +197,8 @@ export function MembersTab(): VNode {
                               type="button"
                               class="btn-ghost"
                               disabled=${busy}
-                              data-action="grant-admin"
-                              onClick=${() => { void runAction(member.userId, 'Make Admin', () => grantAdminMember(member.userId)) }}
+                              data-action="open-grant-admin"
+                              onClick=${() => toggleConfirm('grant-admin', member.userId)}
                             >
                               Make Admin
                             </button>
@@ -200,11 +210,7 @@ export function MembersTab(): VNode {
                               class="btn-ghost"
                               disabled=${busy}
                               data-action="open-revoke-admin"
-                              onClick=${() => {
-                                setDeleteTargetId(null)
-                                setRevokeTargetId(revoking ? null : member.userId)
-                                setRevokeCause('')
-                              }}
+                              onClick=${() => toggleConfirm('revoke-admin', member.userId)}
                             >
                               Revoke Admin
                             </button>
@@ -215,17 +221,36 @@ export function MembersTab(): VNode {
                             class="btn-ghost ap-danger-btn"
                             disabled=${busy}
                             data-action="open-delete"
-                            onClick=${() => {
-                              setRevokeTargetId(null)
-                              setDeleteTargetId(deleting ? null : member.userId)
-                            }}
+                            onClick=${() => toggleConfirm('delete', member.userId)}
                           >
                             Delete
                           </button>
                         </div>
                       </div>
 
-                      ${revoking && html`
+                      ${confirmingHere === 'grant-admin' && html`
+                        <div class="ap-inline-panel" data-testid="grant-admin-confirm">
+                          <span>
+                            <code class="mono">${member.userId}</code> 에게 Admin 권한을 줍니다. 이 사람도 구성원과 초대를 관리하고, 다른 Admin 의 권한을 회수할 수 있습니다.
+                          </span>
+                          <div class="ap-acct-actions">
+                            <button
+                              type="button"
+                              class="btn-primary"
+                              disabled=${busy}
+                              data-action="confirm-grant-admin"
+                              onClick=${() => { void runAction(member.userId, 'Make Admin', () => grantAdminMember(member.userId)) }}
+                            >
+                              Confirm Make Admin
+                            </button>
+                            <button type="button" class="btn-ghost" onClick=${() => setConfirming(null)}>
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
+                      `}
+
+                      ${confirmingHere === 'revoke-admin' && html`
                         <form
                           class="ap-inline-panel"
                           data-testid="revoke-admin-form"
@@ -258,14 +283,14 @@ export function MembersTab(): VNode {
                             >
                               Confirm Revoke Admin
                             </button>
-                            <button type="button" class="btn-ghost" onClick=${() => { setRevokeTargetId(null); setRevokeCause('') }}>
+                            <button type="button" class="btn-ghost" onClick=${() => { setConfirming(null); setRevokeCause('') }}>
                               Cancel
                             </button>
                           </div>
                         </form>
                       `}
 
-                      ${deleting && html`
+                      ${confirmingHere === 'delete' && html`
                         <div class="ap-inline-panel ap-inline-panel--err" data-testid="delete-member-confirm">
                           <span>
                             계정 <code class="mono">${member.userId}</code> 을(를) 영구 삭제합니다. 마지막 활성 Admin은 삭제할 수 없습니다.
@@ -279,7 +304,7 @@ export function MembersTab(): VNode {
                             >
                               Confirm Delete
                             </button>
-                            <button type="button" class="btn-ghost" onClick=${() => setDeleteTargetId(null)}>
+                            <button type="button" class="btn-ghost" onClick=${() => setConfirming(null)}>
                               Cancel
                             </button>
                           </div>

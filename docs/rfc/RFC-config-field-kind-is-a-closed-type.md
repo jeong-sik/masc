@@ -113,6 +113,7 @@ val wire_members : t -> (string * Yojson.Safe.t) list
   - runtime binding 키: binding 을 읽는 모듈이 선언한다. `cache-retention` 은 `Runtime_schema.cache_retention` 의 모든 값으로 만든 `Enum` 이다. 키 이름 비교(`:1811`)와 따로 적은 값 목록(`:1775`)은 지운다.
 - 어느 모듈도 선언하지 않은 키는 저장된 TOML 값의 타입으로만 정한다. 문자열이면 `Line` 이다. 키 이름이나 글 내용(줄바꿈이 있는지)으로 종류를 고르지 않는다.
 - Fusion preset 의 프롬프트 키(`fusion.presets.*.panel_system_prompt` 등)는 `Fusion_config` 가 타입으로 읽고, Runtime → Prompts 의 Presets 화면(#55434)이 편집한다. 범용 스키마에서는 선언되지 않은 키라 `Line` 으로 남는다. 키 이름 패턴으로 `Text` 를 붙이면 문자열 분류기가 되므로 하지 않는다.
+- 범용 편집에서 저장된 `Line` 값에 LF 또는 CR 이 있으면 서버는 값을 그대로 내보내되 필드를 읽기 전용으로 표시한다. 대시보드와 TUI 는 여러 줄 값을 줄바꿈 그대로 보여 주고 「전용 편집 화면에서 수정」을 안내한다. 범용 PATCH 는 저장된 여러 줄 `Line` 을 바꾸는 요청과 새 여러 줄 `Line` 값을 모두 거절한다. 이 검사는 설정 파일 잠금 안에서 현재 값을 다시 읽어 수행한다. `Fusion_config` 가 소유한 전용 편집 경로는 이 제한의 대상이 아니다.
 - 전선 이름은 지금 이름을 그대로 쓰고 `"text"` 하나를 더한다. `Line` 의 전선 이름은 `"string"` 이다.
   - 장점: 바뀌는 이름이 없어 diff 가 작다.
   - 단점: 코드 이름(`Line`)과 전선 이름(`"string"`)이 다르다. 변환은 `wire_members` 한 곳에만 있다.
@@ -152,7 +153,8 @@ val wire_members : t -> (string * Yojson.Safe.t) list
 1. 서버 `Config_field_kind` 와 여덟 생산자 → 확인: 시험이 Keeper 대상 응답에서 `keeper.instructions` 의 `type` 이 `"text"` 임을 본다. 종류마다 `wire_members` 의 모양을 골든으로 고정한다. 값 목록 없는 enum 은 타입으로 막혀 시험이 필요 없다. `cache-retention` 의 `enum_values` 가 `Runtime_schema.cache_retention` 의 모든 값과 같음을 본다. 모든 값 목록은 `[@@deriving enumerate]` 로 만들어, 값이 늘면 목록도 따라 는다.
 2. TUI 디코더와 폼 → 확인: `"bool"` 같은 옛 별칭과 모르는 이름을 거절한다. `"text"` 필드의 폼이 `Multiline_val` 이다. 줄바꿈이 든 값이 `Set_scalar` 로 줄바꿈 그대로 나간다.
 3. 대시보드 디코더와 세 화면 → 확인: 모르는 종류를 받으면 응답이 에러다. Keeper 설정 탭이 `text` 필드를 `<textarea>` 로 그리고, 줄바꿈이 든 값을 고친 초안에 줄바꿈이 남는다. §1.4 의 jsdom 관찰을 회귀 시험으로 둔다.
-4. 끝에서 끝 → 확인: 줄바꿈이 든 값을 설정 PATCH 로 dry-run 해서 diff 에 `\n` 이스케이프가 나오고, 다시 읽은 값이 보낸 값과 같다.
+4. 보존 확인: `trio` 의 두 Fusion 프롬프트가 범용 화면에서 읽기 전용이고 줄바꿈이 그대로 보인다. 범용 PATCH 로 덮어쓰거나 한 줄 키에 LF·CR 이 든 값을 넣으면 거절되며, 저장한 값은 그대로다.
+5. 끝에서 끝 → 확인: 줄바꿈이 든 값을 설정 PATCH 로 dry-run 해서 diff 에 `\n` 이스케이프가 나오고, 다시 읽은 값이 보낸 값과 같다.
 
 세 층은 같은 stack 의 PR 셋이다. 맨 위 PR 의 호스트 Test 가 세 묶음(서버 설정 시험, TUI `test_protocol_net`·`test_store`, 대시보드 vitest)을 모두 통과해야 Ready 로 올린다.
 
@@ -163,5 +165,5 @@ val wire_members : t -> (string * Yojson.Safe.t) list
 
 ## 7. 범위 밖
 
-- 설정 PATCH 의 연산 이름도 별칭을 받는다(`"set_scalar" | "set_string"`, `server_dashboard_http_candle_config.ml:2486`). 같은 종류의 문제지만 이 RFC 는 응답 쪽만 다룬다.
+- 설정 PATCH 의 연산 이름도 별칭을 받는다(`"set_scalar" | "set_string"`, `server_dashboard_http_candle_config.ml:2486`). 같은 종류의 문제지만 이 RFC 는 연산 이름을 바꾸지 않는다.
 - 지시문 편집기 자체(미리보기, 길이 표시, 병합 프롬프트 보기)는 Keeper Prompt 탭(#55441)과 TUI 프롬프트 블록 서브탭(#55458)이 맡는다.

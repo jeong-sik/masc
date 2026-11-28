@@ -467,9 +467,9 @@ let run
        | { Server_account_login.google = Some _; github = Some _ | None }
        | { Server_account_login.google = None; github = Some _ } ->
          Log.Server.info
-           "%s is not set: the redirect_uri of a login client is not compared with the address \
-            of this server"
-           Env_config_core.http_base_url_env_key);
+           "no base URL is set (%s): the redirect_uri of a login client is not compared with \
+            the address of this server"
+           Env_config_core.http_base_url_setting_names);
       Ok ()
   in
   (match login_clients with

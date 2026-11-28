@@ -2520,6 +2520,21 @@ let run ~sw ~runtime_sw ~env ~address ~port ~judged ?input_base_path ?on_ready
   (* Route provider diagnostics into the structured log before any
      provider call runs (#25148), in either kind of server. *)
   Provider_diag_log_sink.install ();
+  (* Both servers bind their listeners before the engine reaches
+     [create_server_state], and the listeners read the [transport] rows of
+     runtime.toml ([https_port], the h2 window sizes) when they bind. Applied
+     only there, the file came too late: a declared [https_port = 0] still
+     bound the default TLS port. Apply it before either server binds.
+     [create_server_state] reads the same file again for the engine and for
+     the stdio entry point, which binds nothing. *)
+  apply_runtime_toml
+    ~base_path:
+      (Env_config_core.normalize_masc_base_path_input
+         (match judged.booted with
+          | Authz_boot_mode_read.Multi_account multi_account ->
+            Authz_boot_mode_read.multi_account_base_path multi_account
+          | Authz_boot_mode_read.Single_user single_user ->
+            Authz_boot_mode_read.single_user_base_path single_user));
   (* A multi-account installation gets the account server and its own route
      table (plan S1a), and the engine the account server starts once it
      published its access (RFC a-persons-keeper-runs-on-the-engine, S1). The

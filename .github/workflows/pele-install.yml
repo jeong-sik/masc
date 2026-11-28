@@ -1,0 +1,44 @@
+name: Pele install
+
+# scripts/install-pele.sh copies tools/pele into a fresh folder and renders a
+# Mermaid and an SVG document there before it publishes the runtime. The Pele
+# tests run inside tools/pele, where every module exists, so only an install
+# shows a module the installer leaves behind (#55344 shipped engine.mjs
+# importing chart.mjs while the installer copied no chart.mjs). Nothing else
+# in CI runs the installer or the Pele tests. It is not a required check: only
+# changes under tools/pele/**, to the installer, or to this workflow trigger it
+# (operator request, 2026-11-28).
+on:
+  workflow_dispatch: {}
+  pull_request:
+    paths:
+      - "tools/pele/**"
+      - "scripts/install-pele.sh"
+      - ".github/workflows/pele-install.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pele-install-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  install:
+    name: Install Pele and run its tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22"
+      - name: Set up pnpm
+        run: corepack enable && corepack prepare pnpm@10.31.0 --activate
+      - name: Install Pele into a scratch prefix
+        run: sh scripts/install-pele.sh --prefix "$RUNNER_TEMP/bin"
+      - name: Run the Pele tests
+        working-directory: tools/pele
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm test

@@ -15,7 +15,12 @@ command -v pnpm >/dev/null 2>&1 || { printf '%s\n' 'install-pele: pnpm not found
 node -e 'if (Number(process.versions.node.split(".")[0]) < 22) throw Error("Node.js 22 or newer is required")'
 mkdir -p "$prefix"
 prefix=$(CDPATH= cd -- "$prefix" && pwd)
-runtime_files='package.json pnpm-lock.yaml engine.mjs graph.mjs render.mjs'
+# Every module at the top of tools/pele ships; tests and examples live in
+# subdirectories. A hand-kept list left chart.mjs behind when #55344 added it.
+runtime_files='package.json pnpm-lock.yaml'
+for module in "$repo_root"/tools/pele/*.mjs; do
+  runtime_files="$runtime_files ${module##*/}"
+done
 revision=$(node --input-type=module - "$repo_root/tools/pele" $runtime_files <<'FINGERPRINT'
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';

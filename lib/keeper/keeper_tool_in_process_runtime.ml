@@ -1166,6 +1166,9 @@ type connector_post_replay = Keeper_connector_post_replay.connector_post_replay 
       ; channel_id : string
       ; content : string
       ; mention_user_ids : string list
+      ; attachment_ids : string list
+        (** Canonical attachment ids uploaded with the post, in order;
+            [[]] for a text-only post. *)
       }
   | Replay_slack_post of
       { input : Yojson.Safe.t
@@ -1520,6 +1523,67 @@ let slack_post_chat_route
   surface, conversation_id
 ;;
 
+(* The Discord upload of one stored attachment. A stored name is already
+   sanitized by the store; an unnamed file is called by its digest, with the
+   extension its magic bytes prove, or ".bin" for an opaque binary. *)
+let discord_upload_of_attachment store id =
+  match
+    Attachment_store.get_meta store ~id, Attachment_store.get_bytes store ~id
+  with
+  | Error error, _ | _, Error error ->
+    Error
+      (Printf.sprintf "attachment %s: %s" id
+         (Attachment_store.get_error_to_string error))
+  | Ok None, _ | _, Ok None ->
+    Error (Printf.sprintf "attachment %s is not in the attachment store" id)
+  | Ok (Some (meta : Attachment_store.meta)), Ok (Some bytes) ->
+    let filename =
+      match meta.filename with
+      | Some name -> name
+      | None ->
+        let extension =
+          match Attachment_store.sniff_mime bytes with
+          | Some mime -> Attachment_store.extension_of_mime mime
+          | None -> ".bin"
+        in
+        meta.sha256 ^ extension
+    in
+    Discord_rest_client.upload ~filename ~media_type:meta.mime_type bytes
+    |> Result.map_error (Printf.sprintf "attachment %s: %s" id)
+
+let discord_uploads ~base_path = function
+  | [] -> Ok None
+  | first :: rest ->
+    let store = Attachment_store.create ~base_path in
+    let open Result.Syntax in
+    let* first = discord_upload_of_attachment store first in
+    let* rest =
+      List.fold_right
+        (fun id acc ->
+           let* acc = acc in
+           let* upload = discord_upload_of_attachment store id in
+           Ok (upload :: acc))
+        rest (Ok [])
+    in
+    Ok (Some (first, rest))
+
+(* Whether every named attachment is in the store, from its metadata alone:
+   the bytes are read once, after approval. *)
+let discord_attachments_present ~base_path attachment_ids =
+  let store = Attachment_store.create ~base_path in
+  List.fold_left
+    (fun acc id ->
+       Result.bind acc (fun () ->
+         match Attachment_store.get_meta store ~id with
+         | Ok (Some _) -> Ok ()
+         | Ok None ->
+           Error (Printf.sprintf "attachment %s is not in the attachment store" id)
+         | Error error ->
+           Error
+             (Printf.sprintf "attachment %s: %s" id
+                (Attachment_store.get_error_to_string error))))
+    (Ok ()) attachment_ids
+
 let replay_connector_post_with_senders
       ~config
       ~(meta : keeper_meta)
@@ -1582,7 +1646,8 @@ let replay_connector_post_with_senders
            | Error detail -> fail_after_effect (Keeper_native_origin_reply.connector route)
                ("message sent, but local chat persistence failed: " ^ detail)
            | Ok () -> succeed (Keeper_native_origin_reply.connector route) ())
-  | Replay_discord_post { input; channel_id; content; mention_user_ids } ->
+  | Replay_discord_post
+      { input; channel_id; content; mention_user_ids; attachment_ids } ->
     with_connector_post_gate_execution
       ~config
       ~meta
@@ -1592,12 +1657,22 @@ let replay_connector_post_with_senders
       ~input
       ~call_summary:(connector_post_call_summary replay)
     @@ fun () ->
+    (* Read after approval: the bytes sent are the bytes stored now. A
+       missing or unreadable file stops the post before anything is sent. *)
+    (match discord_uploads ~base_path:config.Workspace.base_path attachment_ids with
+    | Error detail ->
+      fail Keeper_surface_post.discord_label
+        ~effect_disposition:Tool_result.Proven_pre_effect detail
+    | Ok files ->
     let send_result =
-      match discord_send with
-      | Some send -> send ~channel_id ~content ~mention_user_ids
-      | None ->
+      match discord_send, files with
+      | Some send, _ -> send ~channel_id ~content ~mention_user_ids ~files
+      | None, None ->
         Channel_gate_discord_state.send_message ~channel_id ~content
           ~mention_user_ids ()
+      | None, Some files ->
+        Channel_gate_discord_state.send_files ~channel_id ~content
+          ~mention_user_ids ~files ()
     in
     (match send_result with
      | Error send_error ->
@@ -1636,7 +1711,7 @@ let replay_connector_post_with_senders
           fail_after_effect
             Keeper_surface_post.discord_label
             ("message sent, but local chat persistence failed: " ^ detail)
-        | Ok () -> succeed Keeper_surface_post.discord_label ~message_id ()))
+        | Ok () -> succeed Keeper_surface_post.discord_label ~message_id ())))
   | Replay_slack_post
       { input; channel_id; thread_ts; content; blocks; mention_user_ids } ->
     with_connector_post_gate_execution
@@ -1792,6 +1867,25 @@ let handle_surface_post_with_outcome
         (List.map (Keeper_secret_redaction.redact_json redaction))
         requested_blocks
     in
+    match Keeper_surface_post.attachment_ids_of_args ~surface args with
+    | Error message ->
+      fail
+        ~class_:Tool_result.Policy_rejection
+        ~effect_disposition:Tool_result.Proven_pre_effect
+        (Keeper_surface_post.error_json message)
+    | Ok attachment_ids ->
+    (* Checked before approval so a post naming a file that is not there
+       fails here, not after an operator approved it. *)
+    match
+      discord_attachments_present ~base_path:config.Workspace.base_path
+        attachment_ids
+    with
+    | Error message ->
+      fail
+        ~class_:Tool_result.Policy_rejection
+        ~effect_disposition:Tool_result.Proven_pre_effect
+        (Keeper_surface_post.error_json message)
+    | Ok () ->
     match
       (if String.equal surface Keeper_surface_post.discord_label then
          Channel_gate_discord_state.bound_channels_result ~keeper_name:meta.name
@@ -1937,6 +2031,7 @@ let handle_surface_post_with_outcome
           ~channel_id
           ~content:safe_content
           ~mention_user_ids
+          ~attachment_ids
           ()
       in
       replay_connector_post_with_outcome
@@ -1947,7 +2042,12 @@ let handle_surface_post_with_outcome
         ?gate_context
         ?gate_grant
         (Replay_discord_post
-           { input; channel_id; content = safe_content; mention_user_ids })
+           { input
+           ; channel_id
+           ; content = safe_content
+           ; mention_user_ids
+           ; attachment_ids
+           })
       |> Keeper_tool_execution.with_surface_post_receipt target
          | Keeper_surface_post.To_slack { channel_id; thread_ts; blocks } ->
       let slack_blocks =

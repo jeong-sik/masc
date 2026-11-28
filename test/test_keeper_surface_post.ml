@@ -11,6 +11,15 @@ open Alcotest
 module Store = Masc.Keeper_chat_store
 module SP = Masc.Keeper_surface_post
 
+(* A 2x1 PNG header and a MIDI header: the store sniffs both by magic bytes. *)
+let tiny_png =
+  String.concat ""
+    [ "\x89PNG\r\n\x1a\n"; "\x00\x00\x00\x0d"; "IHDR"; "\x00\x00\x00\x02"
+    ; "\x00\x00\x00\x01"; "\x08\x06\x00\x00\x00"; "\x72\xb6\x0d\x24"
+    ]
+
+let tiny_midi = "MThd\x00\x00\x00\x06\x00\x00\x00\x01\x00\x60"
+
 let target_pp fmt = function
   | SP.To_native route -> Format.fprintf fmt "To_native{%s}" (Yojson.Safe.to_string (Masc.Keeper_native_origin_reply.to_yojson route))
   | SP.To_dashboard -> Format.fprintf fmt "To_dashboard"
@@ -412,6 +421,7 @@ let test_replay_connector_post_preserves_discord_and_slack_coordinates () =
            ; channel_id = "discord-thread-9"
            ; content = "reply in discord thread"
            ; mention_user_ids = []
+           ; attachment_ids = []
            }
        in
        let discord_result =
@@ -419,12 +429,72 @@ let test_replay_connector_post_preserves_discord_and_slack_coordinates () =
            ~config
            ~meta
            ~continuation_channel:discord_cont
-           ~discord_send:(fun ~channel_id:_ ~content:_ ~mention_user_ids:_ ->
+           ~discord_send:(fun ~channel_id:_ ~content:_ ~mention_user_ids:_ ~files ->
+             check bool "text-only post sends no files" true (Option.is_none files);
              Ok "discord-msg-1")
            discord_replay
        in
        check bool "Discord replay completed" true
          (discord_result.disposition = Tool_result.Completed ());
+       (* A post naming stored files sends their bytes under their stored
+          names, in order; a post naming a missing file sends nothing. *)
+       let store = Attachment_store.create ~base_path in
+       let stored ~filename ~declared_mime bytes =
+         match
+           Attachment_store.put ~declared_mime ~filename
+             ~origin:Attachment_store.Model_generated ~created_by:"replay-keeper"
+             ~retention:Attachment_store.Durable store ~bytes
+         with
+         | Ok (meta : Attachment_store.meta) -> meta.id
+         | Error error -> fail (Attachment_store.put_error_to_string error)
+       in
+       let png_id = stored ~filename:"cat.png" ~declared_mime:"image/png" tiny_png in
+       let midi_id =
+         stored ~filename:"riff.mid" ~declared_mime:"audio/midi" tiny_midi
+       in
+       let file_replay attachment_ids =
+         Masc.Keeper_tool_in_process_runtime.Replay_discord_post
+           { input =
+               Masc.Keeper_connector_post_replay.connector_post_gate_input
+                 ~connector:"discord" ~channel_id:"discord-thread-9"
+                 ~content:"악보와 그림이에요" ~mention_user_ids:[] ~attachment_ids ()
+           ; channel_id = "discord-thread-9"
+           ; content = "악보와 그림이에요"
+           ; mention_user_ids = []
+           ; attachment_ids
+           }
+       in
+       let sent_names = ref None in
+       let file_result =
+         Masc.Keeper_tool_in_process_runtime.For_testing.replay_connector_post_with_senders
+           ~config ~meta ~continuation_channel:discord_cont
+           ~discord_send:(fun ~channel_id:_ ~content:_ ~mention_user_ids:_ ~files ->
+             sent_names :=
+               Option.map
+                 (fun (first, rest) ->
+                    List.map Discord_rest_client.upload_filename (first :: rest))
+                 files;
+             Ok "discord-msg-2")
+           (file_replay [ png_id; midi_id ])
+       in
+       check bool "file post completed" true
+         (file_result.disposition = Tool_result.Completed ());
+       check (option (list string)) "stored files sent by name, in order"
+         (Some [ "cat.png"; "riff.mid" ]) !sent_names;
+       let missing_id = "att_" ^ String.make 64 'a' in
+       let missing_result =
+         Masc.Keeper_tool_in_process_runtime.For_testing.replay_connector_post_with_senders
+           ~config ~meta ~continuation_channel:discord_cont
+           ~discord_send:(fun ~channel_id:_ ~content:_ ~mention_user_ids:_ ~files:_ ->
+             fail "a post naming a missing file reached Discord")
+           (file_replay [ png_id; missing_id ])
+       in
+       check bool "missing file fails before any effect" true
+         (match missing_result.disposition with
+          | Tool_result.Failed _ ->
+            missing_result.failure_effect_disposition
+            = Tool_result.Proven_pre_effect
+          | Tool_result.Completed () | Tool_result.Deferred () -> false);
        Channel_gate_slack_state.record_workspace_id "T-SLACK-99";
        let slack_cont =
          Keeper_continuation_channel.slack
@@ -662,6 +732,62 @@ let test_thread_ts_args_decode () =
   | Error _ -> ()
   | Ok _ -> fail "non-string thread_ts was accepted"
 
+let test_attachment_ids_args_decode () =
+  let id c = "att_" ^ String.make 64 c in
+  let decode surface value =
+    SP.attachment_ids_of_args ~surface (`Assoc [ ("attachment_ids", value) ])
+  in
+  check bool "absent decodes to no files" true
+    (SP.attachment_ids_of_args ~surface:"discord" (`Assoc []) = Ok []);
+  check bool "ids keep their order" true
+    (decode "discord" (`List [ `String (id 'b'); `String (id 'a') ])
+     = Ok [ id 'b'; id 'a' ]);
+  let refused label = function
+    | Error (_ : string) -> ()
+    | Ok _ -> fail (label ^ " was accepted")
+  in
+  refused "files on Slack" (decode "slack" (`List [ `String (id 'a') ]));
+  refused "files on the dashboard" (decode "dashboard" (`List [ `String (id 'a') ]));
+  refused "empty array" (decode "discord" (`List []));
+  refused "repeated id" (decode "discord" (`List [ `String (id 'a'); `String (id 'a') ]));
+  refused "malformed id" (decode "discord" (`List [ `String "att_xyz" ]));
+  refused "non-string id" (decode "discord" (`List [ `Int 1 ]));
+  refused "non-array" (decode "discord" (`String (id 'a')))
+
+(* The approved input is what the replay sends after approval: the files a
+   post names survive it in order, and a text-only post's input has no
+   attachment_ids key at all. *)
+let test_approved_discord_input_carries_attachment_ids () =
+  let id c = "att_" ^ String.make 64 c in
+  let input attachment_ids =
+    Masc.Keeper_connector_post_replay.connector_post_gate_input
+      ~connector:"discord" ~channel_id:"123" ~content:"그림이에요"
+      ~mention_user_ids:[] ~attachment_ids ()
+  in
+  (match
+     Masc.Keeper_connector_post_replay.connector_post_replay_of_gate_input
+       (input [ id 'b'; id 'a' ])
+   with
+   | Ok (Masc.Keeper_connector_post_replay.Replay_discord_post { attachment_ids; _ }) ->
+     check (list string) "approved files" [ id 'b'; id 'a' ] attachment_ids
+   | Ok _ -> fail "a Discord post decoded as another connector"
+   | Error detail -> fail detail);
+  (match input [] with
+   | `Assoc fields ->
+     check bool "text-only input names no files" false
+       (List.mem_assoc "attachment_ids" fields)
+   | _ -> fail "approved input is not an object");
+  match
+    Masc.Keeper_connector_post_replay.connector_post_replay_of_gate_input
+      (`Assoc
+         [ "connector", `String "discord"; "channel_id", `String "123"
+         ; "content", `String "x"; "mention_user_ids", `List []
+         ; "attachment_ids", `List [ `String "att_xyz" ]
+         ])
+  with
+  | Error _ -> ()
+  | Ok _ -> fail "an approved input with a malformed id decoded"
+
 let test_blocks_args_decode () =
   check bool "absent decodes to None" true
     (SP.blocks_of_args ~surface:"slack" (`Assoc []) = Ok None);
@@ -837,6 +963,10 @@ let () =
             test_thread_ts_args_decode;
           test_case "blocks decode closes its domain" `Quick
             test_blocks_args_decode;
+          test_case "attachment_ids decode closes its domain" `Quick
+            test_attachment_ids_args_decode;
+          test_case "approved Discord input carries attachment_ids" `Quick
+            test_approved_discord_input_carries_attachment_ids;
           test_case "explicit thread_ts wins over continuation" `Quick
             test_resolve_explicit_thread_ts_wins_over_continuation;
           test_case "explicit thread_ts travels without continuation" `Quick

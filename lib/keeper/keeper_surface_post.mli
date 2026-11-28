@@ -63,6 +63,18 @@ val thread_ts_of_args :
     rejected. The value is passed to Slack verbatim — a foreign or expired
     timestamp fails at the connector, not silently as a root post. *)
 
+val attachment_ids_of_json : Yojson.Safe.t -> (string list, string) result
+(** Decode a non-empty array of canonical attachment ids
+    (["att_<64hex>"], {!Attachment_store.parse_id}) in the given order.
+    [Error] for an empty array, a non-string, a malformed id or a repeat. *)
+
+val attachment_ids_of_args :
+  surface:string -> Yojson.Safe.t -> (string list, string) result
+(** Decode the optional [attachment_ids] tool argument: files to upload with a
+    Discord post, in order. Absent is [Ok []]. Discord-only; otherwise as
+    {!attachment_ids_of_json}. Whether each id is in the attachment store is
+    checked by the caller that reads the store. *)
+
 val blocks_of_args :
   surface:string -> Yojson.Safe.t -> (rich_block list option, string) result
 (** Decode the optional [blocks] tool argument: Slack Block Kit blocks for

@@ -22,6 +22,8 @@ import {
   enqueueKeeperChat,
   fetchKeeperChatHistoryPageApi,
   fetchKeeperSandboxApi,
+  fetchKeeperLastPromptApi,
+  fetchKeeperProviderInputApi,
   fetchKeeperTurnRecordsApi,
   filterAndSortRoster,
   formatCandleMilli,
@@ -1755,6 +1757,38 @@ describe('Keepers Workspace — Interactive DOM & API Flows', () => {
     const drift = await fetchKeeperTurnRecordsApi(keeper, 60)
     expect(drift.ok).toBe(false)
     if (!drift.ok) expect(drift.error).toMatchObject({ kind: 'decode', code: 'schema_drift' })
+  })
+
+  it('reads the debug companion last prompt and provider input as the server writes them', async () => {
+    // `handle_last_prompt_get` and `manifest_to_json`: the manifest's wire is
+    // written field by field, so its phase is the constructor name as a string.
+    const lastPrompt = {
+      keeper: 'albini', dashboard_surface: '/api/v1/keepers/:name/last-prompt',
+      captured_at: 1795000000.25, trace_id: 'tr1', absolute_turn: 2,
+      blocks: [{ id: 'dynamic_context', bytes: 5, text: 'now.\n' }],
+      assembled: 'now.\n', assembled_bytes: 5, system_prompt: null, system_prompt_partition: null,
+    }
+    const manifest = {
+      dashboard_surface: '/api/v1/keepers/:name/provider-input', schema: 'masc.provider-input-manifest.v1',
+      keeper: 'albini', trace_id: 'tr1', absolute_turn: 2, turn_ref: 'tr1#2', runtime_profile: 'local',
+      captured_at: 1795000000.5,
+      wire: {
+        phase: 'Pre_dispatch_serialization', capture_id: null, provider: 'openai-compatible', model: 'm',
+        http_codec: 'responses', stream: true, body_bytes: 2048, body_sha256: 'a'.repeat(64),
+      },
+      parts: [{ index: 0, kind: 'message', role: 'user', bytes: 12, sha256: 'b'.repeat(64) }],
+    }
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      const body = url.includes('/last-prompt') ? lastPrompt : url.includes('/provider-input') ? manifest : {}
+      return new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    }))
+
+    const prompt = await fetchKeeperLastPromptApi('albini')
+    expect(prompt.ok && prompt.value.blocks.map(b => b.id)).toEqual(['dynamic_context'])
+    const input = await fetchKeeperProviderInputApi('albini', 'tr1#2')
+    expect(input.ok && [input.value.wire.provider, input.value.wire.model, input.value.wire.bodyBytes, input.value.parts.length])
+      .toEqual(['openai-compatible', 'm', 2048, 1])
   })
 
   it('sends raw binary audio for Voice STT, guards Clear/Reset with TargetLockedAction, and preserves Config drafts on OAuth toggle', async () => {

@@ -4977,6 +4977,8 @@
  ; as files; the relative manifest_path in each example resolves inside _build.
  (deps ../addons/dos-world/lane.toml ../addons/dos-world/install.toml
        ../addons/value-difference/lane.toml ../addons/output-statistics/lane.toml
+       ; The host manifest is compared with lane.toml.
+       ../addons/output-statistics/lane.host.toml
        ../docs/examples/lane-addons/dos-value-difference.toml
        ../docs/examples/lane-addons/dos-value-statistics.toml
        ../docs/examples/lane-addons/dos-statistics.toml

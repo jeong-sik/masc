@@ -288,6 +288,88 @@ describe('Unified /account wire parsers & workspace surface', () => {
     expect(rowUnknown.querySelector('[data-action="enable"]')).toBeNull()
   })
 
+  it('asks for a second click before making a Member an Admin', async () => {
+    const calls: Array<{ url: string; method: string }> = []
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
+      const method = init?.method ?? 'GET'
+      calls.push({ url, method })
+      if (url === '/api/v1/auth/members' && method === 'GET') {
+        return jsonResp({
+          members: [
+            {
+              user_id: 'u-admin-1',
+              identity: { provider: 'google', sub: 'sub-admin-1' },
+              role: 'admin',
+              status: 'active',
+              held: [],
+            },
+            {
+              user_id: 'u-member-3',
+              identity: { provider: 'github', user_id: 999 },
+              role: 'member',
+              status: 'active',
+              held: [],
+            },
+          ],
+        })
+      }
+      if (url.endsWith('/grant-admin')) {
+        return jsonResp({ user_id: 'u-member-3', role: 'admin' })
+      }
+      return jsonResp({}, 404)
+    })
+
+    authSession.value = {
+      kind: 'multi_account_signed_in',
+      mode: 'multi_account',
+      accountId: 'u-admin-1',
+      email: null,
+      displayName: 'Admin One',
+      role: 'admin',
+      csrfToken: 'csrf-admin',
+      authMethods: AUTH_METHODS,
+      workspaceId: 'default',
+    }
+
+    await act(async () => {
+      render(h(AccountWorkspace, {
+        subroute: 'members',
+        onNavigate: vi.fn(),
+        onInspect: vi.fn(),
+      }), container)
+    })
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-member-id="u-member-3"]')).not.toBeNull()
+    })
+    const row = container.querySelector('[data-member-id="u-member-3"]')!
+    const grantCalls = () => calls.filter((c) => c.url === '/api/v1/auth/members/u-member-3/grant-admin')
+
+    // The first click opens the confirmation and sends nothing
+    await act(async () => {
+      fireEvent.click(row.querySelector('[data-action="open-grant-admin"]')!)
+    })
+    expect(row.querySelector('[data-testid="grant-admin-confirm"]')).not.toBeNull()
+    expect(grantCalls()).toHaveLength(0)
+
+    // Opening Delete on the same row closes the grant confirmation
+    await act(async () => {
+      fireEvent.click(row.querySelector('[data-action="open-delete"]')!)
+    })
+    expect(row.querySelector('[data-testid="grant-admin-confirm"]')).toBeNull()
+    expect(row.querySelector('[data-testid="delete-member-confirm"]')).not.toBeNull()
+
+    await act(async () => {
+      fireEvent.click(row.querySelector('[data-action="open-grant-admin"]')!)
+    })
+    expect(row.querySelector('[data-testid="delete-member-confirm"]')).toBeNull()
+    await act(async () => {
+      fireEvent.click(row.querySelector('[data-action="confirm-grant-admin"]')!)
+    })
+    expect(grantCalls()).toEqual([{ url: '/api/v1/auth/members/u-member-3/grant-admin', method: 'POST' }])
+  })
+
   it('allows revoking expired invites in InvitesTab', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResp({
       invites: [{

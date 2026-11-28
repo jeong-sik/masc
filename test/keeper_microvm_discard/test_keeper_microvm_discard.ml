@@ -130,6 +130,24 @@ let test_actual_inspect_binding_and_complete_capture () = with_fixture @@ fun f 
   | M.Discard_default_set | M.Discard_default_absent | M.Superblock_unreadable _ ->
     fail "ambiguous inspect source accepted"
 
+let test_inspected_image_reads_absent_and_refuses_foreign_or_short () = with_fixture @@ fun f ->
+  let read_default () =
+    M.read_work_volume_discard_default ~backend:Backend.Apple_container ~keeper_name:keeper ~timeout_sec:5. in
+  (match read_default () with
+   | M.Discard_default_absent -> ()
+   | M.Discard_default_set | M.Superblock_unreadable _ ->
+     fail "an ext4 image without the discard bit was not read as absent");
+  write f.image (image_bytes ~magic:0 0x0400);
+  (match read_default () with
+   | M.Superblock_unreadable (M.Discard_image_unreadable (V.Not_ext4 {magic=0})) -> ()
+   | M.Discard_default_set | M.Discard_default_absent | M.Superblock_unreadable _ ->
+     fail "a foreign image was read as a discard default");
+  write f.image "short";
+  match read_default () with
+  | M.Superblock_unreadable (M.Discard_image_unreadable (V.Truncated _)) -> ()
+  | M.Discard_default_set | M.Discard_default_absent | M.Superblock_unreadable _ ->
+    fail "a short image was read as a discard default"
+
 let actual_run ~timeout_sec argv = Process_eio.run_argv_with_status_split ~timeout_sec argv
 
 let test_common_cleanup_uses_actual_complete_inventory () =
@@ -247,6 +265,7 @@ let () = run "microvm discard and first handoff"
     test_case "regular superblock file decodes authoritative flag" `Quick test_real_superblock_files;
     test_case "fallback and other runtime leave the discard default unreadable" `Quick test_fallback_and_other_backend_leave_the_default_unreadable;
     test_case "current volume binding uses complete CLI output" `Quick test_actual_inspect_binding_and_complete_capture;
+    test_case "inspected image reads absent and refuses foreign or short bytes" `Quick test_inspected_image_reads_absent_and_refuses_foreign_or_short;
     test_case "repair helper cleanup uses actual strict inventory" `Quick test_common_cleanup_uses_actual_complete_inventory;
     test_case "actual repair lifecycle retains post-effect cleanup" `Quick test_repair_uses_common_complete_cleanup_and_retains_effect_result;
     test_case "all renames precede deletion and fresh build survives" `Quick test_pending_rename_precedes_deletion_and_preserves_new_build;

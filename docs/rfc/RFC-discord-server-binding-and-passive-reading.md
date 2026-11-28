@@ -79,7 +79,7 @@ type unmentioned =
 
 type stance =
   { trigger : Discord_gateway_client.trigger_policy option
-      (* None: the global discord.trigger_policy decides *)
+      (* None: inherit the guild policy or use the bound-DM default below *)
   ; unmentioned : unmentioned
   }
 ```
@@ -93,7 +93,39 @@ Ingress resolves the binding once before classifying a Discord message. The gate
 
 Defaults for a new server or guild-channel binding are inherited trigger and `unmentioned = Passive`. A bound DM without an explicit trigger starts a turn on each ordinary human message. An explicit DM trigger uses the same binding policy as a guild channel. DMs never inherit a server binding.
 
-`Passive` writes the chat line and external-attention evidence and skips `Server_connector_attention_delivery.deliver`. The next triggered Discord turn reads earlier passive rows from the same guild/channel (or exact thread) and current binding owner up to the triggering event, in source order. The existing prompt context budget bounds the slice. Parent-channel and sibling-thread messages stay separate. The turn labels external authors and message bodies as quoted conversation data. It records the last included message identity for observation. A standalone Keeper cycle does not inject the rows automatically; it can read them through `keeper_surface_read` under the same binding checks.
+**Record passive separately from wake.** `Passive` writes an idempotent chat row
+with its exact Discord message identity and a durable, typed `Passive_context`
+disposition. The stored disposition is the authority for later selection.
+`Wake` rows and rows without this disposition are ineligible, even after a
+binding's stance changes. At the append boundary use
+`Keeper_chat_store.Passive_context` as the mention policy, so even literal
+`@names` and explicit mention hints produce an empty persisted mention list.
+Record external-attention evidence without calling
+`Server_connector_attention_delivery.deliver`. The record creates no queue entry and no pending mention. A standalone Keeper cycle may read the rows
+through `keeper_surface_read` under the same binding checks.
+
+**Read interval and budget.** Select only rows from the exact Discord
+conversation and Keeper resolved for the trigger. Read in durable transcript
+order strictly after that conversation's last consumed position and before the
+trigger's accepted chat row. Parent channels and sibling threads stay separate.
+On the first trigger, start at the beginning of the eligible passive rows.
+Reuse the transcript preview limits already applied by
+`Keeper_world_observation_message_scope` (`default_recent_direct_limit`, eight
+lines, and `recent_direct_content_max_len`, 600 bytes per line after UTF-8
+sanitization). Extract those values into a shared preview rule rather than
+copying constants. Keep the newest eligible lines that fit, then restore source
+order. Mark omitted older lines and truncated individual previews. Quote
+external authors and message bodies as conversation data.
+
+**Consumption.** Save the selected row identities and the high-water position
+with the triggered turn. Advance the durable cursor for this Keeper and exact
+conversation only after the turn commits its response, in the same durable
+commit. The cursor covers the input interval through its newest eligible
+passive row, including any older rows omitted by the preview limit. Omission
+only affects the automatic preview. Those rows remain available through
+`keeper_surface_read`. Retry of the same accepted trigger reuses its selected
+rows. A failed turn or unreadable interval does not advance the cursor, and a
+late commit cannot move it backwards.
 
 `handle_ambient` today states that no flag may suppress the stimulus. That
 sentence is rewritten, not worked around: the stance is the operator's
@@ -164,10 +196,24 @@ production has zero Discord bindings (§1), and other Discord installations re-b
 
 Each layer stays within the constitution's work unit.
 
-1. Discord codec and resolver. Check exact > parent > server, duplicate rejection, DM isolation, and unchanged Slack/Telegram/iMessage files.
-2. Ingress. Resolve before applying stance and carry guild/parent in origins. Check per-binding override, default DM wake, passive records without enqueue, and ignore with no records.
-3. HTTP, Dashboard, TUI, directory/status, tool reads/posts, presence, operator replies and inbound media. Verify a server-bound origin via its guild and reject it after the binding moves.
-4. Triggered-turn context. Check that an earlier passive message appears as quoted context for a later trigger in the same thread, without starting its own turn or mixing parent/sibling rows. Enable the passive default after this layer lands with the others.
+1. Discord codec and resolver. Reuse the shared binding transaction, audit
+   and rollback paths through a Discord row codec. Check exact > parent >
+   server, duplicate rejection, DM isolation, and unchanged Slack, Telegram
+   and iMessage files.
+2. Ingress. Resolve before applying stance and carry guild and parent in
+   origins. Check per-binding override, default DM wake and ignore with no
+   records. A passive message containing a literal `@Keeper` still produces
+   a passive row with no stored mentions, no queue entry and no pending
+   mention in a standalone Keeper cycle.
+3. HTTP, Dashboard, TUI, directory/status, tool reads/posts, presence, operator
+   replies and inbound media. Verify a server-bound origin via its guild and
+   reject it after the binding moves.
+4. Triggered-turn context. Check that a channel and a thread each include
+   their own earlier passive rows as quoted context, without parent or sibling
+   rows. Check that a second trigger includes only new rows, that a failed
+   first turn leaves its rows eligible, and that caps are visible as omissions
+   and truncation while source order is preserved. Enable the passive default
+   only when this layer lands with the others.
 
 ## 6. Verification
 

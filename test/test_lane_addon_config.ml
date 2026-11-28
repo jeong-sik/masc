@@ -365,6 +365,23 @@ selection = "latest_completed"
     candidate ~package:"dos-world" ("[binding]\n" ^ source);
     check_error "dos-world takes no external source" path)
 
+(* lane.host.toml runs the same output-statistics worker as a host process.
+   Both manifests must declare one package: a revision, port or binding change
+   to one of them fails here until the other follows. *)
+let output_statistics_host_manifest_differs_only_in_execution () =
+  let load name =
+    match Lane_addon_manifest.load ~path:(repo_file ("addons/output-statistics/" ^ name)) with
+    | Ok package -> package
+    | Error error -> fail (Lane_addon_manifest.error_to_string error) in
+  let container = load "lane.toml" and host = load "lane.host.toml" in
+  (match host.execution with
+   | Lane_addon_types.Host_process _ -> ()
+   | Lane_addon_types.Container _ -> fail "lane.host.toml declares a container");
+  check int "both manifests bound a reply the same"
+    (Lane_addon_types.max_reply_bytes container) (Lane_addon_types.max_reply_bytes host);
+  check bool "the host manifest keeps every package field but execution" true
+    ({ host with execution = container.execution } = container)
+
 (* The shipped operator quiz: the example declaration loads with the package's
    own manifest, its record grants parse as operator-owned grants, and the
    binding contract refuses a binding without the time zone R is counted in. *)
@@ -1475,6 +1492,7 @@ let () = run "Lane Add-on declarative composition"
      test_case "a declaration names a carried package" `Quick a_declaration_names_a_carried_package;
      test_case "exact outputs are selectable independently from tool hooks" `Quick exact_outputs_are_selected_independently;
      test_case "shipped DOS chain packages declare enforceable binding contracts" `Quick shipped_dos_chain_declares_binding_contracts;
+     test_case "the output-statistics host manifest differs only in execution" `Quick output_statistics_host_manifest_differs_only_in_execution;
      test_case "the shipped operator quiz declaration loads with its manifest" `Quick shipped_operator_quiz_declaration_loads;
      test_case "the operator quiz worker speaks the host contract" `Quick operator_quiz_worker_speaks_the_host_contract;
      test_case "the shipped operator lesson declaration loads with its manifest" `Quick shipped_operator_lesson_declaration_loads;

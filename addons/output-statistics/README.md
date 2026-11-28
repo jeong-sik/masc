@@ -28,6 +28,13 @@ in CI with `docker build -f addons/output-statistics/Dockerfile -t
 masc-lane-output-statistics:0.1.0 addons`. Declaring the image is not evidence that
 it has been built, installed, or qualified in a running host.
 
+[lane.host.toml](lane.host.toml) runs the same worker as a host process, without
+an image. It uses `python3` from the MASC server's `PATH` and requires
+`masc-native-addon-launcher`. MASC accepts a `host_process` package only from
+operator configuration; a Keeper's declaration save refuses it. A unit case in
+`test/test_lane_addon_config.ml` fails when the two manifests differ in anything
+but how the worker runs.
+
 Run real stdio package tests without a local OCaml or Docker build:
 
 ```sh

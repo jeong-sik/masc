@@ -1299,11 +1299,24 @@ let handle_tool_execute_typed
                   instead of as the reference alone: the model reads whether
                   the command succeeded without a second call. The
                   projection falls back to the reference when the payload
-                  does not fit the lane. *)
+                  does not fit the lane.
+
+                  A dispatch with no trustworthy result keeps the reference
+                  alone. Its recorded output is replayed to the Keeper as the
+                  detail of a failed call ([Keeper_own_recent_actions]), a
+                  place written for a refusal's short text and not for a
+                  result payload. *)
+               let projection =
+                 match observation with
+                 | Command_result_observed ->
+                   Tool_output.Inline_with_structured_diagnostic
+                 | Command_request_not_sent | Command_effect_unknown ->
+                   Tool_output.Reference_only
+               in
                authorized
                  (match
                     Tool_bridge.attach_artifact_manifest
-                      ~projection:Tool_output.Inline_with_structured_diagnostic
+                      ~projection
                       ~base_path:config.base_path
                       (let answered =
                          match transport_failure with

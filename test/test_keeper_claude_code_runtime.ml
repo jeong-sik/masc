@@ -616,7 +616,6 @@ let with_unified_autonomous_cycle ?(last_turn_id = 0) ~base_path ~cli_path f =
                        Masc.Keeper_owner_registry.install_from_store
                          ~sw
                          ~operation_runner:None
-                         ~on_turn_slot_released:None
                          config
                      with
                      | Ok _count -> ()
@@ -659,7 +658,7 @@ let with_unified_autonomous_cycle ?(last_turn_id = 0) ~base_path ~cli_path f =
                           ~reactive:false
                           Keeper_heartbeat_source_batch.empty
                       in
-                      match Keeper_owner_registry.run_autonomous_if_idle
+                      match Keeper_owner_registry.run_autonomous_turn ~input:(fun () -> Keeper_owner.No_autonomous_input)
                           ~base_path:config.base_path ~keeper_name (fun () ->
                             Keeper_unified_turn.run_keeper_cycle
                               ~before_dispatch_authority:(fun () -> Ok ())

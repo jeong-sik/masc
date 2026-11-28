@@ -179,7 +179,7 @@ let with_server f =
          ever claims it, so it stays queued until it is cancelled. *)
       ignore (require_ok Keeper_owner_registry.install_error_to_string
         (Keeper_owner_registry.install_from_store ~sw ~operation_runner:None
-          ~on_turn_slot_released:None config));
+          config));
       Server_auth.For_testing.restore_server_state (Some state);
       Auth.save_auth_config base_path
         { Masc_domain.default_auth_config with enabled = true; require_token = true };

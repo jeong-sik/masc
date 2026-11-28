@@ -274,6 +274,7 @@ export interface DecodedGateQueueRow {
   readonly toolName: string
   readonly sequence: number
   readonly waitingSec: number | null
+  readonly requestedAt: number | null
   readonly phase: string | null
   readonly raw: Record<string, unknown>
 }
@@ -329,6 +330,7 @@ export function decodeGateQueueStrict(raw: unknown): DecodedGateQueueResult {
       toolName,
       sequence,
       waitingSec: asFiniteNumber(row.waiting_s),
+      requestedAt: asFiniteNumber(row.requested_at),
       phase: asNonEmptyString(row.phase),
       raw: row,
     })

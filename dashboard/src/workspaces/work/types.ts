@@ -1093,6 +1093,8 @@ export interface AskQuestionItem {
 export interface KeeperAskItem {
   readonly askId: string
   readonly keeper: string
+  /** Unix seconds; null when the row carries no readable time. */
+  readonly askedAt: number | null
   readonly context: string | null
   readonly questions: readonly AskQuestionItem[]
   readonly revision: string
@@ -1104,6 +1106,10 @@ export interface GatePendingItem {
   readonly toolName: string
   readonly inputPreview: string | null
   readonly waitingSec: number | null
+  /** Unix seconds when the row began to wait, from the row's own `requested_at`.
+   *  `waitingSec` is derived from it when the server builds the payload and can go
+   *  stale when that payload is cached, so this is the authoritative time. */
+  readonly requestedAt: number | null
   /** Null when the row's phase is missing or not a current variant. */
   readonly phase: ApprovalQueuePhase | null
   readonly disposition: KeeperSummaryAttemptDisposition | null
@@ -1127,11 +1133,13 @@ export interface GateResolvedAuditRow {
   readonly resolvedAt: string
 }
 
+/** `waitingSinceMs` is when the item began to wait, in ms since the epoch,
+ *  and null when its row carries no time to count from. */
 export type InboxEntry =
-  | { readonly kind: 'tool_approval'; readonly key: string; readonly item: ToolApprovalWait }
-  | { readonly kind: 'keeper_ask'; readonly key: string; readonly item: KeeperAskItem }
-  | { readonly kind: 'channel_gate'; readonly key: string; readonly item: GatePendingItem }
-  | { readonly kind: 'goal_confirmation'; readonly key: string; readonly goal: GoalItem }
+  | { readonly kind: 'tool_approval'; readonly key: string; readonly waitingSinceMs: number | null; readonly item: ToolApprovalWait }
+  | { readonly kind: 'keeper_ask'; readonly key: string; readonly waitingSinceMs: number | null; readonly item: KeeperAskItem }
+  | { readonly kind: 'channel_gate'; readonly key: string; readonly waitingSinceMs: number | null; readonly item: GatePendingItem }
+  | { readonly kind: 'goal_confirmation'; readonly key: string; readonly waitingSinceMs: null; readonly goal: GoalItem }
 
 // ── 4. Candle Ledger & Decimal-String Milli Parsers (`#36`) ───────────────
 

@@ -137,10 +137,21 @@ val masc_host : unit -> string
 (** {1 HTTP base URL} *)
 
 val http_base_url_env_key : string
+
+val http_base_url_toml_key : string
+(** [transport.http_base_url]: the key of runtime.toml that holds the base URL
+    of the workspace. A set {!http_base_url_env_key} wins over it. *)
+
+val http_base_url_setting_names : string
+(** Both names in one phrase, for a message that tells the operator where the
+    base URL of the server comes from. *)
+
 val mcp_url_env_key : string
 val masc_http_base_url_opt : unit -> string option
-(** Return only an explicitly configured [MASC_HTTP_BASE_URL], normalized by
-    trimming surrounding whitespace and trailing slashes.  Unlike
+(** Return only an explicitly configured base URL, normalized by trimming
+    surrounding whitespace and trailing slashes: [MASC_HTTP_BASE_URL] of the
+    process environment, or else [transport.http_base_url] of the runtime.toml
+    the process loaded.  Unlike
     {!masc_http_base_url_result}, this never derives an identity from
     [MASC_HOST]/[MASC_HTTP_PORT]; listener admission must use the actual bind
     configuration instead of re-reading potentially stale environment input. *)

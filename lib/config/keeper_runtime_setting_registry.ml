@@ -733,6 +733,26 @@ let all =
       ~consumers:["Server_tls_material"]
       ~category:Transport
       "PEM private key for MASC_TLS_CERT_FILE; set both or neither"
+  ; (* The address people open is a property of the workspace: two servers
+       started from one shell on two base paths have two addresses, and one
+       exported variable can name only one of them. The file of each base path
+       names its own; the variable stays a per-launch override. *)
+    setting
+      ~effective:
+        (Reader
+           (fun () -> display_string_option (Env_config_core.masc_http_base_url_opt ())))
+      ~env_name:Env_config_core.http_base_url_env_key
+      ~exposure:(Toml_and_env Env_config_core.http_base_url_toml_key)
+      ~value_kind:String
+      ~default:"(derived)"
+      ~consumers:
+        [ "Server_bootstrap_http listener config"
+        ; "Server_accounts login client preflight"
+        ; "Server_request_authority trust policy"
+        ; "Masc_cli_auth invitation link"
+        ]
+      ~category:Transport
+      "Public http(s) origin people open for this workspace; unset, the address the listener binds"
   ; setting
       ~range:(float_range ~min:1.0 ~max:60.0 ())
       ~effective:(Reader (fun () -> display_float Env_config_keeper.KeeperGrpc.reconnect_backoff_sec))

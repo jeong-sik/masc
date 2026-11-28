@@ -36,7 +36,7 @@ let with_workspace f =
         ignore (Workspace.init config ~agent_name:None);
         Eio.Switch.run @@ fun sw ->
         (match Keeper_owner_registry.install_from_store ~sw ~operation_runner:None
-                 ~on_turn_slot_released:None config with
+                 config with
          | Ok 0 -> ()
          | Ok _ -> fail "fixture unexpectedly loaded owners"
          | Error error -> fail (Keeper_owner_registry.install_error_to_string error));

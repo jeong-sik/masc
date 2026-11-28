@@ -183,7 +183,6 @@ let start_waiting_task ?hold_resume ~sw ~clock (config : Workspace.config) ~requ
     (Registry.install_from_store
        ~sw
        ~operation_runner:(Some runner)
-       ~on_turn_slot_released:None
        config
      |> Result.map_error Registry.install_error_to_string
      |> get);

@@ -28,7 +28,7 @@ let with_fixture ?(claimed = 1) ?(owner_trace = "retry-original-trace") f =
         let config = Workspace.default_config base_path in
         ignore (Workspace.init config ~agent_name:None);
         ignore (require Keeper_owner_registry.install_error_to_string
-          (Keeper_owner_registry.install_from_store ~sw ~operation_runner:None ~on_turn_slot_released:None config));
+          (Keeper_owner_registry.install_from_store ~sw ~operation_runner:None config));
         let keeper_name = "retry-owner" in
         let meta = require Fun.id (Masc_test_deps.meta_of_json_fixture
           (`Assoc [ "name", `String keeper_name; "trace_id", `String owner_trace ])) in
@@ -194,7 +194,7 @@ let test_live_owner_child_and_registered_lane_are_refused () =
     let release, finish = Eio.Promise.create () in
     let ended = Eio.Stream.create 1 in
     Eio.Fiber.fork ~sw (fun () ->
-      let result = Keeper_owner.run_autonomous_if_idle owner (fun () ->
+      let result = Keeper_owner.run_autonomous_turn ~input:(fun () -> Keeper_owner.No_autonomous_input) owner (fun () ->
         Eio.Promise.resolve start (); Eio.Promise.await release) in
       Eio.Stream.add ended result);
     Eio.Promise.await started;

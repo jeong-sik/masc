@@ -274,7 +274,6 @@ let with_owners config f =
      Registry.install_from_store
        ~sw
        ~operation_runner:None
-       ~on_turn_slot_released:None
        config
    with
    | Ok _ -> ()
@@ -337,7 +336,6 @@ let start_owner ~sw config ~store ~keeper_name ~initial_meta =
       ~session_root:(Filename.concat base_path "traces")
       ~now:Unix.gettimeofday
       ~operation_runner:None
-      ~on_turn_slot_released:None
       ~keeper_name
       ~initial_meta
   with

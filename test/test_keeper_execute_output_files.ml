@@ -216,6 +216,50 @@ let test_claude_lane_stores_40000_bytes_byte_identical () =
     Alcotest.(check string) "the stored stdout blob is the child's bytes" payload
       (blob_bytes ~base_path "stdout_artifact" fields))
 
+let preview_of field fields =
+  match List.assoc_opt field fields with
+  | None -> Alcotest.failf "%s is missing" field
+  | Some reference -> Yojson.Safe.Util.(reference |> member "_blob" |> member "preview" |> to_string)
+;;
+
+let sha256_of field fields =
+  match List.assoc_opt field fields with
+  | None -> Alcotest.failf "%s is missing" field
+  | Some reference -> Yojson.Safe.Util.(reference |> member "_blob" |> member "sha256" |> to_string)
+;;
+
+(* With stderr empty, stdout is the same bytes as the combined output. Its
+   reference has the output's address and does not repeat the 4 KiB preview:
+   the result a model receives stays about half the size. *)
+let test_a_stream_equal_to_the_output_carries_no_second_preview () =
+  publish_payload ~lane:claude_lane 40_000 (fun ~base_path:_ ~payload:_ fields ->
+    Alcotest.(check bool) "the output keeps its preview" true
+      (String.length (preview_of "output_artifact" fields) > 0);
+    Alcotest.(check string) "stdout has the output's address"
+      (sha256_of "output_artifact" fields) (sha256_of "stdout_artifact" fields);
+    Alcotest.(check string) "stdout does not repeat the preview" ""
+      (preview_of "stdout_artifact" fields))
+
+(* When both streams have bytes, neither is the combined output, and each
+   reference keeps its own preview. *)
+let test_two_streams_keep_their_own_previews () =
+  let store_dir = Filename.temp_file "stream-artifact-fields-" "" in
+  Sys.remove store_dir;
+  Unix.mkdir store_dir 0o700;
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree store_dir) @@ fun () ->
+  let store = Tool_blob_store.create ~base_path:store_dir in
+  let put bytes = Tool_blob_store.put_durable store ~bytes ~mime:"text/plain" in
+  let fields =
+    Publish.stream_artifact_fields
+      ~output:(put "standard output\nstandard error\n")
+      ~stdout:(put "standard output\n")
+      ~stderr:(put "standard error\n")
+  in
+  Alcotest.(check bool) "stdout keeps its preview" true
+    (String.length (preview_of "stdout_artifact" fields) > 0);
+  Alcotest.(check bool) "stderr keeps its preview" true
+    (String.length (preview_of "stderr_artifact" fields) > 0)
+
 let test_narrow_lanes_still_store_20000_bytes () =
   List.iter
     (fun (name, lane) ->
@@ -268,6 +312,10 @@ let () =
           test_claude_lane_returns_20000_bytes_inline
       ; Alcotest.test_case "Claude Code lane stores 40,000 bytes byte-identical" `Quick
           test_claude_lane_stores_40000_bytes_byte_identical
+      ; Alcotest.test_case "a stream equal to the output carries no second preview" `Quick
+          test_a_stream_equal_to_the_output_carries_no_second_preview
+      ; Alcotest.test_case "two streams keep their own previews" `Quick
+          test_two_streams_keep_their_own_previews
       ; Alcotest.test_case "Codex and Antigravity lanes still store 20,000 bytes" `Quick
           test_narrow_lanes_still_store_20000_bytes
       ]

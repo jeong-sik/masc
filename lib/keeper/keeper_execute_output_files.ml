@@ -67,6 +67,23 @@ let copy_chunks ?expected_bytes path emit =
 let unlink_if_present path =
   try Unix.unlink path with Unix.Unix_error (Unix.ENOENT, _, _) -> ()
 
+let stream_artifact_fields
+      ~(output : Tool_output.artifact_ref)
+      ~(stdout : Tool_output.artifact_ref)
+      ~(stderr : Tool_output.artifact_ref)
+  =
+  let stream (reference : Tool_output.artifact_ref) =
+    Tool_output.normalized_artifact_ref_to_json
+      (if String.equal reference.sha256 output.sha256
+       then Tool_output.with_preview reference ""
+       else reference)
+  in
+  [ "output_artifact", Tool_output.normalized_artifact_ref_to_json output
+  ; "stdout_artifact", stream stdout
+  ; "stderr_artifact", stream stderr
+  ]
+;;
+
 let publish ~inline_ceiling_bytes ~base_path ~redaction (files : Process_output_capture.files) =
   let* stdout_path, stdout_bytes = complete_path "stdout" files.stdout in
   let* stderr_path, stderr_bytes = complete_path "stderr" files.stderr in
@@ -131,12 +148,11 @@ let publish ~inline_ceiling_bytes ~base_path ~redaction (files : Process_output_
             let store = Tool_blob_store.create ~base_path in
             let store_file path =
               Tool_blob_store.put_file_durable_blocking store ~path ~mime:"text/plain"
-              |> Tool_output.normalized_artifact_ref_to_json
             in
-            [ "output_artifact", store_file combined
-            ; "stdout_artifact", store_file stdout
-            ; "stderr_artifact", store_file stderr
-            ]
+            stream_artifact_fields
+              ~output:(store_file combined)
+              ~stdout:(store_file stdout)
+              ~stderr:(store_file stderr)
         in
         Ok
           { fields = ("output_completeness", `String "complete") :: fields

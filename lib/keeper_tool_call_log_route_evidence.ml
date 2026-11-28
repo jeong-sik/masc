@@ -95,9 +95,16 @@ let route_evidence_json_of_tool_io
       ~execution_evidence
   =
   let route_text = route_text_for_evidence output_text in
+  (* A result sent inline beside its manifest reference is an envelope around
+     the producer's data; the route fields are in that data. *)
   let parsed_output =
     match parse_tool_output_json_sanitized route_text with
-    | Ok json -> Some json
+    | Ok json ->
+      (match Tool_output.artifact_result_envelope_of_json json with
+       | Tool_output.Decoded_artifact_result_envelope { structured_content; _ } ->
+         Some structured_content
+       | Tool_output.Not_artifact_result_envelope
+       | Tool_output.Invalid_artifact_result_envelope _ -> Some json)
     | Error _ -> None
   in
   (* A completed Execute keeps [via] and [sandbox_profile] in its execution

@@ -1564,6 +1564,40 @@ let route_evidence_for_tool tool_name =
   | None -> Alcotest.failf "missing route evidence for %s" tool_name
 ;;
 
+(* An Execute result too large to return inline reaches the model as an
+   envelope: its payload beside the manifest's reference. The exit status is
+   in that payload, and the row's route evidence reads it there. *)
+let test_route_evidence_reads_status_inside_an_inline_result_envelope () =
+  let manifest =
+    artifact_ref_exn
+      ~sha256:(String.make 64 'e')
+      ~bytes:128
+      ~mime:Tool_output.artifact_manifest_mime
+      ~preview:""
+  in
+  let status = `Assoc [ "kind", `String "exit"; "code", `Int 3 ] in
+  let envelope =
+    Tool_output.artifact_result_envelope_to_json
+      ~artifact_manifest:manifest
+      ~structured_content:(`Assoc [ "ok", `Bool false; "status", status ])
+      ()
+    |> Yojson.Safe.to_string
+  in
+  match
+    Keeper_tool_call_log.route_evidence_json_of_tool_io
+      ~tool_name:"tool_execute"
+      ~input:(`Assoc [])
+      ~output_text:envelope
+      ~execution_evidence:None
+  with
+  | None -> Alcotest.fail "an Execute envelope has route evidence"
+  | Some evidence ->
+    Alcotest.(check string)
+      "the exit status is read from the payload the envelope wraps"
+      (Yojson.Safe.to_string status)
+      (Yojson.Safe.to_string (Yojson.Safe.Util.member "status" evidence))
+;;
+
 let check_eval_tags tool_name expected =
   let evidence = route_evidence_for_tool tool_name in
   Alcotest.(check (list string))
@@ -3744,6 +3778,10 @@ let () =
             "route evidence records descriptor eval tags"
             `Quick
             test_route_evidence_records_descriptor_eval_tags
+        ; Alcotest.test_case
+            "route evidence reads status inside an inline result envelope"
+            `Quick
+            test_route_evidence_reads_status_inside_an_inline_result_envelope
         ; eio_test "non-object input still logs action radius"
             test_non_object_input_still_logs_action_radius
         ; eio_test "dashboard aggregate groups runtime fields"

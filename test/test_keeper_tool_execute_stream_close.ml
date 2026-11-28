@@ -403,29 +403,44 @@ let test_manifest_preserves_execute_answer_identity () =
     let original = match outcome.data with Some value -> value | None -> fail "Execute typed data missing" in
     let result = Tool_result.make_ok ~tool_name:"tool_execute" ~start_time:(Tool_timing.start ())
         ~data:original ?metadata:outcome.metadata () in
-    let project result =
-      let content = match Tool_bridge.to_agent_core_typed_result ~base_path
+    let content_of result =
+      match Tool_bridge.to_agent_core_typed_result ~base_path
           ~answer_reader:(fun output_text -> Keeper_tool_answer.answer ~tool_name:"Execute" ~output_text) result with
-        | Ok result -> result.Agent_core.Types.content
-        | Error error -> fail error.Agent_core.Types.message in
+      | Ok result -> result.Agent_core.Types.content
+      | Error error -> fail error.Agent_core.Types.message in
+    (* A result whose manifest was attached with the default projection: the
+       model gets the manifest's marker. *)
+    let project result =
+      let content = content_of result in
       match Tool_output.decode_from_agent_core content with
       | Tool_output.Decoded reference ->
-        check string "actual Execute uses manifest projection" Tool_output.artifact_manifest_mime reference.mime;
+        check string "the marker names a result manifest" Tool_output.artifact_manifest_mime reference.mime;
         content, reference
-      | _ -> fail "Execute artifacts must project their durable manifest" in
+      | _ -> fail "a result with the default projection must project its durable manifest" in
+    let stored data =
+      Tool_result.make_ok ~tool_name:"tool_execute" ~start_time:(Tool_timing.start ()) ~data ()
+      |> Tool_bridge.attach_artifact_manifest ~base_path |> require in
+    (* Execute's own projection: the payload beside the manifest's reference. *)
+    let envelope = content_of result in
+    (match Tool_output.decode_structured_reference envelope with
+     | Tool_output.Result_envelope_manifest _ -> ()
+     | Tool_output.No_structured_reference
+     | Tool_output.Structured_handle _
+     | Tool_output.Invalid_structured_handle _
+     | Tool_output.Invalid_result_envelope_manifest _ ->
+       fail "actual Execute must send its artifact result as an envelope");
     let digest ?base_path content =
       match Keeper_tool_progress_identity.digest_tool_io ?base_path ~tool_name:"Execute"
           ~input:(`Assoc ["command",`String "fixture"]) ~output_text:content () with
       | Some io -> io.Keeper_tool_progress_identity.output_fingerprint
       | None -> fail "Execute fingerprint missing" in
-    let first, reference = project result in
+    let first, reference = project (stored original) in
     let changed_time = match original with
       | `Assoc fields -> `Assoc (("execution_time_ms",`Int 987654)::List.remove_assoc "execution_time_ms" fields)
       | _ -> fail "Execute payload must be an object" in
-    let second_result = Tool_result.make_ok ~tool_name:"tool_execute" ~start_time:(Tool_timing.start ())
-        ~data:changed_time () |> Tool_bridge.attach_artifact_manifest ~base_path |> require in
-    let second, second_reference = project second_result in
+    let second, second_reference = project (stored changed_time) in
     check bool "different measurements retain different manifests" false (reference.sha256=second_reference.sha256);
+    check string "the envelope has the producer's inline answer" (digest outcome.raw_output) (digest envelope);
     check string "verified manifest equals inline producer answer" (digest outcome.raw_output) (digest ~base_path first);
     check string "measurement does not invent progress through manifest" (digest ~base_path first) (digest ~base_path second);
     check bool "unverified manifests remain distinct" false (digest first=digest second);

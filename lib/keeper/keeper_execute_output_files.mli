@@ -29,5 +29,18 @@ val publish :
     result manifest has been committed. Incomplete or failed
     captures remain private and do not produce a complete-output claim. *)
 
+val stream_artifact_fields :
+  output:Tool_output.artifact_ref ->
+  stdout:Tool_output.artifact_ref ->
+  stderr:Tool_output.artifact_ref ->
+  (string * Yojson.Safe.t) list
+(** The [output_artifact], [stdout_artifact] and [stderr_artifact] fields of
+    an output too large to return inline. [output] is stdout followed by
+    stderr, so when one stream is empty the other holds the same bytes as
+    [output] and has its address. That stream's reference carries an empty
+    preview: its reader has the same preview in [output_artifact], under the
+    same [sha256]. An empty preview beside [bytes] above zero therefore means
+    "the same as [output_artifact]", not "no output". *)
+
 val capture_dirname : string
 (** The directory {!capture_directory} names below [<base>/.masc]. *)

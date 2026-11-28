@@ -29,7 +29,13 @@ let wait_until ~timeout_s f =
   let rec loop () =
     if f () then true
     else if Unix.gettimeofday () >= deadline then false
-    else (ignore (Unix.select [] [] [] 0.02); loop ())
+    else begin
+      (* A SIGCHLD can interrupt the pause; the loop re-reads [f] and the
+         deadline either way. *)
+      (try ignore (Unix.select [] [] [] 0.02)
+       with Unix.Unix_error (Unix.EINTR, _, _) -> ());
+      loop ()
+    end
   in
   loop ()
 

@@ -321,6 +321,11 @@ let check_lock_reopens_after_unlinked_inode ~with_lock () =
   let lock_path = path ^ ".lock" in
   with_external_lock_holder lock_path @@ fun release_holder ->
   let initial_ino = (Unix.lstat lock_path).Unix.st_ino in
+  (* Keep the unlinked inode allocated: once its last descriptor closes, ext4
+     can give the same number to the file created next, and the comparison
+     below would read a fresh file as the stale one. *)
+  let stale_pin = Unix.openfile lock_path [ Unix.O_RDONLY; Unix.O_CLOEXEC ] 0 in
+  Fun.protect ~finally:(fun () -> Unix.close stale_pin) @@ fun () ->
   Eio_main.run @@ fun env ->
   let clock = Eio.Stdenv.clock env in
   let waiting, signal_waiting = Eio.Promise.create () in

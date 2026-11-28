@@ -480,8 +480,7 @@ val saved_history_ref_error_to_string : Saved_history.ref_error -> string
     messages are split into. The value, and the trace and turn of the
     reference, are the load of one head, with one exception: when a canonical
     loader ({!with_agent_core_exact_snapshot}, {!load_agent_core_exact_snapshot},
-    {!load_agent_core_with_ref}, {!with_agent_core_exact_snapshot_since},
-    {!decode_changed_bytes}) reads a head whose (device, inode, size, mtime)
+    {!load_agent_core_with_ref}) reads a head whose (device, inode, size, mtime)
     identity is the one a Keeper's lineage wrote or read, they are that
     lineage's value, which is what loading that head gave or gives, as
     {!load_agent_core} answers. A file rewritten in place that keeps its size
@@ -551,60 +550,6 @@ val load_agent_core_exact_snapshot_with_boundary :
   session_dir:string ->
   session_id:string ->
   (exact_checkpoint_snapshot * canonical_history_boundary, checkpoint_ref_load_error) result
-
-(** The content one exact snapshot read, named by its digest. It is made only
-    from an exact snapshot, never from a stored record. *)
-type exact_source
-
-val exact_snapshot_source : exact_checkpoint_snapshot -> exact_source
-
-type exact_snapshot_since =
-  | Unchanged_source
-      (** The head names the known content, by digest, so the value the
-          caller already holds for it is still current. No object was read. *)
-  | Changed_source of exact_checkpoint_snapshot
-      (** The head names other content, loaded once or, under the rule on
-          {!exact_checkpoint_snapshot}, a Keeper lineage's value for it. *)
-
-(** {!with_agent_core_exact_snapshot} for a caller that already holds one
-    exact snapshot of this session: under the same session lock the head is
-    read, and its objects are loaded only when its content digest differs from
-    [known]. A missing file is [Ref_not_found]. *)
-val with_agent_core_exact_snapshot_since :
-  session_dir:string ->
-  known:exact_source ->
-  (exact_snapshot_since -> 'a) ->
-  ('a, checkpoint_ref_load_error) result
-
-(** A head read under the session lock whose content differs from a known
-    source. *)
-type changed_bytes
-
-type exact_bytes_since =
-  | Unchanged_bytes
-      (** The head names the known content. No object was read. *)
-  | Changed_bytes of changed_bytes
-      (** Another head, read but whose objects are not loaded yet. *)
-
-(** Read the head under the session lock and release the lock without
-    loading its objects. A caller that holds the known snapshot's decoded value
-    can drop it before {!decode_changed_bytes} builds the new one, so the two
-    are not alive together. A missing file is [Ref_not_found]. *)
-val read_agent_core_exact_bytes_since :
-  session_dir:string ->
-  known:exact_source ->
-  (exact_bytes_since, checkpoint_ref_load_error) result
-
-(** Load the head {!read_agent_core_exact_bytes_since} found changed, with the
-    digest it already took. The objects a head names do not change, so they
-    are read after the lock was released. When they were read from a file whose identity a
-    Keeper's lineage holds, that lineage's value is handed out instead, as
-    {!exact_checkpoint_snapshot} describes. The lock is released between the
-    read and the decode, so a later file that reuses the read file's inode
-    with the same size and mtime is one more false match for that identity
-    rule (#43575). *)
-val decode_changed_bytes :
-  changed_bytes -> (exact_checkpoint_snapshot, checkpoint_ref_load_error) result
 
 (** Load one canonical checkpoint and its exact source identity from the same
     locked read, as {!load_agent_core_exact_snapshot}: the digest is the head's

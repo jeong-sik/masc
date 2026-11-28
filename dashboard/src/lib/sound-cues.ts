@@ -194,6 +194,7 @@ export async function enumerateMediaDevices(): Promise<EnumeratedAudioDevices> {
 // ── Live Mic Input VU Meter Probe ─────────────────────────────────────
 
 export interface MicLevelProbeOptions {
+  readonly signal?: AbortSignal
   readonly deviceId?: string
   readonly noiseSuppression?: boolean
   readonly echoCancellation?: boolean
@@ -209,6 +210,8 @@ export interface MicLevelProbeHandle {
 export async function startMicLevelProbe(
   options: MicLevelProbeOptions,
 ): Promise<MicLevelProbeHandle | null> {
+  const { signal } = options
+  if (signal?.aborted) return null
   if (
     typeof navigator === 'undefined'
     || !navigator.mediaDevices
@@ -230,9 +233,18 @@ export async function startMicLevelProbe(
   let rafId: number | null = null
   let stopped = false
 
+  const stopTracks = (media: MediaStream) => {
+    for (const track of media.getTracks()) {
+      try {
+        track.stop()
+      } catch { /* ignore */ }
+    }
+  }
+
   const stop = () => {
     if (stopped) return
     stopped = true
+    signal?.removeEventListener('abort', stop)
     if (rafId !== null && typeof cancelAnimationFrame === 'function') {
       cancelAnimationFrame(rafId)
       rafId = null
@@ -241,20 +253,17 @@ export async function startMicLevelProbe(
       source?.disconnect()
     } catch { /* ignore */ }
     if (stream) {
-      for (const track of stream.getTracks()) {
-        try {
-          track.stop()
-        } catch { /* ignore */ }
-      }
+      stopTracks(stream)
       stream = null
     }
     if (ctx && ctx.state !== 'closed') {
       void ctx.close().catch(() => {})
       ctx = null
     }
-    options.onLevel(0)
+    if (!signal?.aborted) options.onLevel(0)
   }
 
+  signal?.addEventListener('abort', stop, { once: true })
   try {
     const audioConstraints: MediaTrackConstraints = {
       noiseSuppression: options.noiseSuppression ?? true,
@@ -263,11 +272,13 @@ export async function startMicLevelProbe(
       ...(options.deviceId ? { deviceId: { ideal: options.deviceId } } : {}),
     }
 
-    stream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints, video: false })
+    const acquiredStream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints, video: false })
     if (stopped) {
-      stop()
+      // The browser permission request itself is not abortable.
+      stopTracks(acquiredStream)
       return null
     }
+    stream = acquiredStream
 
     ctx = new Ctor()
     source = ctx.createMediaStreamSource(stream)
@@ -286,7 +297,7 @@ export async function startMicLevelProbe(
       }
       const rms = Math.min(1, Math.sqrt(sumSq / samples.length) * 2.4)
       options.onLevel(rms)
-      if (typeof requestAnimationFrame === 'function') {
+      if (!stopped && typeof requestAnimationFrame === 'function') {
         rafId = requestAnimationFrame(tick)
       }
     }
@@ -295,7 +306,7 @@ export async function startMicLevelProbe(
     return { stop }
   } catch (err) {
     stop()
-    options.onError?.(err instanceof Error ? err.message : String(err))
+    if (!signal?.aborted) options.onError?.(err instanceof Error ? err.message : String(err))
     return null
   }
 }

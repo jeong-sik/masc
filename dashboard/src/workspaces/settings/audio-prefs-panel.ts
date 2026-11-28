@@ -16,7 +16,6 @@ import {
   startMicLevelProbe,
   type DesktopNotificationPermission,
   type EnumeratedAudioDevices,
-  type MicLevelProbeHandle,
 } from '../../lib/sound-cues'
 import {
   USER_PREFS_LIMITS,
@@ -65,7 +64,7 @@ export function AudioPrefsPanel(): VNode {
   const [notifyPerm, setNotifyPerm] = useState<DesktopNotificationPermission>(() =>
     getDesktopNotificationPermission(),
   )
-  const probeRef = useRef<MicLevelProbeHandle | null>(null)
+  const probeRef = useRef<AbortController | null>(null)
 
   const refreshDevices = async () => {
     setRefreshingDevices(true)
@@ -80,14 +79,14 @@ export function AudioPrefsPanel(): VNode {
   useEffect(() => {
     void refreshDevices()
     return () => {
-      probeRef.current?.stop()
+      probeRef.current?.abort()
       probeRef.current = null
     }
   }, [])
 
   const handleToggleMicTest = async () => {
-    if (micTesting) {
-      probeRef.current?.stop()
+    if (probeRef.current) {
+      probeRef.current?.abort()
       probeRef.current = null
       setMicTesting(false)
       setMicLevel(0)
@@ -95,22 +94,25 @@ export function AudioPrefsPanel(): VNode {
     }
     setMicError(null)
     setMicTesting(true)
+    const controller = new AbortController()
+    probeRef.current = controller
     const handle = await startMicLevelProbe({
+      signal: controller.signal,
       deviceId: prefs.inputDeviceId || undefined,
       noiseSuppression: prefs.noiseSuppression,
       echoCancellation: prefs.echoCancellation,
       autoGainControl: prefs.autoGainControl,
       onLevel: (rms) => setMicLevel(rms),
-      onError: (msg) => {
-        setMicError(msg)
-        setMicTesting(false)
-      },
+      onError: setMicError,
     })
-    if (!handle) {
-      setMicTesting(false)
+    if (probeRef.current !== controller) {
+      handle?.stop()
       return
     }
-    probeRef.current = handle
+    if (!handle) {
+      probeRef.current = null
+      setMicTesting(false)
+    }
   }
 
   const handleRequestNotifyPermission = async () => {

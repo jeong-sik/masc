@@ -2384,7 +2384,7 @@ export function QuotasTab(props: WorkspaceViewProps) {
                                   </div>
                                 `}
                               </div>
-                              <span class="mono" style=${{ fontSize: 'var(--fs-11)', color: integ.enabled === false ? 'var(--fg-4)' : 'var(--ok-fg)' }}>
+                              <span class="mono" style=${{ fontSize: 'var(--fs-11)', color: integ.enabled === false ? 'var(--fg-3)' : 'var(--ok-fg)' }}>
                                 ${integ.enabled === false ? '비활성' : '활성'}
                               </span>
                             </div>

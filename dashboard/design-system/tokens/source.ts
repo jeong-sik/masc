@@ -82,7 +82,7 @@ export const raw: ReadonlyArray<TokenBase> = (() => {
   out.push(t('fg-1', 'oklch(0.935 0.008 80)', 'raw', 'color', 'primary ink (Lc >= 85)'))
   out.push(t('fg-2', 'oklch(0.790 0.010 78)', 'raw', 'color', 'secondary ink (Lc >= 60)'))
   out.push(t('fg-3', 'oklch(0.650 0.009 75)', 'raw', 'color', 'muted labels'))
-  out.push(t('fg-4', 'oklch(0.490 0.008 72)', 'raw', 'color', 'disabled / placeholder'))
+  out.push(t('fg-4', 'oklch(0.490 0.008 72)', 'raw', 'color', 'disabled controls, separators'))
 
   // Bone Primary CTA (neutral high-contrast — separates CTA from Candle Brass)
   out.push(t('cta-bg', 'oklch(0.920 0.010 80)', 'raw', 'color', 'Bone primary CTA fill'))
@@ -326,7 +326,7 @@ export const semantic: ReadonlyArray<TokenBase> = (() => {
   out.push(t('input-border', 'var(--line-1)', 'role', 'color'))
   out.push(t('input-bg-hover', 'var(--bg-2)', 'role', 'color'))
   out.push(t('input-bg-focus', 'var(--bg-0)', 'role', 'color'))
-  out.push(t('input-placeholder', 'var(--fg-4)', 'role', 'color'))
+  out.push(t('input-placeholder', 'var(--fg-3)', 'role', 'color'))
   out.push(t('input-border-focus', 'var(--focus)', 'role', 'color'))
 
   out.push(t('dialog-panel-bg', 'var(--bg-2)', 'role', 'color'))

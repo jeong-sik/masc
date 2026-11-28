@@ -1867,10 +1867,10 @@ export function LanesTab(props: WorkspaceViewProps) {
                           </span>
                         `}
                       </span>
-                      <span class="mono tnum" style=${{ textAlign: 'right', color: r.http_status === null ? 'var(--fg-4)' : 'var(--fg-1)' }}>
+                      <span class="mono tnum" style=${{ textAlign: 'right', color: r.http_status === null ? 'var(--fg-3)' : 'var(--fg-1)' }}>
                         ${r.http_status === null ? '미보고' : r.http_status}
                       </span>
-                      <span class="mono tnum" style=${{ textAlign: 'right', color: r.latency_ms === null ? 'var(--fg-4)' : 'var(--fg-1)' }}>
+                      <span class="mono tnum" style=${{ textAlign: 'right', color: r.latency_ms === null ? 'var(--fg-3)' : 'var(--fg-1)' }}>
                         ${r.latency_ms === null ? '미보고' : formatMs(r.latency_ms)}
                       </span>
                     </div>

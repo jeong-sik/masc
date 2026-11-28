@@ -185,6 +185,7 @@ let has_get_health cmds =
               | Cmd.Get_keeper_provider_input_part _
               | Cmd.Get_keeper_cache_outcome _
               | Cmd.Get_keeper_next_request _
+              | Cmd.Get_keeper_last_prompt _
               | Cmd.Get_keeper_turn_transcript _
               | Cmd.Get_keeper_tool_stats _
               | Cmd.Get_keeper_tool_calls _

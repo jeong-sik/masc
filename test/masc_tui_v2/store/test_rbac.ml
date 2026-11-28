@@ -1096,6 +1096,7 @@ let test_poller_loader_and_sse_suppression () =
         Cmd.Get_chat_operation_events
           { keeper = "alpha"; operation_id = "op-1"; from = Wire_chat_journal.From_start } );
       ("Get_keeper_next_request", Cmd.Get_keeper_next_request { keeper = "alpha" });
+      ("Get_keeper_last_prompt", Cmd.Get_keeper_last_prompt { keeper = "alpha" });
     ];
 
   (* #28 P1-2: Worker-allowed Tool/Tool_actor routes (CanReadState / CanBroadcast / mutating_tool) *)

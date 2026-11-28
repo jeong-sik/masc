@@ -35,7 +35,9 @@ import {
 import { KeeperRoster, type KeeperRosterProps } from './keeper-roster'
 import { KeeperHeader, type KeeperHeaderProps } from './keeper-header'
 import { KeeperChatTab } from './keeper-chat-tab'
+import { KeeperGroupBar, normalizeKeeperGroup } from './keeper-group-bar'
 import { PersonalKeepersWorkspace } from './personal-keepers-workspace'
+import { SplitHandle, useSplitSize } from '../../components/primitives/split-handle'
 import { loadSetupInventory } from '../runtime/setup-inventory-read'
 import type { KeeperRosterItem } from './types'
 import './keepers.css'
@@ -123,6 +125,14 @@ export function KeepersWorkspace(props: WorkspaceViewProps) {
     ? { observedAt: turns.updatedAt, live: !turns.stale }
     : null
   const [localSelectedName, setLocalSelectedName] = useState<string | null>(props.entityId ?? null)
+  const [selectedGroup, setSelectedGroup] = useState<string | null>(null)
+  const kpRootRef = useRef<HTMLDivElement>(null)
+  const { size: rosterWidth, setSize: setRosterWidth } = useSplitSize({
+    id: 'keepers-roster',
+    defaultSize: 260,
+    min: 200,
+    max: 440,
+  })
   const rosterRead = useRef<ReturnType<typeof loadKeeperRoster> | null>(null)
   const activeTab: KeeperEntityTab = parseKeeperEntityTab(props.entityTab)
 
@@ -217,6 +227,14 @@ export function KeepersWorkspace(props: WorkspaceViewProps) {
 
   const rosterItems: readonly KeeperRosterItem[] = roster.kind === 'value' ? roster.data : []
 
+  const filteredRoster = useMemo(() => {
+    if (!selectedGroup || roster.kind !== 'value') return roster
+    return {
+      ...roster,
+      data: roster.data.filter((k) => normalizeKeeperGroup(k.company) === selectedGroup),
+    }
+  }, [roster, selectedGroup])
+
   const activeKeeper = useMemo<KeeperRosterItem | null>(() => {
     if (rosterItems.length === 0) return null
     const wanted = props.entityId ?? localSelectedName
@@ -293,17 +311,44 @@ export function KeepersWorkspace(props: WorkspaceViewProps) {
   }
 
   return html`
-    <div class="kp-root" data-workspace="keepers">
-      <${ObservedKeeperRoster}
-        turnPreviews=${fleetTurnPreviews}
-        roster=${roster}
-        turnsObservation=${turnsObservation}
-        selectedKeeper=${activeKeeper?.name ?? null}
+    <div class="kp-workspace-shell" data-workspace="keepers">
+      <${KeeperGroupBar}
+        keepers=${rosterItems}
+        selectedGroup=${selectedGroup}
+        onSelectGroup=${setSelectedGroup}
+        activeKeeper=${activeKeeper}
         onSelectKeeper=${handleSelectKeeper}
-        onCreatedKeeper=${handleCreatedKeeper}
+        onGroupAssigned=${() => void refreshRoster('manual')}
       />
+      <div
+        ref=${kpRootRef}
+        class="kp-root"
+        data-resizable="true"
+        style=${{ '--kp-roster-w': `${rosterWidth}px` } as Record<string, string>}
+      >
+        <${ObservedKeeperRoster}
+          turnPreviews=${fleetTurnPreviews}
+          roster=${filteredRoster}
+          turnsObservation=${turnsObservation}
+          selectedKeeper=${activeKeeper?.name ?? null}
+          onSelectKeeper=${handleSelectKeeper}
+          onCreatedKeeper=${handleCreatedKeeper}
+        />
 
-      <section class="kp-stage" aria-label="Keeper 워크스페이스">
+        <${SplitHandle}
+          id="keepers-roster"
+          orientation="vertical"
+          value=${rosterWidth}
+          defaultSize=${260}
+          min=${200}
+          max=${440}
+          cssVar="--kp-roster-w"
+          targetRef=${kpRootRef}
+          onChange=${setRosterWidth}
+          label="Keeper 로스터 너비 조절"
+        />
+
+        <section class="kp-stage" aria-label="Keeper 워크스페이스">
         ${!activeKeeper
           ? html`
               <div class="kp-scroll-pane">
@@ -372,6 +417,7 @@ export function KeepersWorkspace(props: WorkspaceViewProps) {
               </div>
             `}
       </section>
+      </div>
     </div>
   `
 }

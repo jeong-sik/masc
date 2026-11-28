@@ -17,7 +17,7 @@
 }
 
 .chat-bubble {
-  max-width: 78ch;
+  max-width: var(--chat-measure, 78ch);
   padding: var(--sp-3) var(--sp-4);
   border-radius: var(--radius-md);
   border: 1px solid var(--line-1);
@@ -31,4 +31,64 @@
   background: var(--bg-0);
   overflow: hidden;
   margin: var(--sp-2) 0;
+}
+
+/* Unified readable chat measure across messages, tool activity cards, and live turn cards */
+.kp-msg,
+.kp-activity-single,
+.kp-activity-group,
+.kp-live-turn-card {
+  max-width: var(--chat-measure, 78ch);
+  min-width: 0;
+}
+
+/* Flex-shrink collision guards so status / elapsed / remove buttons never clip on long names */
+.kp-block-summary,
+.kp-open-work-row,
+.kp-queue-row {
+  min-width: 0;
+}
+
+.kp-block-summary > :first-child,
+.kp-open-work-row > .kp-open-work-phrase,
+.kp-queue-row > .kp-queue-msg {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.kp-block-summary > .kp-pill,
+.kp-block-summary > .mono,
+.kp-block-summary > button,
+.kp-open-work-row > .kp-open-work-reach,
+.kp-open-work-row > .kp-open-work-elapsed,
+.kp-open-work-row > time,
+.kp-queue-row > button,
+.kp-queue-row > .kp-pill {
+  flex-shrink: 0;
+}
+
+.kp-attachment-chip,
+.kp-composer-chip,
+.kp-attach-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  min-width: 0;
+  max-width: 100%;
+}
+
+.kp-attachment-chip > span,
+.kp-composer-chip > span,
+.kp-attach-chip > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kp-attachment-chip > button,
+.kp-composer-chip > button,
+.kp-attach-chip > button {
+  flex-shrink: 0;
 }

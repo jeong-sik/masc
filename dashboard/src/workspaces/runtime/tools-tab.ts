@@ -38,7 +38,7 @@ import {
   type ActiveKeeperOAuthFlow,
   type KeeperOAuthFlowHandle,
 } from '../../core'
-import { DataTable, RefreshButton, UPlotChart, type DataTableColumn, type UPlotSeriesSpec } from '../../components/primitives'
+import { DataTable, RefreshButton, SplitHandle, UPlotChart, useSplitSize, type DataTableColumn, type UPlotSeriesSpec } from '../../components/primitives'
 import { KeeperBadge } from '../../components/keeper-badge'
 import { isAdminLockedForSession } from '../../routes/router'
 import { pushShellToast } from '../../shell/shell-state'
@@ -266,6 +266,13 @@ export function ToolsTab({ onInspect }: WorkspaceViewProps) {
   const [banner, setBanner] = useState<{ kind: 'err'; text: string } | null>(null)
 
   // Skills editor state
+  const skillsSplitRef = useRef<HTMLDivElement>(null)
+  const { size: skillsListWidth, setSize: setSkillsListWidth } = useSplitSize({
+    id: 'runtime-skills',
+    defaultSize: 320,
+    min: 240,
+    max: 520,
+  })
   const [selectedSkill, setSelectedSkill] = useState<SkillSummaryItem | null>(null)
   const [skillSource, setSkillSource] = useState('')
   const [skillReading, setSkillReading] = useState(true)
@@ -645,13 +652,15 @@ export function ToolsTab({ onInspect }: WorkspaceViewProps) {
     {
       id: 'name',
       header: '도구 이름',
+      width: '34%',
       sortable: true,
       sortValue: (r) => r.name,
-      cell: (r) => html`<span class="mono" style=${{ fontSize: 'var(--fs-12)' }}>${r.name}</span>`,
+      cell: (r) => html`<span class="mono" title=${r.name} style=${{ fontSize: 'var(--fs-12)' }}>${r.name}</span>`,
     },
     {
       id: 'desc',
       header: '설명',
+      width: '18%',
       cell: (r) => {
         const description = r.description
         return description ? html`
@@ -666,6 +675,7 @@ export function ToolsTab({ onInspect }: WorkspaceViewProps) {
     {
       id: 'calls',
       header: '호출 수',
+      width: '16%',
       numeric: true,
       sortable: true,
       observed: (r) => toObservedNumber(r.calls, true),
@@ -674,6 +684,7 @@ export function ToolsTab({ onInspect }: WorkspaceViewProps) {
     {
       id: 'failRate',
       header: '실패율',
+      width: '16%',
       numeric: true,
       sortable: true,
       observed: (r) => toObservedNumber(r.failure_rate, true),
@@ -682,12 +693,22 @@ export function ToolsTab({ onInspect }: WorkspaceViewProps) {
     {
       id: 'p95',
       header: 'p95',
+      width: '16%',
       numeric: true,
       sortable: true,
       observed: (r) => toObservedNumber(r.p95_ms, true),
       formatValue: (v) => formatMs(Number(v)),
     },
   ], [onInspect])
+
+  const catalogFamilies = useMemo(() => {
+    const counts = new Map<string, number>()
+    for (const r of decodedCatalog.rows) {
+      const key = r.family ?? r.domain ?? '기타'
+      counts.set(key, (counts.get(key) ?? 0) + 1)
+    }
+    return [...counts.entries()].sort((a, b) => b[1] - a[1])
+  }, [decodedCatalog.rows])
 
   const clientColumns = useMemo<readonly DataTableColumn<McpClientRow>[]>(() => [
     { id: 'name', header: '클라이언트', sortable: true, accessor: (r) => r.name },
@@ -1032,6 +1053,19 @@ export function ToolsTab({ onInspect }: WorkspaceViewProps) {
             onInput=${(e: Event) => setSearch((e.target as HTMLInputElement).value)}
             style=${{ maxWidth: '320px', padding: 'var(--sp-1) var(--sp-2)', background: 'var(--input-bg)', border: '1px solid var(--input-border)', borderRadius: 'var(--radius-sm)' }}
           />
+          ${catalogFamilies.length > 0 && html`
+            <details class="ap-disclosure" data-testid="tools-catalog-secondary-details">
+              <summary class="ap-disclosure-trigger">
+                <span>카탈로그 분류 요약 (총 ${decodedCatalog.rows.length}개 · ${catalogFamilies.length}개 분류)</span>
+                <span aria-hidden="true">▸</span>
+              </summary>
+              <div class="ap-disclosure-body" style=${{ display: 'flex', flexWrap: 'wrap', gap: 'var(--sp-1)' }}>
+                ${catalogFamilies.map(([fam, count]) => html`
+                  <span key=${fam} class="kp-pill mono tnum">${fam} (${count})</span>
+                `)}
+              </div>
+            </details>
+          `}
           ${toolsObs.kind === 'failed' && html`
             <div class="ap-error" role="alert">도구 카탈로그 조회 실패: ${toolsObs.error.message}</div>
           `}
@@ -1060,8 +1094,12 @@ export function ToolsTab({ onInspect }: WorkspaceViewProps) {
       `}
 
       ${section === 'skills' && isSingleUser && html`
-        <div style=${{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 'var(--sp-3)', minWidth: 0 }}>
-          <div class="wka-card" style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-2)' }}>
+        <div
+          ref=${skillsSplitRef}
+          class="rt-skills-split"
+          style=${{ '--skills-list-w': `${skillsListWidth}px` } as Record<string, string>}
+        >
+          <div class="wka-card" style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-2)', minWidth: 0 }}>
             <div class="wka-h">
               <h3>스킬 목록 (${skillsList.length})</h3>
               <${RefreshButton}
@@ -1086,14 +1124,28 @@ export function ToolsTab({ onInspect }: WorkspaceViewProps) {
                       justifyContent: 'space-between',
                       textAlign: 'left',
                       background: skillKey(selectedSkill) === skillKey(s) ? 'var(--bg-4)' : undefined,
+                      minWidth: 0,
                     }}
                     onClick=${() => void handleOpenSkill(s)}
                   >
-                    <span class="mono">${s.identity.name}</span>
-                    <span class="mono tnum" style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-3)' }}>${s.body_bytes}B</span>
+                    <span class="mono" title=${s.identity.name} style=${{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>${s.identity.name}</span>
+                    <span class="mono tnum" style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-3)', flexShrink: 0 }}>${s.body_bytes}B</span>
                   </button>
                 `)}
           </div>
+
+          <${SplitHandle}
+            id="runtime-skills"
+            orientation="vertical"
+            value=${skillsListWidth}
+            defaultSize=${320}
+            min=${240}
+            max=${520}
+            cssVar="--skills-list-w"
+            targetRef=${skillsSplitRef}
+            onChange=${setSkillsListWidth}
+            label="스킬 목록 너비 조절"
+          />
 
           <div class="wka-card" style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-2)', minWidth: 0 }}>
             <div class="wka-h">

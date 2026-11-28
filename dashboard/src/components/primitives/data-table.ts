@@ -75,6 +75,26 @@ export interface DataTableProps<T> {
   readonly initialSort?: { readonly id: string; readonly desc?: boolean }
 }
 
+function resolveCellTooltip<T>(col: DataTableColumn<T>, row: T): string | undefined {
+  if (col.cell) {
+    if (col.sortValue) {
+      const sv = col.sortValue(row)
+      if (typeof sv === 'string' && sv.length > 24) return sv
+    }
+    return undefined
+  }
+  if (col.observed) {
+    const obs = col.observed(row)
+    if (obs.kind !== 'value') return undefined
+    const text = formatObserved(obs, col.formatValue)
+    return text.length > 24 ? text : undefined
+  }
+  const raw = col.accessor ? col.accessor(row) : undefined
+  if (raw === undefined || raw === null) return undefined
+  const text = col.formatValue ? col.formatValue(raw) : String(raw)
+  return text.length > 24 ? text : undefined
+}
+
 function renderCellContent<T>(col: DataTableColumn<T>, row: T): ComponentChildren {
   if (col.cell) return col.cell(row)
   if (col.observed) {
@@ -282,11 +302,13 @@ export function DataTable<T extends object>(props: DataTableProps<T>) {
                       >
                         ${row.getAllCells().map((cell) => {
                           const meta = columnMetaById.get(cell.column.id)
+                          const cellTitle = meta ? resolveCellTooltip(meta, row.original) : undefined
                           return html`
                             <td
                               key=${cell.id}
                               class=${meta?.numeric ? 'is-num' : ''}
                               data-label=${meta?.header ?? cell.column.id}
+                              title=${cellTitle}
                             >
                               ${meta
                                 ? html`<${DataCell} col=${meta} row=${row.original} />`

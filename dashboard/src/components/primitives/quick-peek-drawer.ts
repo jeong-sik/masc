@@ -8,11 +8,18 @@
 
 import { html } from 'htm/preact'
 import type { ComponentChildren } from 'preact'
-import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks'
 import { useFocusScope } from '../../../design-system/headless-preact/use-focus-scope'
 import { isEditableTarget } from '../../lib/keyboard'
+import { SplitHandle, useSplitSize } from './split-handle'
 
 export type QuickPeekMode = 'auto' | 'push' | 'overlay'
+
+const QPEEK_MIN_WIDTH = 360
+const QPEEK_MAX_WIDTH = 960
+const QPEEK_DEFAULT_WIDTH = 480
+const QPEEK_WIDE_WIDTH = 720
+const QPEEK_WIDE_THRESHOLD = 640
 
 export interface QuickPeekDrawerProps {
   readonly open: boolean
@@ -31,7 +38,15 @@ function detectDesktopPush(): boolean {
 }
 
 export function QuickPeekDrawer(props: QuickPeekDrawerProps) {
-  const [wide, setWide] = useState(props.defaultWide ?? false)
+  const { size: drawerWidth, setSize: setDrawerWidth } = useSplitSize({
+    id: 'quick-peek',
+    defaultSize: props.defaultWide ? QPEEK_WIDE_WIDTH : QPEEK_DEFAULT_WIDTH,
+    min: QPEEK_MIN_WIDTH,
+    max: QPEEK_MAX_WIDTH,
+  })
+  const [wide, setWide] = useState(() => (props.defaultWide ?? false) || drawerWidth >= QPEEK_WIDE_THRESHOLD)
+  const wideRef = useRef(wide)
+  wideRef.current = wide
   const [isPushViewport, setIsPushViewport] = useState(detectDesktopPush)
   const previousFocusRef = useRef<HTMLElement | null>(null)
   const drawerRef = useRef<HTMLElement>(null)
@@ -39,6 +54,25 @@ export function QuickPeekDrawer(props: QuickPeekDrawerProps) {
   const bodyRef = useRef<HTMLDivElement>(null)
   const onCloseRef = useRef(props.onClose)
   onCloseRef.current = props.onClose
+
+  const toggleWide = useCallback(() => {
+    const nextWide = !wideRef.current
+    wideRef.current = nextWide
+    const nextWidth = nextWide ? QPEEK_WIDE_WIDTH : QPEEK_DEFAULT_WIDTH
+    setWide(nextWide)
+    setDrawerWidth(nextWidth)
+    drawerRef.current?.style.setProperty('--qpeek-w', `${nextWidth}px`)
+  }, [setDrawerWidth])
+
+  const handleResizeChange = useCallback(
+    (next: number) => {
+      const nextWide = next >= QPEEK_WIDE_THRESHOLD
+      wideRef.current = nextWide
+      setDrawerWidth(next)
+      setWide(nextWide)
+    },
+    [setDrawerWidth],
+  )
 
   const resolvedMode = props.mode === 'push'
     ? 'push'
@@ -108,7 +142,7 @@ export function QuickPeekDrawer(props: QuickPeekDrawerProps) {
           if (otherModalOpen) return
         }
         event.preventDefault()
-        setWide((w) => !w)
+        toggleWide()
       }
     }
     window.addEventListener('keydown', onKeyDown)
@@ -116,7 +150,7 @@ export function QuickPeekDrawer(props: QuickPeekDrawerProps) {
       window.removeEventListener('keydown', onKeyDown)
       previousFocusRef.current?.focus?.()
     }
-  }, [props.open])
+  }, [props.open, toggleWide])
 
   if (!props.open) return null
 
@@ -136,7 +170,23 @@ export function QuickPeekDrawer(props: QuickPeekDrawerProps) {
       aria-label=${props.title}
       data-mode=${resolvedMode}
       data-wide=${wide ? 'true' : 'false'}
+      data-resizable="true"
+      style=${{ '--qpeek-w': `${drawerWidth}px` } as Record<string, string>}
     >
+      <${SplitHandle}
+        id="quick-peek"
+        orientation="vertical"
+        value=${drawerWidth}
+        defaultSize=${QPEEK_DEFAULT_WIDTH}
+        min=${QPEEK_MIN_WIDTH}
+        max=${QPEEK_MAX_WIDTH}
+        cssVar="--qpeek-w"
+        targetRef=${drawerRef}
+        onChange=${handleResizeChange}
+        reverse=${true}
+        label="미리보기 서랍 너비 조절"
+        className="qpeek-split-handle"
+      />
       <header class="qpeek-head">
         <div>
           <h2 class="qpeek-title">${props.title}</h2>
@@ -150,7 +200,7 @@ export function QuickPeekDrawer(props: QuickPeekDrawerProps) {
             aria-pressed=${wide ? 'true' : 'false'}
             aria-label=${wide ? '기본 너비로 축소' : '넓게 보기'}
             title=${wide ? '기본 너비로 축소' : '넓게 보기'}
-            onClick=${() => setWide((w) => !w)}
+            onClick=${toggleWide}
           >
             ⤢
           </button>

@@ -9,10 +9,16 @@
 import { html } from 'htm/preact'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { MarkdownContent } from '../../components/common/markdown-renderer'
+import { StructuredPayloadView } from '../../components/primitives/structured-payload'
 import { authSession, currentSessionEpoch, isEpochCurrent, sessionEpoch } from '../../core/auth'
 import { isAdminLockedForSession } from '../../routes/router'
 import { prettyFormatPayload, toolResultMarkdownPreview } from './chat-blocks'
 import { fetchKeeperToolResultApi, recordedToolOutcomeTone } from './keepers-api'
+import {
+  ToolHierarchyView,
+  buildToolCallHierarchy,
+  inferReachFromToolName,
+} from './tool-hierarchy'
 import {
   TOOL_RESULT_MAX_PAGES_PER_BURST,
   TOOL_RESULT_PAGE_BYTES,
@@ -22,7 +28,6 @@ import {
   fetchToolResultContinuation,
   formatByteSize,
   formatToolResultProgress,
-  isLongToolOutput,
   type ToolResultState,
 } from './tool-result-state'
 import type { KeeperToolCallEntry } from './types'
@@ -30,6 +35,8 @@ import type { KeeperToolCallEntry } from './types'
 export interface KeeperToolCallInspectorProps {
   readonly keeperName: string
   readonly entry: KeeperToolCallEntry
+  readonly relatedEntries?: readonly KeeperToolCallEntry[]
+  readonly onSelectEntry?: (entry: KeeperToolCallEntry) => void
 }
 
 function formatEntryPayload(value: unknown): string {
@@ -57,7 +64,6 @@ export function KeeperToolCallInspector(props: KeeperToolCallInspectorProps) {
   const [resultState, setResultState] = useState<ToolResultState | null>(() =>
     executionId && canInspectResult ? { status: 'loading' } : null,
   )
-  const [inputExpanded, setInputExpanded] = useState(false)
   const [outputExpanded, setOutputExpanded] = useState(false)
   const [showRawJson, setShowRawJson] = useState(false)
   const [copiedTarget, setCopiedTarget] = useState<'input' | 'output' | 'raw' | null>(null)
@@ -193,7 +199,6 @@ export function KeeperToolCallInspector(props: KeeperToolCallInspectorProps) {
   }, [abortActive, loadInitialPage])
 
   useEffect(() => {
-    setInputExpanded(false)
     setOutputExpanded(false)
     setShowRawJson(false)
     setCopiedTarget(null)
@@ -208,6 +213,12 @@ export function KeeperToolCallInspector(props: KeeperToolCallInspectorProps) {
   const formattedInput = useMemo(() => formatEntryPayload(entry.input), [entry.input])
   const previewOutput = useMemo(() => formatEntryPayload(entry.output), [entry.output])
   const rawEntryJson = useMemo(() => JSON.stringify(entry, null, 2), [entry])
+  const reachBadge = useMemo(() => inferReachFromToolName(entry.tool), [entry.tool])
+  const hierarchyNodes = useMemo(() => {
+    if (!props.relatedEntries || props.relatedEntries.length === 0) return []
+    const built = buildToolCallHierarchy(props.relatedEntries)
+    return built.filter((n) => n.kind === 'parallel_batch' || n.kind === 'delegate_chain')
+  }, [props.relatedEntries])
 
   const hydratedLoaded = resultState?.status === 'loaded'
   const effectiveOutput = hydratedLoaded
@@ -219,10 +230,14 @@ export function KeeperToolCallInspector(props: KeeperToolCallInspectorProps) {
   const completeOutput = hydratedLoaded ? resultState.eof && !resultState.isBinary : !previewTruncated
   const markdown = completeOutput ? toolResultMarkdownPreview(effectiveOutput) : null
   const rawOutput = html`
-    <pre
-      class=${outputExpanded ? 'kp-block-pre kp-block-pre--expanded' : 'kp-block-pre'}
-      data-testid="tool-call-inspector-output"
-    >${effectiveOutput}</pre>
+    <${StructuredPayloadView}
+      value=${effectiveOutput}
+      defaultCollapsed=${false}
+      defaultMode="raw"
+      testId="tool-call-inspector-output-view"
+      bodyTestId="tool-call-inspector-output"
+      emptyText="출력 결과 없음"
+    />
   `
   const canLoadMore = Boolean(
     executionId
@@ -246,6 +261,9 @@ export function KeeperToolCallInspector(props: KeeperToolCallInspectorProps) {
           ${entry.disposition ?? entry.wire_outcome}
         </span>
         <span class="kp-pill">${Math.round(entry.duration_ms)}ms</span>
+        <span class="kp-pill" data-tone=${reachBadge === '외부 · 네트워크' ? 'warn' : 'default'}>
+          ${reachBadge}
+        </span>
         ${entry.failure_class && html`
           <span class="kp-pill" data-tone="bad">${entry.failure_class}</span>
         `}
@@ -287,39 +305,37 @@ export function KeeperToolCallInspector(props: KeeperToolCallInspectorProps) {
         </details>
       `}
 
+      ${hierarchyNodes.length > 0 && html`
+        <section class="kp-inspector-section" aria-label="실행 계층 (병렬 · 위임)" data-testid="tool-call-inspector-hierarchy">
+          <${ToolHierarchyView}
+            nodes=${hierarchyNodes}
+            activeExecutionId=${executionId || undefined}
+            onSelectEntry=${props.onSelectEntry}
+          />
+        </section>
+      `}
+
       <!-- Input (Args) -->
       <section class="kp-inspector-section" aria-label="입력 (Args)">
-        <div class="kp-block-subbar">
-          <span class="kp-block-sublabel">Input (Args)</span>
-          <div class="kp-block-subactions">
-            ${formattedInput && html`
-              <button
-                type="button"
-                class="btn-ghost kp-toggle-btn"
-                onClick=${() => void triggerCopy('input', formattedInput)}
-              >
-                ${copiedTarget === 'input' ? '복사됨' : '복사'}
-              </button>
-            `}
-            ${isLongToolOutput(formattedInput) && html`
-              <button
-                type="button"
-                class="btn-ghost kp-toggle-btn"
-                onClick=${() => setInputExpanded((v) => !v)}
-              >
-                ${inputExpanded ? '축소' : '전체 높이'}
-              </button>
-            `}
-          </div>
-        </div>
         ${formattedInput
           ? html`
-              <pre
-                class=${inputExpanded ? 'kp-block-pre kp-block-pre--expanded' : 'kp-block-pre'}
-                data-testid="tool-call-inspector-input"
-              >${formattedInput}</pre>
+              <${StructuredPayloadView}
+                value=${entry.input}
+                label="Input (Args)"
+                defaultMode="tree"
+                collapseThresholdChars=${600}
+                collapseThresholdLines=${8}
+                testId="tool-call-inspector-input-view"
+                bodyTestId="tool-call-inspector-input"
+                emptyText="입력 인자 없음"
+              />
             `
-          : html`<div class="kp-block-status">입력 인자 없음</div>`}
+          : html`
+              <div class="kp-block-subbar">
+                <span class="kp-block-sublabel">Input (Args)</span>
+              </div>
+              <div class="kp-block-status">입력 인자 없음</div>
+            `}
       </section>
 
       <!-- Output (Result) -->
@@ -342,15 +358,6 @@ export function KeeperToolCallInspector(props: KeeperToolCallInspectorProps) {
                 onClick=${() => void triggerCopy('output', effectiveOutput)}
               >
                 ${copiedTarget === 'output' ? '복사됨' : '복사'}
-              </button>
-            `}
-            ${isLongToolOutput(effectiveOutput) && html`
-              <button
-                type="button"
-                class="btn-ghost kp-toggle-btn"
-                onClick=${() => setOutputExpanded((v) => !v)}
-              >
-                ${outputExpanded ? '축소' : '전체 높이'}
               </button>
             `}
           </div>

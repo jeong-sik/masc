@@ -251,3 +251,11 @@ export function openActivityTone(activity: TurnOpenActivity): OpenActivityTone {
   if (activity.kind === 'tool') return 'tool'
   return activity.channel === 'thinking' ? 'thinking' : 'active'
 }
+
+export {
+  buildOpenWorkHierarchy as openWorkHierarchy,
+  reachBadgeForReach,
+  type OpenWorkHierarchyNode,
+  type OpenWorkParallelBatch,
+  type ToolReachBadge,
+} from './tool-hierarchy'

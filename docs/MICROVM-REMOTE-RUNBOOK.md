@@ -154,6 +154,7 @@ checkout 에서 고친 서버·shim 을 microVM 에 배포할 때는 옵션 없�
 빌드한 서버(`main_eio.exe`)에서 소스 신원을 하나로 읽지 못하면 아무것도 설치하지 않고 멈춘다.
 릴리즈 shim 을 그 릴리즈의 자산으로 되돌리는 일은 릴리즈 설치기가 한다
 (`scripts/install.sh --version vX.Y.Z --force --base-path <workspace>`).
+릴리즈 설치기는 shim 만 바꾸지 않는다. prefix 에 깔린 서버도 그 릴리즈로 바꾼다.
 
 켜져 있는 게스트는 다음 요청부터 새 shim 을 쓴다. 서버는 옛 shim 이 probe 에 답한
 릴리즈와 기능 목록을 다시 띄울 때까지 들고 있다.
@@ -200,6 +201,7 @@ ELF 헤더에서 읽는다. 옛 shim 은 옆에 `masc-exec-shim.previous` 로 �
 `masc-exec-shim` 으로 옮긴다. 옛 shim 이 릴리즈 shim 이었다면 sidecar 는 이미 지워져서
 되돌린 shim 은 sha256 대조 없이 돈다. sidecar 까지 되돌리려면
 `scripts/install.sh --version vX.Y.Z --force --base-path <workspace>` 로 같은 작업 공간에 그 릴리즈를 다시 깐다.
+이때 prefix 의 서버도 그 릴리즈로 바뀐다.
 릴리즈 없이 지금 트리로 만들어야 할 때는 아래처럼 직접 빌드한다. 손으로 빌드한
 shim 에는 sidecar 가 없어야 한다. 없으면 부팅이 검증 없이 돌리고 로그에 그렇게
 적는다.

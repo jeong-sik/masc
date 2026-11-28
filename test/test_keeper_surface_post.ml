@@ -869,6 +869,50 @@ let test_discord_attachments_held_before_approval () =
        check bool "the voice message's sound is now durable" true
          (retention_of wav_id = Attachment_store.Durable))
 
+(* keeper_voice_speak's clip becomes the Keeper's ephemeral attachment, and a
+   voice post naming that id passes the check before approval. A clip that
+   cannot be read is reported in the result, not raised. *)
+let test_spoken_clip_is_a_voice_message_file () =
+  let base_path = Filename.temp_dir "surface-post-spoken-" "" in
+  Eio_main.run @@ fun env ->
+  Fun.protect
+    ~finally:(fun () -> Fs_compat.remove_tree base_path)
+    (fun () ->
+       if not (Fs_compat.has_fs ()) then Fs_compat.set_fs (Eio.Stdenv.fs env);
+       let spoken audio_file =
+         Masc.Keeper_tool_voice_runtime.For_testing.with_clip_attachment
+           ~base_dir:base_path ~keeper:"alice" ~audio_file
+           [ ("status", `String "spoken") ]
+       in
+       let clip = Filename.concat base_path "reply.wav" in
+       Fs_compat.save_file clip tiny_wav;
+       let open Yojson.Safe.Util in
+       let result = spoken clip in
+       check string "the speak result is kept" "spoken"
+         (result |> member "status" |> to_string);
+       let id = result |> member "attachment_id" |> to_string in
+       let store = Attachment_store.create ~base_path in
+       (match Attachment_store.get_meta store ~id with
+        | Ok (Some (meta : Attachment_store.meta)) ->
+          check string "stored as WAV, read from the bytes" "audio/wav" meta.mime_type;
+          check bool "the Keeper's ephemeral file" true
+            (meta.retention = Attachment_store.Ephemeral { keeper = "alice" })
+        | Ok None -> fail "the clip is not in the attachment store"
+        | Error error -> fail (Attachment_store.get_error_to_string error));
+       (match
+          Masc.Keeper_tool_in_process_runtime.For_testing.discord_files_held
+            ~base_path ~keeper:"alice" (SP.Voice_message id)
+        with
+        | Ok () -> ()
+        | Error detail -> fail detail);
+       let unread = spoken (Filename.concat base_path "gone.wav") in
+       check bool "an unreadable clip has no attachment_id" true
+         (unread |> member "attachment_id" = `Null);
+       check bool "and says why" true
+         (match unread |> member "attachment_error" with
+          | `String detail -> String.length detail > 0
+          | _ -> false))
+
 (* The approved input is what the replay sends after approval: the files a
    post names survive it in order, a voice message stays a voice message, and
    a text-only post's input has no file keys at all. *)
@@ -1089,6 +1133,8 @@ let () =
             test_approved_discord_input_carries_files;
           test_case "attachments are held before approval" `Quick
             test_discord_attachments_held_before_approval;
+          test_case "a spoken clip is a voice message file" `Quick
+            test_spoken_clip_is_a_voice_message_file;
           test_case "explicit thread_ts wins over continuation" `Quick
             test_resolve_explicit_thread_ts_wins_over_continuation;
           test_case "explicit thread_ts travels without continuation" `Quick

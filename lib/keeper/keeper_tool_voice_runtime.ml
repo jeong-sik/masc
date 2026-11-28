@@ -365,3 +365,7 @@ let handle_voice_tool ~config ~meta ~authorize_external_effect ~name ~args () =
      ~args
      ())
     .raw_output
+
+module For_testing = struct
+  let with_clip_attachment = with_clip_attachment
+end

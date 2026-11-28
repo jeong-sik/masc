@@ -205,10 +205,10 @@ let volume_claim_add_script = volume_claim_add_script_with ~marker:volume_claim_
 let volume_claim_release_script = volume_claim_release_script_with ~marker:volume_claim_marker_guest_path
 let volume_claims_read_script = volume_claims_read_script_with ~marker:volume_claim_marker_guest_path
 
-(* The claims helper shares the trim helper's shape -- one [container run
-   --rm] of the keeper's own image, root, every capability dropped, no
-   network, a read-only root -- but needs no capability at all: it only
-   reads and writes files on the mounted volume. The helper name is
+(* The claims helper is one [container run --rm] of the keeper's own image:
+   root, every capability dropped, no network, a read-only root. It needs no
+   capability because it only reads and writes files on the mounted volume.
+   The helper name is
    keeper-scoped and shared across workspaces, so two workspaces claiming
    at once collide on the name and the second run fails; that failure, and
    a name observed present before this one starts, both leave the marker

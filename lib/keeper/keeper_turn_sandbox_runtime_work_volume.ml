@@ -210,10 +210,11 @@ let claim_work_volume_at_boot (t : t) ~backend ~volume_name ~timeout_sec =
     before [container run] so a boot never starts without one of them. *)
 let microvm_guest_provisions ?apple_volumes (t : t) ~backend ~(shim : boot_shim) ~timeout_sec =
   let Boot_shim_verified = shim in
-  (* Until legacy helper and volume ownership are bound to a workspace, boot
-     must neither launch a name-scoped trim helper nor delete a possible peer's
-     helper. A present or unreadable helper inventory refuses provisioning.
-     The observation does not fence an older process from starting one later. *)
+  (* An older process may still run a keeper-scoped trim or repair helper, and
+     no record names its workspace. Until helper and volume ownership are bound
+     to a workspace, boot does not delete a possible peer's helper: a present
+     or unreadable helper inventory refuses provisioning. The observation does
+     not fence an older process from starting one later. *)
   let helper_check = match (backend : Keeper_microvm_backend.t) with
     | Keeper_microvm_backend.Apple_container ->
       ensure_apple_volume_helpers_absent ~keeper_name:t.meta.name ~timeout_sec

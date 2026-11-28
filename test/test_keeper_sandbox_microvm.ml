@@ -1763,10 +1763,10 @@ let test_apple_volume_delete_argv_names_the_volume () =
   Alcotest.(check bool) "names it" true (contains "masc-keeper-build-x" argv)
 ;;
 
-(* A dissolved keeper's volume removal against a scripted runtime: [deletes]
-   answers each [volume delete] in order and [listing] answers the one
-   [volume list] that settles absence. The calls are recorded so a case can
-   check what was sent. *)
+(* A dissolved keeper's work and build volume removal against a scripted
+   runtime: [deletes] answers each [volume delete] in order and [listing]
+   answers the one [volume list] that settles absence. The calls are recorded
+   so a case can check what was sent. *)
 let run_volume_removal ~deletes ~listing ~keeper_name =
   let sent = ref [] in
   let deletes = ref deletes in
@@ -1783,7 +1783,10 @@ let run_volume_removal ~deletes ~listing ~keeper_name =
     then listing
     else Alcotest.failf "unexpected command: %s" (String.concat " " argv)
   in
-  let result = M.remove_apple_keeper_volumes ~run ~timeout_sec:1.0 ~keeper_name in
+  let result =
+    M.remove_apple_volumes_by_names ~run ~timeout_sec:1.0
+      ~volume_names:[ "masc-keeper-work-" ^ keeper_name; "masc-keeper-build-" ^ keeper_name ]
+  in
   result, List.rev !sent
 ;;
 
@@ -3623,45 +3626,6 @@ let test_volume_create_argv_carries_a_size () =
   Alcotest.(check bool) "size is passed" true (adjacent ~flag:"-s" ~value:"64g" argv)
 ;;
 
-let test_work_volume_trim_argv_grants_only_its_capabilities () =
-  let argv =
-    M.apple_work_volume_trim_argv ~keeper_name:"x" ~volume_name:"masc-keeper-work-x" ~image:"masc-sandbox:general"
-  in
-  let spelled guest_constraint =
-    match Backend.run_constraint_argv Backend.Apple_container guest_constraint with
-    | Backend.Expressed tokens -> tokens
-    | Backend.Not_expressible reason -> Alcotest.failf "Apple cannot spell it: %s" reason
-  in
-  let rec contains_run run = function
-    | [] -> false
-    | _ :: rest as whole ->
-      (List.length whole >= List.length run
-       && List.equal String.equal run (List.filteri (fun i _ -> i < List.length run) whole))
-      || contains_run run rest
-  in
-  Alcotest.(check bool) "goes through container" true (contains "container" argv);
-  Alcotest.(check bool) "a one-shot container" true (contains "--rm" argv);
-  Alcotest.(check bool) "cleanup can address this exact trim" true
-    (adjacent ~flag:"--name" ~value:"masc-keeper-work-x-trim" argv);
-  Alcotest.(check bool) "runs as root" true (adjacent ~flag:"--user" ~value:"0" argv);
-  (* --cap-add alone adds to the runtime's default set, so the default set is
-     dropped first, spelled the way the keeper guest's boot spells it. *)
-  Alcotest.(check bool) "drops every capability first" true
-    (contains_run (spelled Backend.Drop_all_capabilities) argv);
-  (* The helper only configures the block-device default. *)
-  Alcotest.(check bool) "only CAP_SYS_ADMIN is added" true
-    (adjacent ~flag:"--cap-add" ~value:"CAP_SYS_ADMIN" argv
-     && not (contains "CAP_DAC_OVERRIDE" argv)
-     && List.length (List.filter (String.equal "--cap-add") argv) = 1);
-  Alcotest.(check bool) "read-only root" true (contains_run (spelled Backend.Read_only_rootfs) argv);
-  Alcotest.(check bool) "no network" true (adjacent ~flag:"--network" ~value:"none" argv);
-  Alcotest.(check bool) "fixed script entrypoint, not the image's own" true
-    (adjacent ~flag:"--entrypoint" ~value:"/bin/sh" argv);
-  Alcotest.(check bool) "mounts the work volume at the trim root" true
-    (adjacent ~flag:"--volume" ~value:("masc-keeper-work-x:" ^ M.trim_guest_root) argv);
-
-;;
-
 let test_volume_repair_argv_grants_only_sys_admin () =
   let argv =
     M.apple_volume_repair_argv ~keeper_name:"x" ~volume_name:"masc-keeper-work-x" ~image:"masc-sandbox:general"
@@ -3683,8 +3647,8 @@ let test_volume_repair_argv_grants_only_sys_admin () =
     (adjacent ~flag:"--name" ~value:"masc-keeper-work-x-repair" argv);
   Alcotest.(check bool) "runs as root" true (adjacent ~flag:"--user" ~value:"0" argv);
   Alcotest.(check bool) "drops every capability first" true (contains_run drop_all argv);
-  (* SYS_ADMIN to unmount. e2fsck writes the block device, not files, so the
-     trim helper's DAC_OVERRIDE is not needed. *)
+  (* SYS_ADMIN to unmount. e2fsck writes the block device, not files, so
+     DAC_OVERRIDE is not needed. *)
   Alcotest.(check bool) "only CAP_SYS_ADMIN is added" true
     (adjacent ~flag:"--cap-add" ~value:"CAP_SYS_ADMIN" argv
      && List.length (List.filter (String.equal "--cap-add") argv) = 1);
@@ -3765,11 +3729,6 @@ let test_volume_repair_script_refuses_a_mounted_volume () =
     (List.mem "volume is still mounted; e2fsck not run" (String.split_on_char '\n' out))
 ;;
 
-let trim_test_plan keeper_name =
-  M.work_volume_trim_name ~keeper_name,
-  M.apple_work_volume_trim_argv ~keeper_name ~volume_name:("masc-keeper-work-" ^ keeper_name) ~image:"trim-fixture"
-;;
-
 let test_trim_names_fit_apple_and_distinguish_long_keepers () =
   List.iter (fun keeper_name ->
     Alcotest.(check string) "existing valid helper names survive upgrades"
@@ -3779,13 +3738,12 @@ let test_trim_names_fit_apple_and_distinguish_long_keepers () =
   Alcotest.(check int) "the first overlong name is bounded" 63
     (String.length (M.work_volume_trim_name ~keeper_name:(String.make 42 'a')));
   let keeper = String.make 127 'a' in
-  let first, argv = trim_test_plan (keeper ^ "x") in
-  let second, _ = trim_test_plan (keeper ^ "y") in
-  let repeated, _ = trim_test_plan (keeper ^ "x") in
+  let first = M.work_volume_trim_name ~keeper_name:(keeper ^ "x") in
+  let second = M.work_volume_trim_name ~keeper_name:(keeper ^ "y") in
+  let repeated = M.work_volume_trim_name ~keeper_name:(keeper ^ "x") in
   Alcotest.(check int) "Apple's maximum is respected" 63 (String.length first);
   Alcotest.(check bool) "distinct suffixes survive truncation" false (first = second);
-  Alcotest.(check string) "name is stable for cleanup" first repeated;
-  Alcotest.(check bool) "run uses bounded name" true (adjacent ~flag:"--name" ~value:first argv)
+  Alcotest.(check string) "name is stable for cleanup" first repeated
 ;;
 
 let test_apple_provision_refuses_unowned_volume_helpers () =
@@ -6702,8 +6660,6 @@ let () =
             test_work_volume_is_named_and_mounted_at_its_root
         ; Alcotest.test_case "create argv carries a size" `Quick
             test_volume_create_argv_carries_a_size
-        ; Alcotest.test_case "work volume trim grants only its capabilities" `Quick
-            test_work_volume_trim_argv_grants_only_its_capabilities
         ; Alcotest.test_case "volume repair argv grants only CAP_SYS_ADMIN" `Quick
             test_volume_repair_argv_grants_only_sys_admin
         ; Alcotest.test_case "volume repair script runs e2fsck after unmount" `Quick

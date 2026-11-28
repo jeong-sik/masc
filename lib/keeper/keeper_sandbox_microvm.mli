@@ -400,38 +400,9 @@ val apple_guest_facts : container_name:string -> string -> Keeper_microvm_boot_p
 
 val work_volume_mount_args : volume_name:string -> string list
 
-val trim_guest_root : string
-(** [/masc-trim]: where {!apple_work_volume_trim_argv} mounts the volume. *)
-
 val work_volume_trim_name : keeper_name:string -> string
 (** Stable bounded helper name. The keeper name must be a valid work-volume
     segment. Existing names of at most 63 bytes retain their exact spelling. *)
-
-val apple_work_volume_trim_argv :
-  keeper_name:string -> volume_name:string -> image:string -> string list
-(** [container run --rm] of [image] as root with every capability dropped
-    and only [CAP_SYS_ADMIN] added back, no network, a read-only root and
-    a fixed findmnt/tune2fs script setting persistent ext4 discard.
-    Subsequent mounts automatically discard freed blocks. Run only while no guest has the volume
-    attached: a second ext4 mount of the same volume corrupts it. *)
-
-val discard_configuration_script_with : findmnt:string -> tune2fs:string -> guest_root:string -> string
-(** The same fixed helper payload with explicit tool/mount paths, allowing
-    actual process fixtures without touching a mounted volume. Resolve its
-    mounted device and run tune2fs only; a failed discovery stops before tuning. *)
-
-val remove_apple_work_volume_trim :
-  run:(timeout_sec:float -> string list -> Unix.process_status * string * string)
-  -> timeout_sec:float
-  -> remove_timeout_sec:float
-  -> keeper_name:string
-  -> (unit, string) result
-(** Delete the stable helper using the removal budget, then prove its absence
-    using actual complete canonical CLI capture and the shared strict all-row
-    inventory decoder under the I/O budget. [run] supplies only the delete
-    effect, never absence authority. The name is shared across workspaces;
-    callers must establish ownership separately before using this low-level
-    operation. Keeper boot and teardown do not use it. *)
 
 type discard_read_failure =
   | Discard_backend_unsupported of Keeper_microvm_backend.t
@@ -458,33 +429,6 @@ val read_work_volume_discard_default :
     No cached source, caller-provided image or preview authorizes this read. *)
 
 val discard_read_failure_message : discard_read_failure -> string
-
-type discard_configuration =
-  | Discard_already_set
-  | Discard_unreadable of discard_read_failure
-  | Discard_helper_finished of
-      { status : Unix.process_status
-      ; output : string
-      ; after : work_volume_discard_default
-      }
-
-val reclaim_apple_work_volume :
-  run:(timeout_sec:float -> string list -> Unix.process_status * string * string)
-  -> on_cleanup_error:(string -> unit)
-  -> timeout_sec:float
-  -> remove_timeout_sec:float
-  -> keeper_name:string
-  -> volume_name:string
-  -> image:string
-  -> (discard_configuration, string) result
-(** Read the actual work volume before any helper operation. Set/unreadable
-    results start no helper and issue no helper cleanup. Only an absent flag
-    permits one tune2fs helper, bracketed by strict absence checks, including
-    protected cleanup on cancellation. A helper's status is retained and its
-    subsequent superblock reading is separate; exit0 never guesses a set bit.
-    [Error] refuses a guest mount when helper absence cannot be proved.
-    This low-level operation does not establish workspace or helper ownership;
-    Keeper boot does not call it while those identities are unverified. *)
 
 val volume_repair_guest_root : string
 (** [/masc-repair]: where {!apple_volume_repair_argv} mounts the volume. *)
@@ -516,7 +460,12 @@ val remove_apple_volume_repair :
   -> remove_timeout_sec:float
   -> keeper_name:string
   -> (unit, string) result
-(** {!remove_apple_work_volume_trim} for the repair helper. *)
+(** Delete the stable repair helper using the removal budget, then prove its
+    absence using actual complete canonical CLI capture and the shared strict
+    all-row inventory decoder under the I/O budget. [run] supplies only the
+    delete effect, never absence authority. The name is shared across
+    workspaces; callers must establish ownership separately before using this
+    low-level operation. *)
 
 type volume_repair_run =
   { status : Unix.process_status
@@ -727,23 +676,6 @@ val remove_apple_volumes_by_names :
   -> timeout_sec:float
   -> volume_names:string list
   -> (unit, string) result
-
-val remove_apple_keeper_volumes :
-  run:(timeout_sec:float -> string list -> Unix.process_status * string * string)
-  -> timeout_sec:float
-  -> keeper_name:string
-  -> (unit, string) result
-(** Low-level operation to delete the work and build volumes named for
-    [keeper_name]. These names are shared across workspaces: the caller must
-    establish that every owner has released them before calling this function.
-    The claims marker and container listing do not prove that unrecorded or
-    paused owners are absent, and do not fence a concurrent boot. A missing
-    guest alone is not such proof. The
-    operation names them by {!work_volume_name} and {!build_volume_name},
-    then proves both absent from one volume listing. Both deletes are
-    attempted whatever either returns; an already-absent volume is a success.
-    A volume still listed, an unreadable listing, or a keeper name those
-    functions refuse is [Error]. This function does not establish ownership. *)
 
 (** {2 The work volume claims marker}
 

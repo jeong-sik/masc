@@ -1106,16 +1106,23 @@ let test_encoded_pixel_snapshot () =
         | _ -> fail "missing encoded pixels"
       in
       (* Original synthetic firmware jumps into an original 16 KiB cartridge.
-         The guest enables text display and changes R7 between palette colors 2
-         and 3 once per VBlank. Thus advancing one frame changes actual pixels,
-         rather than merely allocating another all-black buffer. *)
+         The guest enables text display and toggles R7 between palette colors 2
+         and 3 once per key press. Row select/read follow the ocaml-msx keyboard
+         contract — OUT (0xAA) (0x50|row), then IN A,(0xA9), active low, space =
+         row 8 bit 0 — scanning rows 0..9 with proper edge detection (C flag: one
+         toggle per press, re-armed only when all rows read idle), so one
+         Lane.press deterministically changes actual pixels. The previous VBlank-poll design
+         was flaky under CI: in failing runs the guest never observed the flag,
+         pixels stayed constant, and the retained/inline assertion inverted
+         (runs 46077144207, 46082771264, 46084052839 — one constant revision
+         across all ticks). On the pinned core 581da90 the cart additionally never ran unless the boot ROM selects slot 2 for page 1: the frame stayed blanked (all-zero rgb, sha256 8123c216..., mode GRAPHIC1), so every tick read retained (runs 46086810409, 46088129522, 46089075533, 46090234412). *)
       let roms_dir = Filename.concat base_path "pixel-bios" in
       Sys.mkdir roms_dir 0o755;
       let write_code bytes offset code =
         List.iteri (fun i n -> Bytes.set bytes (offset + i) (Char.chr n)) code
       in
       let bios = Bytes.make 32768 '\000' in
-      write_code bios 0 [ 0xc3; 0x10; 0x40 ]; (* JP 4010; cartridge page is slot 2 *)
+      write_code bios 0 [ 0x3e; 0x08; 0xd3; 0xa8; 0xc3; 0x10; 0x40 ]; (* LD A,0x08; OUT (0xA8),A routes page 1 to slot 2 (the cartridge) - the pinned ocaml-msx 581da90 no longer forces ppi_a in load_cartridge, so the boot ROM must select the cart slot itself like real C-BIOS; then JP 4010 *)
       Out_channel.with_open_bin
         (Filename.concat roms_dir "cbios_main_msx2.rom")
         (fun oc -> output_bytes oc bios);
@@ -1130,13 +1137,27 @@ let test_encoded_pixel_snapshot () =
       write_code
         cart
         0x10
-        [ 0xf3; 0x06; 0x02 (* DI; LD B,2 *)
+        [ 0xf3 (* DI *)
+        ; 0x06; 0x02 (* LD B,2 — palette color seed *)
+        ; 0x0e; 0x00 (* LD C,0 — not yet toggled this press *)
         ; 0x3e; 0x50; 0xd3; 0x99 (* text mode, display enabled *)
         ; 0x3e; 0x81; 0xd3; 0x99 (* write VDP register 1 *)
-        ; 0xdb; 0x99; 0xe6; 0x80; 0x28; 0xfa (* 401B: wait for VBlank *)
+        ; 0x16; 0x00 (* LD D,0 — row counter *)
+        ; 0x3e; 0x50; 0xb2; 0xd3; 0xaa (* 401F loop: A=0x50|D; OUT(0xAA) select row D *)
+        ; 0xdb; 0xa9 (* IN A,(0xA9) read row, active low *)
+        ; 0xfe; 0xff (* CP 0xff — any key pressed? *)
+        ; 0x20; 0x0b (* JR NZ,4035 key detected *)
+        ; 0x14 (* INC D *)
+        ; 0x7a; 0xfe; 0x0a (* LD A,D; CP 10 *)
+        ; 0x20; 0xef (* JR NZ,401F *)
+        ; 0x0e; 0x00 (* all rows idle — re-arm C *)
+        ; 0xc3; 0x1f; 0x40 (* JP 401F *)
+        ; 0x79; 0xb7 (* 4035: LD A,C; OR A — already toggled while held? *)
+        ; 0x20; 0x0c (* JR NZ,4045 skip *)
+        ; 0x0e; 0x01 (* LD C,1 *)
         ; 0x78; 0xee; 0x01; 0x47 (* toggle color 2 / 3 *)
         ; 0xd3; 0x99; 0x3e; 0x87; 0xd3; 0x99 (* write VDP register 7 *)
-        ; 0xc3; 0x1b; 0x40
+        ; 0xc3; 0x1f; 0x40 (* 4045: JP 401F *)
         ];
       let cart_path = Filename.concat base_path "pixel-toggle.rom" in
       Out_channel.with_open_bin cart_path (fun oc -> output_bytes oc cart);
@@ -1169,6 +1190,14 @@ let test_encoded_pixel_snapshot () =
               Route.tick_response ~config ~body:(retained_request ~frames:2 first_tick)
             in
             assert_pixels_kind "retained" same_pixels;
+            ignore
+              (require
+                 (Lane.press
+                    ~who:"unit-pixel"
+                    ~keys:[ Result.get_ok (Lane.key_of_string "space") ]
+                    ~hold_frames:1
+                    ~step_frames:1
+                    ~sequence:false));
             let _, changed_pixels =
               Route.tick_response ~config ~body:(retained_request same_pixels)
             in

@@ -93,7 +93,10 @@ ZIP 의 목차는 파일 끝에 있으므로, TUI 는 최대 크기 안에서 �
 - 매크로가 든 OOXML(`…macroEnabled.main+xml`)은 닫힌 집합 밖이라 `Unsupported_or_unknown_format` 이다.
 - XML 은 이미 쓰는 `markup` 으로 읽는다. 부분 문자열로 찾지 않는다.
 - ZIP 은 `zipc`(ISC, 순수 OCaml)로 읽는다. 펼치는 항목은 `_rels/.rels`·`[Content_Types].xml`·`mimetype`·`META-INF/manifest.xml` 넷뿐이다.
-  넷 모두 적힌 크기가 `part_max_bytes`(1 MiB)를 넘으면 펼치지 않고 깨진 컨테이너로 본다.
+  적힌 크기가 `part_max_bytes` 를 넘으면 펼치지 않고 깨진 컨테이너로 본다. 상한은 항목마다 다르다.
+  `_rels/.rels` 64 KiB, `[Content_Types].xml` 256 KiB, `mimetype` 1 KiB, `META-INF/manifest.xml` 256 KiB 다.
+  표본에서 가장 큰 것은 727 B·14.5 KB(40쪽 발표 문서)·19 B·4.9 KB 였다.
+  엄격 XML 읽기는 1 MiB 에 CPU 0.21~0.43초가 들었고, 그런 1 MiB 는 약 2 KB 로 압축된다. 그래서 상한으로 한 업로드의 XML 을 320 KiB(약 0.13초)로 묶는다.
   OPC 이름(`_rels/.rels`·`[Content_Types].xml`·주 part)은 대소문자를 가리지 않고 찾는다. 대소문자만 다른 항목이 둘이면 깨진 컨테이너다. HWPX 의 두 항목은 이름이 정확히 같아야 한다.
   zipc 0.2.0 의 inflate 는 깨진 Deflate 에서 `Invalid_argument` 를 던진다. 판별은 그 호출에서만 이 예외를 깨진 항목으로 바꾼다. decompress 1.6.1 도 같은 종류의 예외를 던져서 inflate 를 바꾸지 않았다.
   펼친 크기가 central directory 에 적힌 크기와 달라도 깨진 컨테이너다.

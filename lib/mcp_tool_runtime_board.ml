@@ -69,9 +69,29 @@ let result_after_activity_projection
    record and the mention -- takes the text from the stored row, so it cannot
    read the request by a different rule than the store did.
 
-   The post handler returns the stored post as its typed data
-   ([Board.post_to_yojson] plus the names no Keeper declares). *)
-let written_post result = Board_tool.post_of_write_data (Tool_result.data result)
+   The post handler leaves the text out of its answer
+   ([Board_tool_post.post_acknowledgement]), so the stored post is read back
+   by the id the answer names. *)
+type written_post_unavailable =
+  | Answer_names_no_post
+  | Stored_post_unreadable of Board.board_error
+
+let written_post_unavailable_to_string = function
+  | Answer_names_no_post -> "the answer names no post id"
+  | Stored_post_unreadable error -> Board_tool.board_error_to_string error
+
+let written_post result =
+  match Tool_result.data result with
+  | `Assoc fields ->
+    (match List.assoc_opt "id" fields with
+     | Some (`String post_id) ->
+       Board_dispatch.read_post_unchecked ~post_id
+       |> Result.map_error (fun error ->
+         Stored_post_unreadable (Board.board_error_of_read_error error))
+     | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _)
+     | None -> Error Answer_names_no_post)
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+    Error Answer_names_no_post
 
 type written_comment_unavailable =
   | No_board_evidence
@@ -242,11 +262,11 @@ let public_created_post result =
   if not (Tool_result.is_success result) then None
   else
     match written_post result with
-    | None ->
-      Log.Misc.error "board_post succeeded but its result data is not a post: %s"
-        (Tool_result.message result);
+    | Error unavailable ->
+      Log.Misc.error "board_post succeeded but its stored post is not available: %s"
+        (written_post_unavailable_to_string unavailable);
       None
-    | Some post ->
+    | Ok post ->
       (match post.visibility with
        | Board.Public -> Some post
        | Board.Unlisted | Board.Internal | Board.Direct -> None)

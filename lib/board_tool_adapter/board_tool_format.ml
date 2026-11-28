@@ -158,14 +158,6 @@ let with_unresolved written unresolved =
   | other -> `Assoc [ "result", other; "unresolved", names ]
 ;;
 
-(* The post a write response carries: [with_unresolved] put the list beside the
-   post's own fields, and the post decoder accepts an exact set of fields. *)
-let post_of_write_data = function
-  | `Assoc fields ->
-    Board.post_of_yojson (`Assoc (List.remove_assoc "unresolved" fields))
-  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
-;;
-
 let visibility_of_string = Board.visibility_of_string
 
 let valid_visibility_strings =

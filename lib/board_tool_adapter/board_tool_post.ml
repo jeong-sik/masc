@@ -49,6 +49,28 @@ let body_or_content_arg args =
   | None -> get_string args "content" ""
 ;;
 
+(* What a post write answers with. The writer sent the text and the meta in
+   this very call, and the board stores them, so the answer names the post and
+   leaves [body] and [meta] out, as [comment_acknowledgement] does for a
+   comment. In the tool-call ledger of 2026-11-21 to 11-28 the answers of 357
+   successful masc_board_post calls came to 1,334,612 bytes for 574,262 bytes
+   of text sent.
+
+   [meta] is also where an attachment named by digest is stored, as a
+   normalized artifact reference. A result that carries one must carry a
+   result manifest ([Tool_projection.project_result]), and this answer never
+   had one: the six posts Keepers wrote with such an attachment in 2026-11
+   were stored, and each was then reported to its Keeper as "tool output
+   artifact storage failed". The board row holds the reference; the answer
+   does not repeat it. *)
+let post_acknowledgement (post : Board.post) =
+  match Board.post_to_yojson post with
+  | `Assoc fields ->
+    `Assoc (fields |> List.remove_assoc "body" |> List.remove_assoc "meta")
+  | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _) as other ->
+    other
+;;
+
 (* Attachment syntax is checked first, like any other argument. Artifact bytes
    are read last, after every check that needs no I/O, so a post that is going
    to be rejected for its title, author or post_kind reads no blob. *)
@@ -219,7 +241,7 @@ let handle_post_create ~tool_name ~start_time args : Tool_result.result =
               progress := Creation_committed creation;
               let json =
                 Board_tool_format.with_unresolved
-                  (Board.post_to_yojson creation.post) creation.unresolved
+                  (post_acknowledgement creation.post) creation.unresolved
               in
               Tool_result.make_ok ~tool_name ~start_time ~data:json ()
          | Error failure ->
@@ -301,7 +323,7 @@ let handle_post_edit ~tool_name ~start_time args : Tool_result.result =
        with
        | Ok (post, unresolved) ->
          let json =
-           Board_tool_format.with_unresolved (Board.post_to_yojson post) unresolved
+           Board_tool_format.with_unresolved (post_acknowledgement post) unresolved
          in
          Tool_result.make_ok ~tool_name ~start_time ~data:json ()
        | Error e -> Board_tool_format.error_of_board_error ~tool_name ~start_time e))

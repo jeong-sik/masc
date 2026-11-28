@@ -2992,8 +2992,12 @@ let test_handle_request_tools_call_board_post_structured_content () =
   ]) in
   let response = Mcp_eio.handle_request ~sender:Mcp_eio.Unadmitted ~clock ~sw state request in
   let structured = structured_content_exn response in
-  Alcotest.(check string) "canonical board body" "hello board"
-    Yojson.Safe.Util.(structured |> member "body" |> to_string);
+  Alcotest.(check bool) "the answer leaves out the text it was sent" true
+    Yojson.Safe.Util.(structured |> member "body" = `Null);
+  Alcotest.(check bool) "the answer names the post" true
+    (match Yojson.Safe.Util.member "id" structured with
+     | `String post_id -> not (String.equal post_id "")
+     | _ -> false);
   Alcotest.(check bool) "legacy content field stays absent" true
     Yojson.Safe.Util.(structured |> member "content" = `Null);
   Alcotest.(check string) "board author" "tester"

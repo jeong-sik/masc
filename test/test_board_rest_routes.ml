@@ -921,8 +921,9 @@ let test_board_post_route_preserves_publication_evidence () =
     (data |> member "unresolved" |> to_list |> List.map to_string);
   (match Masc.Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id:later_id with
    | Ok post ->
-     check string "structured success data identifies the stored body" post.body
-       (data |> member "body" |> to_string);
+     check bool "structured success data leaves out the text it was sent" true
+       (data |> member "body" = `Null);
+     check string "the stored post holds that text" "later HTTP publication" post.body;
      check string "structured success data identifies the stored author"
        (Masc.Board.Agent_id.to_string post.author)
        (data |> member "author" |> to_string)

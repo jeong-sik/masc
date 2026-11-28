@@ -846,10 +846,12 @@ let test_the_post_tool_answers_with_the_unresolved_names =
       "the response lists the undeclared name"
       [ "check" ]
       Yojson.Safe.Util.(data |> member "unresolved" |> to_list |> List.map to_string);
-    match Board_tool.post_of_write_data data with
-    | Some post ->
-      check (list string) "the post reads back" [ "alice" ] (target_names post.audience)
-    | None -> fail "the response must still read back as a post")
+    let post_id = Yojson.Safe.Util.(data |> member "id" |> to_string) in
+    match Board_dispatch.read_post_unchecked ~post_id with
+    | Ok post ->
+      check (list string) "the post the answer names reads back" [ "alice" ]
+        (target_names post.audience)
+    | Error _ -> fail "the answer must name the stored post")
 ;;
 
 (* The comment and the edit tool answer like the post tool does. *)

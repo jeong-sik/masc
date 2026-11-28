@@ -72,6 +72,18 @@ let parse_create_response_json body =
     | None ->
         Alcotest.failf "expected JSON payload in create response: %s" body
 
+(* A post write answers without the text and the meta it was sent
+   ([Board_tool_post.post_acknowledgement]). What the board stored is read by
+   the id the answer names, in the encoding the store and the dashboard use. *)
+let stored_post_json answer =
+  match Yojson.Safe.Util.member "id" answer with
+  | `String post_id ->
+    (match Board_dispatch.read_post_unchecked ~post_id with
+     | Ok post -> Board.post_to_yojson post
+     | Error _ -> Alcotest.failf "the answer names %s, which is not stored" post_id)
+  | _ ->
+    Alcotest.failf "the write answer names no post: %s" (Yojson.Safe.to_string answer)
+
 let make_keeper_meta ?(name = "judge-keeper") () : Keeper_meta_contract.keeper_meta =
   match
     Masc_test_deps.meta_of_json_fixture
@@ -659,7 +671,16 @@ let test_post_create_metadata_payload () =
        ])
   in
   Alcotest.(check bool) "create ok" true ok;
-  let json = parse_create_response_json body in
+  let answer = parse_create_response_json body in
+  Alcotest.(check string) "the answer names the title" "Why"
+    Yojson.Safe.Util.(answer |> member "title" |> to_string);
+  Alcotest.(check bool) "the answer leaves out the text it was sent" true
+    Yojson.Safe.Util.(answer |> member "body" = `Null);
+  Alcotest.(check bool) "the answer leaves out the meta it was sent" true
+    Yojson.Safe.Util.(answer |> member "meta" = `Null);
+  Alcotest.(check bool) "the answer still lists the unresolved names" true
+    Yojson.Safe.Util.(answer |> member "unresolved" = `List []);
+  let json = stored_post_json answer in
   Alcotest.(check string) "title kept" "Why"
     Yojson.Safe.Util.(json |> member "title" |> to_string);
   Alcotest.(check string) "body kept" "Visible answer\n\nSupporting detail"
@@ -692,7 +713,7 @@ let test_post_create_typed_attachments () =
   Alcotest.(check bool) "HTTPS image accepted" true (Tool_result.is_success result);
   let stored =
     Yojson.Safe.Util.
-      (Tool_result.data result |> member "meta" |> member "attachments")
+      (stored_post_json (Tool_result.data result) |> member "meta" |> member "attachments")
   in
   Alcotest.(check bool)
     "typed image stored and read"
@@ -720,7 +741,9 @@ let test_post_create_typed_attachments () =
     (Tool_result.is_success artifact_result);
   let stored_artifact =
     Yojson.Safe.Util.
-      (Tool_result.data artifact_result |> member "meta" |> member "attachments")
+      (stored_post_json (Tool_result.data artifact_result)
+       |> member "meta"
+       |> member "attachments")
   in
   (match stored_artifact with
    | `List [ `Assoc fields ] ->
@@ -759,7 +782,9 @@ let test_post_create_typed_attachments () =
     (Tool_result.is_success manifest_result);
   let stored_manifest =
     Yojson.Safe.Util.
-      (Tool_result.data manifest_result |> member "meta" |> member "attachments")
+      (stored_post_json (Tool_result.data manifest_result)
+       |> member "meta"
+       |> member "attachments")
   in
   (match stored_manifest with
    | `List [ `Assoc fields ] ->
@@ -898,6 +923,48 @@ let test_attachment_artifact_read_bound () =
     Alcotest.failf "exact bound refused: %s"
       (Board_tool_attachment.error_to_string error)
 
+(* A post with an attachment named by digest stores a normalized artifact
+   reference in its meta. The answer used to carry that meta, a Keeper's
+   projection found the reference without a result manifest, and the Keeper
+   read "tool output artifact storage failed" for a post the board had
+   stored. *)
+let test_post_with_an_artifact_attachment_reaches_a_keeper_as_written () =
+  with_eio @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let blob =
+    match
+      Tool_blob_store.put
+        (Tool_blob_store.create ~base_path:_test_base_path)
+        ~bytes:"attachment bytes"
+        ~mime:"application/octet-stream"
+    with
+    | Tool_output.Stored reference -> reference
+  in
+  let result =
+    dispatch_result "masc_board_post"
+      (make_args
+         [ "content", `String "A post with a file"
+         ; "author", `String "tester"
+         ; ( "attachments"
+           , `List [ `Assoc [ "kind", `String "file"; "sha256", `String blob.sha256 ] ] )
+         ])
+  in
+  Alcotest.(check bool) "the board stored the post" true (Tool_result.is_success result);
+  Alcotest.(check int) "the answer carries no artifact reference" 0
+    (List.length (Tool_output.normalized_artifact_refs_in_json (Tool_result.data result)));
+  (match Tool_bridge.to_agent_core_typed_result ~base_path:_test_base_path result with
+   | Ok _ -> ()
+   | Error error ->
+     Alcotest.failf "the Keeper reads a failure for a stored post: %s"
+       error.Agent_core.Types.message);
+  let attachments =
+    Yojson.Safe.Util.(
+      stored_post_json (Tool_result.data result) |> member "meta" |> member "attachments")
+  in
+  Alcotest.(check int) "the board row keeps the reference" 1
+    (List.length (Tool_output.normalized_artifact_refs_in_json attachments))
+
 (* Regression guard: board_post must return STRUCTURED [data] (`Assoc), not a
    `String that embeds stringified JSON. The `String form double-encodes the
    payload — a consumer that re-serializes the result (e.g. the dashboard's
@@ -993,7 +1060,7 @@ let test_post_create_judgment_roundtrip () =
          ])
   in
   Alcotest.(check bool) "create ok" true ok;
-  let json = parse_create_response_json body in
+  let json = stored_post_json (parse_create_response_json body) in
   Alcotest.(check string) "judgment summary kept in meta" summary
     Yojson.Safe.Util.(json |> member "meta" |> member "judgment" |> member "summary" |> to_string)
 
@@ -1014,7 +1081,7 @@ let test_post_create_judgment_list_roundtrip () =
          ])
   in
   Alcotest.(check bool) "create ok" true ok;
-  let json = parse_create_response_json body in
+  let json = stored_post_json (parse_create_response_json body) in
   let judgment_json = Yojson.Safe.Util.(json |> member "meta" |> member "judgment") in
   (* The List judgment must be preserved, not silently dropped. *)
   Alcotest.(check bool) "list judgment is a non-null value" true
@@ -1049,7 +1116,7 @@ let test_post_create_judgment_scalar_types_ignored () =
               ])
        in
        Alcotest.(check bool) (label ^ ": create ok") true ok;
-       let json = parse_create_response_json body in
+       let json = stored_post_json (parse_create_response_json body) in
        let judgment_json =
          try Yojson.Safe.Util.(json |> member "meta" |> member "judgment")
          with _ -> `Null
@@ -1082,7 +1149,7 @@ let test_post_create_sources_footer_and_meta () =
          ])
   in
   Alcotest.(check bool) "create ok" true ok;
-  let json = parse_create_response_json body in
+  let json = stored_post_json (parse_create_response_json body) in
   let content = Yojson.Safe.Util.(json |> member "body" |> to_string) in
   Alcotest.(check bool) "sources footer appended" true
     (String_util.contains_substring content "## Sources");
@@ -1120,7 +1187,7 @@ let test_masc_board_post_preserves_meta_reason () =
                  ] );
            ])
   in
-  let json = parse_create_response_json body in
+  let json = stored_post_json (parse_create_response_json body) in
   Alcotest.(check string) "classification reason kept" reason
     Yojson.Safe.Util.(json |> member "meta" |> member "classification_reason" |> to_string);
   Alcotest.(check string) "keeper source injected" "masc_board_post"
@@ -2441,8 +2508,10 @@ let test_dispatch_post_update_success () =
          ])
   in
   Alcotest.(check bool) "edit ok" true ok_edit;
-  Alcotest.(check bool) "edit msg contains new body" true
+  Alcotest.(check bool) "the edit answer leaves out the text it was sent" false
     (String_util.contains_substring msg_edit "edited tool body");
+  Alcotest.(check string) "the edit answer names the post" post_id
+    Yojson.Safe.Util.(parse_create_response_json msg_edit |> member "id" |> to_string);
   (match Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id with
    | Error e -> Alcotest.fail (Board.show_board_error e)
    | Ok post -> Alcotest.(check string) "edit persisted" "edited tool body" post.body)
@@ -4485,6 +4554,8 @@ let () =
             test_post_create_metadata_payload;
           Alcotest.test_case "create typed attachments" `Quick
             test_post_create_typed_attachments;
+          Alcotest.test_case "an artifact attachment reaches a Keeper as written" `Quick
+            test_post_with_an_artifact_attachment_reaches_a_keeper_as_written;
           Alcotest.test_case "attachment artifact read bound" `Quick
             test_attachment_artifact_read_bound;
           Alcotest.test_case "create data is structured not double-encoded" `Quick

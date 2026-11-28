@@ -32,14 +32,10 @@ val error_of_post_publication_failure :
     class or message. Proven commits carry [data.committed_post_id]. *)
 
 val with_unresolved : Yojson.Safe.t -> string list -> Yojson.Safe.t
-(** [with_unresolved written names] adds the [unresolved] list to the JSON of a
-    post or comment a write just returned: the names in the text that look
+(** [with_unresolved written names] adds the [unresolved] list to the JSON a
+    post or comment write answers with: the names in the text that look
     like addresses but no Keeper declares, as the author wrote them. *)
 
-val post_of_write_data : Yojson.Safe.t -> Board.post option
-(** The post that {!with_unresolved} wrapped, or [None] when the data is not a
-    post.  Use it instead of {!Board.post_of_yojson} on a write response: the
-    post decoder rejects the extra [unresolved] field. *)
 val visibility_of_string : string -> Board.visibility option
 val parse_visibility : string -> (Board.visibility, string) Result.t
 val parse_visibility_arg :

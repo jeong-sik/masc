@@ -72,8 +72,8 @@ there:
 - The server does not start when `client_id` is empty, when the variable
   that `client_secret_env` names is unset or empty, when a redirect is not
   an https URL with a host and no query or fragment, when its path is not
-  the callback of its provider, or when its origin is not that of
-  `MASC_HTTP_BASE_URL` (when that is set).
+  the callback of its provider, or when its origin is not that of the
+  base URL of the server (step 3), when one is set.
 - A redirect is read as it is written. The path has to be the callback
   byte for byte: `/%61uth/github/callback` or `/auth/../auth/github/callback`
   stops the boot, because the server answers 404 on a path that only decodes
@@ -88,9 +88,11 @@ Stop any server on the workspace first. The command takes the workspace
 lease.
 
 ```sh
-export MASC_HTTP_BASE_URL=https://<host>
-masc auth bootstrap --base-path <base> --external-store <absolute path of a new file>
+MASC_HTTP_BASE_URL=https://<host> masc auth bootstrap --base-path <base> --external-store <absolute path of a new file>
 ```
+
+- The address goes on the command line here because the workspace has no
+  runtime.toml yet. Step 3 writes it into the file.
 
 - The external store is a file that the authorization log writes to before
   and after each change. Its path must be absolute and outside the base
@@ -108,8 +110,8 @@ masc auth bootstrap --base-path <base> --external-store <absolute path of a new 
   after 24 hours. Only a digest of the token is written, so a lost link
   cannot be read again.
 - For a link that expired or was lost, stop the server and run
-  `masc auth invite --base-path <base>` with `MASC_HTTP_BASE_URL` set as
-  above. It writes one more Admin invitation and revokes none. While a
+  `masc auth invite --base-path <base>`. It reads the address as the server
+  does (step 3), writes one more Admin invitation and revokes none. While a
   server runs on the workspace, the command is refused for the lease and
   says where else to go: once an Admin has signed in, the 초대 링크
   (invitations) panel of the console issues invitations with no stop of the
@@ -117,11 +119,29 @@ masc auth bootstrap --base-path <base> --external-store <absolute path of a new 
 
 ## 3. Start the account server
 
+Add the address of the workspace to the `[transport]` table of
+`<base>/.masc/config/runtime.toml`, the file step 2 put in place. The file
+already has that table, and TOML refuses a second `[transport]` header.
+
+```toml
+[transport]
+http_base_url = "https://<host>"
+```
+
 ```sh
-export MASC_HTTP_BASE_URL=https://<host>
 export MASC_GITHUB_CLIENT_SECRET=<client secret>
 masc start --base-path <base> --port <port>
 ```
+
+- The server compares the redirect of each login client with
+  `http_base_url`, builds invitation links on it, and leaves it in
+  `MASC_HTTP_BASE_URL` of its own process. Without it the server uses the
+  address it binds and compares nothing.
+- `MASC_HTTP_BASE_URL` in the environment comes before the file. A shell
+  that exports it for another workspace on the same host, such as a
+  single-user server, hands the account server that address. The boot then
+  stops with `redirect_uri_origin_mismatch`. Move such an export out of the
+  shell's startup file and give each workspace its own `http_base_url`.
 
 - Export the secret variable of every login client in `config.json`. A
   `google` client names its own.
@@ -160,7 +180,7 @@ masc start --base-path <base> --port <port>
   server another port or `0`.
 - `masc restart` replaces it as it replaces a single-user server. The new
   server takes the environment of the shell that runs `masc restart`, so
-  export `MASC_HTTP_BASE_URL` and the client secrets there too.
+  export the client secrets there too.
 
 ## 4. Sign in as the first Admin
 

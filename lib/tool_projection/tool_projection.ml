@@ -175,14 +175,22 @@ let make_tool_error ?(recoverable = false) ?error_class message
   : Agent_core.Types.tool_result =
   Error { Agent_core.Types.message; recoverable; error_class }
 
+(* The one comparison between a text and the ceiling of the projection it
+   crosses. [project_content], the artifact envelope and [fits_inline] all ask
+   it, so a producer that asks before it builds its result gets the answer
+   the projection gives when the result is sent (#55433). *)
+let within_ceiling ~model_projection text =
+  String.length text <= Tool_output.inline_ceiling_bytes model_projection
+;;
+
 let project_content ?base_path ?stored_preview ?answer_fingerprint ~model_projection message =
-  match model_projection with
-  | Tool_output.Store_above { threshold_bytes } ->
-    maybe_externalize ?base_path ?stored_preview ?answer_fingerprint ~threshold_bytes message
-  | Tool_output.Inline_up_to { maximum_bytes } ->
-    if String.length message <= maximum_bytes
-    then Ok message
-    else
+  if within_ceiling ~model_projection message
+  then Ok message
+  else
+    match model_projection with
+    | Tool_output.Store_above { threshold_bytes } ->
+      maybe_externalize ?base_path ?stored_preview ?answer_fingerprint ~threshold_bytes message
+    | Tool_output.Inline_up_to { maximum_bytes } ->
       Error
         { kind = Inline_budget_exceeded
         ; message =
@@ -318,11 +326,11 @@ let project_result
                   let envelope = artifact_result_envelope
                     ~reference ~structured_content ?content:inline_content () in
                   let ceiling = Tool_output.inline_ceiling_bytes model_projection in
-                  if String.length envelope <= ceiling
+                  if within_ceiling ~model_projection envelope
                   then Ok envelope
                   else
                     let content = marker () in
-                    if String.length content <= ceiling then Ok content
+                    if within_ceiling ~model_projection content then Ok content
                     else Error
                       { kind = Inline_budget_exceeded
                       ; message = Printf.sprintf
@@ -385,6 +393,93 @@ let post_effect_failure_content ~model_projection ~failure_class ~effect_disposi
       bounded selected count
 ;;
 
+(* What a failed result tells the model before any artifact is considered:
+   the producer's message with its class and next move. It is text when the
+   result carries nothing else and one JSON object when it carries data or
+   metadata. *)
+type failed_text =
+  { failure_class : string
+  ; next_move : string option
+  ; inline_diagnostic : string
+  ; text : string
+  }
+
+let failed_text ~class_ ~message ~data_source ~metadata ~data =
+  let failure_class = Tool_result.tool_failure_class_to_string class_ in
+  let next_move = failure_next_move class_ in
+  let inline_diagnostic =
+    Yojson.Safe.to_string
+      (`Assoc
+         ([ "masc.tool_disposition", `String "failed"
+          ; "failure_class", `String failure_class ]
+          @ match next_move with None -> [] | Some value -> [ "next_move", `String value ]))
+  in
+  (* Keep producer recovery details in model content. Data already carried
+     verbatim by the message or metadata needs no second copy. *)
+  let model_data =
+    match data_source with
+    | Tool_result.Message_as_data | Tool_result.Explicit_data `Null -> None
+    | Tool_result.Explicit_data
+        (`Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ | `List _)
+      ->
+      let carried_by_metadata =
+        match metadata with
+        | Some metadata -> Yojson.Safe.equal data metadata
+        | None -> false
+      in
+      let carried_as_text =
+        match data with
+        | `String text -> String.equal text message
+        | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _ -> false
+      in
+      (* Serializing is the expensive check, so it runs only when the two
+         cheap ones did not settle it (#34731 review). *)
+      if
+        carried_by_metadata
+        || carried_as_text
+        || String.equal (Yojson.Safe.to_string data) message
+      then None
+      else Some data
+  in
+  let message =
+    match metadata, model_data with
+    | None, None ->
+      (match next_move with
+       | Some next_move ->
+         Printf.sprintf "%s\nfailure_class=%s — %s" message failure_class next_move
+       | None -> Printf.sprintf "%s\nfailure_class=%s" message failure_class)
+    | metadata, model_data ->
+      Yojson.Safe.to_string
+        (`Assoc
+            ([ "message", `String message
+             ; "masc.tool_disposition", `String "failed"
+             ; "failure_class", `String failure_class
+             ]
+             @ (match next_move with
+                | Some next_move -> [ "next_move", `String next_move ]
+                | None -> [])
+             @ (match model_data with
+                | Some data -> [ "data", data ]
+                | None -> [])
+             @ (match metadata with
+                | Some metadata -> [ "masc.payload", metadata ]
+                | None -> [])))
+  in
+  { failure_class; next_move; inline_diagnostic; text = message }
+;;
+
+(* The text [to_agent_core_typed_result] hands [project_result] for this
+   result. When the data names no artifact it is what the model reads, or what
+   is stored when it is over the ceiling. *)
+let inline_text (tr : Tool_result.result) =
+  match tr with
+  | Tool_result.Completed _ | Tool_result.Deferred _ -> Tool_result.message tr
+  | Tool_result.Failed { class_; message; data_source; metadata; _ } ->
+    (failed_text ~class_ ~message ~data_source ~metadata ~data:(Tool_result.data tr)).text
+;;
+
+let fits_inline ~model_projection tr = within_ceiling ~model_projection (inline_text tr)
+
 let to_agent_core_typed_result
       ?base_path
       ?(answer_reader = fun _ -> None)
@@ -403,7 +498,7 @@ let to_agent_core_typed_result
       ~model_projection
       ~structured_content:(Tool_result.data tr)
       ~metadata:(Tool_result.metadata tr)
-      (Tool_result.message tr)
+      (inline_text tr)
       (fun content ->
          Ok { Agent_core.Types.content; content_blocks = output.content_blocks; _meta = output.metadata })
   | Tool_result.Deferred output ->
@@ -424,70 +519,13 @@ let to_agent_core_typed_result
       ~model_projection
       ~structured_content:(Tool_result.data tr)
       ~metadata:(Tool_result.metadata tr)
-      (Tool_result.message tr)
+      (inline_text tr)
       (fun content ->
          Ok { Agent_core.Types.content; content_blocks = output.content_blocks; _meta = Some metadata })
   | Tool_result.Failed { effect_disposition; class_; message; data_source; metadata; _ } ->
-    let failure_class = Tool_result.tool_failure_class_to_string class_ in
-    let next_move = failure_next_move class_ in
-    let inline_diagnostic =
-      Yojson.Safe.to_string
-        (`Assoc
-           ([ "masc.tool_disposition", `String "failed"
-            ; "failure_class", `String failure_class ]
-            @ match next_move with None -> [] | Some value -> [ "next_move", `String value ]))
-    in
     let data = Tool_result.data tr in
-    (* Keep producer recovery details in model content. Data already carried
-       verbatim by the message or metadata needs no second copy. *)
-    let model_data =
-      match data_source with
-      | Tool_result.Message_as_data | Tool_result.Explicit_data `Null -> None
-      | Tool_result.Explicit_data
-          (`Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ | `List _)
-        ->
-        let carried_by_metadata =
-          match metadata with
-          | Some metadata -> Yojson.Safe.equal data metadata
-          | None -> false
-        in
-        let carried_as_text =
-          match data with
-          | `String text -> String.equal text message
-          | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _ -> false
-        in
-        (* Serializing is the expensive check, so it runs only when the two
-           cheap ones did not settle it (#34731 review). *)
-        if
-          carried_by_metadata
-          || carried_as_text
-          || String.equal (Yojson.Safe.to_string data) message
-        then None
-        else Some data
-    in
-    let message =
-      match metadata, model_data with
-      | None, None ->
-        (match next_move with
-         | Some next_move ->
-           Printf.sprintf "%s\nfailure_class=%s — %s" message failure_class next_move
-         | None -> Printf.sprintf "%s\nfailure_class=%s" message failure_class)
-      | metadata, model_data ->
-        Yojson.Safe.to_string
-          (`Assoc
-              ([ "message", `String message
-               ; "masc.tool_disposition", `String "failed"
-               ; "failure_class", `String failure_class
-               ]
-               @ (match next_move with
-                  | Some next_move -> [ "next_move", `String next_move ]
-                  | None -> [])
-               @ (match model_data with
-                  | Some data -> [ "data", data ]
-                  | None -> [])
-               @ (match metadata with
-                  | Some metadata -> [ "masc.payload", metadata ]
-                  | None -> [])))
+    let { failure_class; next_move; inline_diagnostic; text = message } =
+      failed_text ~class_ ~message ~data_source ~metadata ~data
     in
     let stored_preview =
       match next_move with

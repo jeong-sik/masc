@@ -68,7 +68,7 @@ let with_process_output ?(stdout = stdout) ?(stderr = stderr) ?(pool = false) ?s
 let test_changed_eof_source_is_not_published () =
   with_process_output (fun ~base_path ~redaction ~stdout_path ~stderr_path files ->
     Unix.truncate stdout_path 1;
-    (match Publish.publish ~inline_ceiling_bytes:default_ceiling ~base_path ~redaction files with
+    (match Publish.publish ~placement:(Publish.Inline_when_at_most default_ceiling) ~base_path ~redaction files with
      | Error (Publish.Persistence_failed _) -> ()
      | Error error -> Alcotest.fail (Publish.error_to_string error)
      | Ok _ -> Alcotest.fail "a stale EOF receipt became complete output");
@@ -84,7 +84,7 @@ let test_changed_eof_source_is_not_published () =
 let test_publication_retains_sources_until_release () =
   with_process_output (fun ~base_path ~redaction ~stdout_path ~stderr_path files ->
     let publication =
-      match Publish.publish ~inline_ceiling_bytes:default_ceiling ~base_path ~redaction files with
+      match Publish.publish ~placement:(Publish.Inline_when_at_most default_ceiling) ~base_path ~redaction files with
       | Ok publication -> publication
       | Error error -> Alcotest.fail (Publish.error_to_string error)
     in
@@ -140,7 +140,7 @@ let payload bytes =
 let publish_payload ~lane bytes check_fields =
   let payload = payload bytes in
   with_process_output ~stdout:payload ~stderr:"" (fun ~base_path ~redaction ~stdout_path:_ ~stderr_path:_ files ->
-    match Publish.publish ~inline_ceiling_bytes:(lane_ceiling lane) ~base_path ~redaction files with
+    match Publish.publish ~placement:(Publish.Inline_when_at_most (lane_ceiling lane)) ~base_path ~redaction files with
     | Error error -> Alcotest.fail (Publish.error_to_string error)
     | Ok publication ->
       Alcotest.(check int) "compared bytes match the redacted stream"
@@ -165,7 +165,7 @@ let test_non_utf8_child_output_is_preserved () =
   let stdout = "한글 intact\n" ^ "\x89PNG\r\n\x1a\n" in
   let stderr = "cut Korean: \xed\x95" in
   with_process_output ~stdout ~stderr ~pool:true (fun ~base_path ~redaction ~stdout_path:_ ~stderr_path:_ files ->
-    match Publish.publish ~inline_ceiling_bytes:default_ceiling ~base_path ~redaction files with
+    match Publish.publish ~placement:(Publish.Inline_when_at_most default_ceiling) ~base_path ~redaction files with
     | Error error -> Alcotest.fail (Publish.error_to_string error)
     | Ok publication ->
       let fields = publication.Publish.fields in
@@ -189,7 +189,7 @@ let test_worker_publication_preserves_secret_snapshot () =
     ~pool:true ~secret (fun ~base_path ~redaction ~stdout_path:_ ~stderr_path:_ files ->
       Alcotest.(check string) "caller has already matched the snapshot"
         "[REDACTED]" (Redaction.redact_text redaction secret);
-      match Publish.publish ~inline_ceiling_bytes:0 ~base_path ~redaction files with
+      match Publish.publish ~placement:(Publish.Inline_when_at_most 0) ~base_path ~redaction files with
       | Error error -> Alcotest.fail (Publish.error_to_string error)
       | Ok publication ->
         let fields = publication.Publish.fields in
@@ -215,6 +215,40 @@ let test_claude_lane_stores_40000_bytes_byte_identical () =
       (blob_bytes ~base_path "output_artifact" fields);
     Alcotest.(check string) "the stored stdout blob is the child's bytes" payload
       (blob_bytes ~base_path "stdout_artifact" fields))
+
+(* #55433: Execute publishes with [Inline_when_at_most] first and, when the
+   result that would carry the output does not fit its lane, publishes the
+   same files again with [Stored]. The first publication stored nothing and
+   left the sources; the second stores the bytes the first returned, and one
+   release removes the sources both read. *)
+let test_the_same_files_publish_again_as_stored () =
+  with_process_output (fun ~base_path ~redaction ~stdout_path ~stderr_path files ->
+    let publish placement =
+      match Publish.publish ~placement ~base_path ~redaction files with
+      | Ok publication -> publication
+      | Error error -> Alcotest.fail (Publish.error_to_string error)
+    in
+    let inline = publish (Publish.Inline_when_at_most default_ceiling) in
+    Alcotest.(check bool) "the first publication returns the output inline" true
+      (inline.placed = Publish.Returned_inline);
+    Alcotest.(check bool) "the output it returns is both streams" true
+      (List.assoc_opt "output" inline.fields = Some (`String (stdout ^ stderr)));
+    Alcotest.(check bool) "its sources remain for a second publication" true
+      (Sys.file_exists stdout_path && Sys.file_exists stderr_path);
+    let stored = publish Publish.Stored in
+    Alcotest.(check bool) "the second publication stores the output" true
+      (stored.placed = Publish.Stored_as_artifacts);
+    Alcotest.(check bool) "a stored output is not also inline" false
+      (List.mem_assoc "output" stored.fields);
+    Alcotest.(check string) "the stored output is the bytes the first returned"
+      (stdout ^ stderr) (blob_bytes ~base_path "output_artifact" stored.fields);
+    Alcotest.(check string) "stdout is stored as the child wrote it" stdout
+      (blob_bytes ~base_path "stdout_artifact" stored.fields);
+    Alcotest.(check string) "stderr is stored as the child wrote it" stderr
+      (blob_bytes ~base_path "stderr_artifact" stored.fields);
+    stored.release_sources ();
+    Alcotest.(check bool) "one release removes the sources both read" false
+      (Sys.file_exists stdout_path || Sys.file_exists stderr_path))
 
 let preview_of field fields =
   match List.assoc_opt field fields with
@@ -300,6 +334,8 @@ let () =
           test_changed_eof_source_is_not_published
       ; Alcotest.test_case "publication waits for the caller to release sources" `Quick
           test_publication_retains_sources_until_release
+      ; Alcotest.test_case "the same files publish again as stored" `Quick
+          test_the_same_files_publish_again_as_stored
       ; Alcotest.test_case "worker publication preserves captured secret values" `Quick
           test_worker_publication_preserves_secret_snapshot
       ; Alcotest.test_case "non-UTF-8 child output survives JSON transport" `Quick

@@ -580,7 +580,16 @@ let test_large_sources_survive_actual_bridge () = with_fixture (fun config ->
   ignore (reconstruct ~follow:(fun args cursor -> cursor_args args (without_select cursor))
       threaded_surface "masc_board_post_get" selected);
   invalid_input threaded_surface "masc_board_post_get"
-    (`Assoc ["post_id", `String threaded_id; "comment_offset", `Int 1; "cursor", cursor]))
+    (`Assoc ["post_id", `String threaded_id; "comment_offset", `Int 1; "cursor", cursor]);
+  (* A cursor that lost its selection, beside a call that names no comment
+     arguments, reads another page. The source is the submitted bytes and did
+     not change, so the refusal says what to pass. *)
+  (match call threaded_surface "masc_board_post_get" (bare selected (without_select cursor)) with
+   | Tool_result.Failed _ as result ->
+     check bool "a cursor that lost its selection is told to pass next_cursor whole" true
+       (String_util.contains_substring (Tool_result.message result) "pass next_cursor whole")
+   | result ->
+     failf "a cursor without its selection and without arguments continued: %s" (Tool_result.message result)))
 
 let artifact reference content =
   Store.Evidence_artifact { reference; content; bytes = String.length content }

@@ -83,7 +83,8 @@ let cursor_parts = function
    carries them. A cursor that carries a selection continues a page that has
    the same one. A page with a selection is also continued by a cursor that
    carries none: the caller then selected the page itself, and the digest
-   still pins the bytes. *)
+   still pins the bytes. The bytes are the submitted capture and do not
+   change, so a digest that differs means the request reads another page. *)
 let page_source ~args ~select source =
   let bytes = Yojson.Safe.to_string source in
   let total = String.length bytes in
@@ -95,7 +96,8 @@ let page_source ~args ~select source =
     | Some cursor ->
       let* expected, offset, carried = cursor_parts cursor in
       if not (String.equal expected digest) then
-        Error (Source_unavailable "source changed between pages; restart the exact source read")
+        Error (Source_unavailable
+          "this cursor does not name the page the request reads: pass next_cursor whole as cursor and keep the same source id")
       else if offset > 0 && offset < total
         && String_util.utf8_char_boundary bytes offset = offset
         && (match select, carried with

@@ -352,7 +352,8 @@ let test_schemas_are_the_descriptor_schemas () =
                 "the carried selection is the descriptor's comment arguments"
                 [ "after_comment_id"; "comment_limit"; "comment_offset"; "comment_tail" ]
                 (schema.input_schema |> member "properties" |> member "cursor"
-                 |> member "select" |> member "properties" |> keys |> List.sort String.compare);
+                 |> member "properties" |> member "select"
+                 |> member "properties" |> keys |> List.sort String.compare);
               Alcotest.(check (list string))
                 "only the digest and the offset are required of a cursor"
                 [ "byte_offset"; "source_sha256" ]

@@ -192,6 +192,13 @@ signed in: its panels 초대 링크 (invitations), 허용 목록 (the allowlist)
   `held` names which: `revoke`, `disable` or `delete`). With no session
   the answer is 401; a session of a person who is not an Admin, or a
   request from another origin, gets 403.
+- **Roles.** A person is an Admin or a Member. An Admin invitation makes an
+  Admin; an invitation for a Member and an allowlist entry make a Member.
+  Account → Members in the dashboard makes an active Member an Admin
+  (`POST /api/v1/auth/members/<user_id>/grant-admin`) and takes the role
+  away (`.../revoke-admin` with a cause). The new Admin acts as one on the
+  next request. A grant of a disabled or held person, or of an Admin, is a
+  409, and the last Admin that acts keeps the role.
 
 ## 6. Declare what people connect
 

@@ -4,7 +4,7 @@
  * Covers:
  * - `GET /api/v1/auth/whoami`, `POST /auth/logout`
  * - `GET/POST/DELETE /api/v1/auth/pats`
- * - `GET /api/v1/auth/members` + Stack A lifecycle (`disable`, `enable`, `revoke-admin`, `DELETE`)
+ * - `GET /api/v1/auth/members` + Stack A lifecycle (`disable`, `enable`, `grant-admin`, `revoke-admin`, `DELETE`)
  * - `GET/POST/DELETE /api/v1/auth/invites`
  * - `GET/POST/DELETE /api/v1/auth/allowlist`
  */
@@ -299,6 +299,15 @@ export function enableMember(
   fetchImpl?: typeof fetch,
 ): Promise<Result<{ readonly user_id: string; readonly status: string }, ApiError>> {
   return apiMutate('POST', `/api/v1/auth/members/${encodeURIComponent(userId)}/enable`, undefined, { fetchImpl })
+}
+
+/** `POST /api/v1/auth/members/:id/grant-admin`: an Admin gives a Member the
+    Admin assignment. The route reads no body (lib/auth/login_member_routes.mli). */
+export function grantAdminMember(
+  userId: string,
+  fetchImpl?: typeof fetch,
+): Promise<Result<{ readonly user_id: string; readonly role: string }, ApiError>> {
+  return apiMutate('POST', `/api/v1/auth/members/${encodeURIComponent(userId)}/grant-admin`, undefined, { fetchImpl })
 }
 
 export function revokeAdminMember(

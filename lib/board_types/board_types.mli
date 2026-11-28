@@ -1066,11 +1066,50 @@ type votes_source_state =
     until model publication is acknowledged. Unknown writes and unfinished
     publication require a fresh store; an ordinary reload cannot clear them. *)
 
+(** Whether a source's file is still the one this store last read (#55465).
+
+    A refused source is read again once its file has changed. A store keeps,
+    for each source, the directory entry its last read saw; nothing here takes
+    a lock or opens a file. *)
+module Source_file : sig
+  type seen
+  (** The directory entry at a source's path when this store last read the
+      file: device, inode, size, modification time and link count, or its
+      absence. *)
+
+  val never_seen : seen
+  (** No read of this store has seen the file. *)
+
+  val around_read :
+    seen -> path:string ->
+    (unit -> ('a, Fs_compat.private_jsonl_transaction_error) result) ->
+    seen * ('a, Fs_compat.private_jsonl_transaction_error) result
+  (** Run one read of [path] and return what the store has seen after it. The
+      entry is taken by one [lstat] before the read, so a change during the
+      read shows as a change afterwards. A read that returned the file, or
+      refused it for what the file is (a torn last line, a second hard link,
+      not a regular file), saw that entry. A read that failed before that (a
+      contended lock, a failed operation, a lock file in a wrong state) keeps
+      the earlier [seen]. An exception of [read] passes through. *)
+
+  val changed_since : seen -> path:string -> bool
+  (** Whether the entry at [path] differs from the one last seen. [true]
+      without IO when no read has seen the file; otherwise one [lstat], on the
+      system thread {!Fs_compat.Systhread_host.run} picks, or in place outside
+      Eio. An entry that cannot be inspected counts as changed. *)
+end
+
 type store = {
   (** Canonical posts observation/refusal/uncertainty, owned by persist_mutex.
       Successful loads and writes advance it; dirty cards need not equal its bytes. *)
   mutable posts_source : posts_source_state;
   posts_source_io : posts_source_io;
+  (** The entry each source's last read saw, owned by persist_mutex. *)
+  mutable posts_source_seen : Source_file.seen;
+  mutable comments_source_seen : Source_file.seen;
+  mutable sub_boards_source_seen : Source_file.seen;
+  mutable votes_source_seen : Source_file.seen;
+  mutable reactions_source_seen : Source_file.seen;
   (** Comments' source, uncertainty and unfinished model publication are owned
       by persist_mutex; no separate load-success flag grants authority. *)
   mutable comments_source : comments_source_state;

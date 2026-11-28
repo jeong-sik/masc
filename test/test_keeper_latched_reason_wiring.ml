@@ -220,7 +220,7 @@ let test_grpc_pause_directive_records_reason () =
        let meta = make_meta keeper_name in
        Keeper_meta_store.replace_snapshot config meta
        |> Result.get_ok;
-       Keeper_owner_registry.install_from_store ~sw ~operation_runner:None ~on_turn_slot_released:None config
+       Keeper_owner_registry.install_from_store ~sw ~operation_runner:None config
        |> Result.get_ok
        |> ignore;
        Keeper_registry.For_testing.clear ();
@@ -289,7 +289,6 @@ let test_reflected_operator_pause_reconciles_registry_phase () =
        Keeper_owner_registry.install_from_store
          ~sw
          ~operation_runner:None
-         ~on_turn_slot_released:None
          config
        |> Result.get_ok
        |> ignore;

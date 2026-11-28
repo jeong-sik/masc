@@ -22,7 +22,7 @@ let with_owner_inventory config f =
   Eio_main.run @@ fun env ->
   if not (Fs_compat.has_fs ()) then Fs_compat.set_fs (Eio.Stdenv.fs env);
   Eio.Switch.run @@ fun sw ->
-  (match Masc.Keeper_owner_registry.install_from_store ~sw ~operation_runner:None ~on_turn_slot_released:None config with
+  (match Masc.Keeper_owner_registry.install_from_store ~sw ~operation_runner:None config with
    | Ok _ -> ()
    | Error error ->
      Alcotest.fail (Masc.Keeper_owner_registry.install_error_to_string error));
@@ -1526,7 +1526,6 @@ let test_status_surfaces_chat_operation_runtime () =
          Masc.Keeper_owner_registry.install_from_store
            ~sw
            ~operation_runner:None
-           ~on_turn_slot_released:None
            config
        with
        | Ok 1 -> ()

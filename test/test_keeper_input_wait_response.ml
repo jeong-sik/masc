@@ -121,7 +121,7 @@ let test_autonomous_input_owner_rejects_lost_response_lineage () =
     "activation_mode",`String "manual"]) |> prepared in
   Keeper_meta_store.replace_snapshot workspace meta |> prepared;
   Keeper_owner_registry.install_from_store ~sw ~operation_runner:None
-    ~on_turn_slot_released:None workspace |> prepared |> ignore;
+    workspace |> prepared |> ignore;
   let owner = Keeper_owner_registry.get ~base_path:root ~keeper_name |> prepared in
   let session_dir = Filename.concat root original.session_id in
   Unix.mkdir session_dir 0o700;
@@ -131,7 +131,7 @@ let test_autonomous_input_owner_rejects_lost_response_lineage () =
   let refused_source label source = match prepare source with
     | Error (Keeper_input_checkpoint_producer.Source_changed | Source_missing) -> ()
     | Error _ | Ok _ -> fail label in
-  (match Keeper_owner.run_autonomous_if_idle owner (fun () ->
+  (match Keeper_owner.run_autonomous_turn ~input:(fun () -> Keeper_owner.No_autonomous_input) owner (fun () ->
      let producer = prepare None |> prepared in
      let producer = Keeper_input_checkpoint_producer.publish_autonomous producer original |> prepared in
      let candidate = Response.prepare ~net:env#net ~source:(exact original)
@@ -180,7 +180,7 @@ let test_superseded_retained_input_checkpoint_recovers_on_next_turn () =
     "activation_mode",`String "manual"]) |> prepared in
   Keeper_meta_store.replace_snapshot workspace meta |> prepared;
   Keeper_owner_registry.install_from_store ~sw ~operation_runner:None
-    ~on_turn_slot_released:None workspace |> prepared |> ignore;
+    workspace |> prepared |> ignore;
   let owner = Keeper_owner_registry.get ~base_path:root ~keeper_name |> prepared in
   let session_dir = Keeper_types_support.keeper_session_dir workspace base_cp.session_id in
   let accepted_dir = Filename.concat session_dir "accepted-checkpoints" in
@@ -214,7 +214,7 @@ let test_superseded_retained_input_checkpoint_recovers_on_next_turn () =
    | Error _ ->
      fail "expected Retained_superseded with pending_input = None");
   let fresh_turn_1 = { base_cp with turn_count = 1 } in
-  (match Keeper_owner.run_autonomous_if_idle owner (fun () ->
+  (match Keeper_owner.run_autonomous_turn ~input:(fun () -> Keeper_owner.No_autonomous_input) owner (fun () ->
      let writer =
        Keeper_owner.begin_input_checkpoint owner ~trace_id:meta.runtime.trace_id
        |> prepared
@@ -427,9 +427,9 @@ let test_operation_response_preserves_producer_g ~canonical_intent ~fault () =
   let g=Store.exact_snapshot_reference newer_snapshot in
 
   Eio.Switch.run (fun owner_sw ->
-    Keeper_owner_registry.install_from_store ~sw:owner_sw ~operation_runner:None ~on_turn_slot_released:None workspace |> prepared |> ignore;
+    Keeper_owner_registry.install_from_store ~sw:owner_sw ~operation_runner:None workspace |> prepared |> ignore;
     let owner=Keeper_owner_registry.get ~base_path:root ~keeper_name |> prepared in
-    (match Keeper_owner.run_autonomous_if_idle owner (fun () ->
+    (match Keeper_owner.run_autonomous_turn ~input:(fun () -> Keeper_owner.No_autonomous_input) owner (fun () ->
        let producer=Keeper_input_checkpoint_producer.prepare ~base_path:root ~keeper_name ~session_dir
          ~trace_id:meta.runtime.trace_id ~source:(Some original) |> prepared in
        ignore (Keeper_input_checkpoint_producer.publish_autonomous producer newer |> prepared);

@@ -24,6 +24,10 @@
  * - Drafts and requests live in `prompt-edits.ts`, so they outlast the detail
  *   and the tab. An outcome is also told in a toast unless the detail of
  *   that prompt shows it: open in the edit view, with the catalog read.
+ * - The second view lists prompt presets (`presets-panel.ts`), which snapshot
+ *   the overrides together with keeper instructions and runtime routing. It
+ *   reads the same catalog to compare a preset's overrides with the text in
+ *   force.
  */
 
 import { html } from 'htm/preact'
@@ -44,6 +48,7 @@ import {
   writeEndText,
   type PromptWriteEnd,
 } from './prompt-edits'
+import { PresetsPanel } from './presets-panel'
 import {
   decodeOverrideApplied,
   decodePromptCatalog,
@@ -59,6 +64,13 @@ import { failureOutcome } from './write-outcome'
 export const PROMPT_CATALOG_CACHE_KEY = 'runtime:prompts'
 
 type FetchReason = 'mount' | 'manual'
+
+type Section = 'prompts' | 'presets'
+
+const SECTIONS: readonly (readonly [Section, string])[] = [
+  ['prompts', '프롬프트'],
+  ['presets', '프리셋'],
+]
 
 function loadPromptCatalog(reason: FetchReason) {
   return resourceCache.fetch<PromptCatalog>(
@@ -111,6 +123,7 @@ export function PromptsTab(_props: WorkspaceViewProps) {
   const [onlyOverrides, setOnlyOverrides] = useState(false)
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
   const { drafts, writes } = promptEditsFor(epoch)
+  const [section, setSection] = useState<Section>('prompts')
 
   useEffect(() => {
     void loadPromptCatalog('mount')
@@ -275,24 +288,37 @@ export function PromptsTab(_props: WorkspaceViewProps) {
       <header class="ov-head" style=${{ flexShrink: 0 }}>
         <div>
           <span class="ov-eyebrow">5 RUNTIME · PROMPTS</span>
-          <h1>공유 프롬프트 · World · override</h1>
+          <h1>공유 프롬프트 · World · 프리셋</h1>
+        </div>
+        <div class="ap-viewseg" role="group" aria-label="프롬프트 화면 선택">
+          ${SECTIONS.map(([id, label]) => html`
+            <button key=${id} type="button" data-section=${id} aria-pressed=${section === id} class=${`ap-viewbtn ${section === id ? 'on' : ''}`} onClick=${() => setSection(id)}>
+              ${label}
+            </button>
+          `)}
         </div>
       </header>
       ${!canEdit && html`
         <div class="wka-card" role="status" data-testid="prompts-admin-locked" style=${{ flexShrink: 0, fontSize: 'var(--fs-13)', color: 'var(--fg-2)' }}>
-          프롬프트는 읽을 수만 있어요. override 저장과 지우기는 관리자 세션에서 할 수 있어요.
+          프롬프트와 프리셋은 읽을 수만 있어요. override 저장·지우기와 프리셋 저장·복원·삭제는 관리자 세션에서 할 수 있어요.
         </div>
       `}
       <div style=${{ flex: '1 1 0%', minHeight: 0 }}>
-        <${MasterDetail}
-          masterLabel="프롬프트 목록"
-          detailLabel="프롬프트"
-          master=${master}
-          detail=${detail}
-          hasSelection=${selected !== null}
-          selectionKey=${selectedKey}
-          emptyDetail=${html`<div class="wka-card dtable-absent">목록에서 프롬프트를 고르면 지금 쓰는 텍스트와 편집기가 열려요.</div>`}
-        />
+        ${section === 'presets'
+          ? html`<${PresetsPanel}
+              canEdit=${canEdit}
+              catalog=${catalog}
+              onPromptsChanged=${() => { resourceCache.invalidateTopic('prompts'); void loadPromptCatalog('manual') }}
+            />`
+          : html`<${MasterDetail}
+              masterLabel="프롬프트 목록"
+              detailLabel="프롬프트"
+              master=${master}
+              detail=${detail}
+              hasSelection=${selected !== null}
+              selectionKey=${selectedKey}
+              emptyDetail=${html`<div class="wka-card dtable-absent">목록에서 프롬프트를 고르면 지금 쓰는 텍스트와 편집기가 열려요.</div>`}
+            />`}
       </div>
     </div>
   `

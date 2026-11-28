@@ -151,10 +151,14 @@ let render ~executable ~dir request =
            (fun output -> [ export_flag output; Filename.concat dir (file_name output) ])
            request.outputs
     in
+    (* Every path in [argv] is absolute, so the process needs no working
+       directory of its own. Process_eio opens a [~cwd] beneath its
+       configured root only, and the scratch directory is under the system
+       temp directory, outside it. *)
     (match
        Process_eio.run_argv_with_status_split_or_refusal ~timeout_sec:render_timeout_sec
          ~env:(Env_keeper_scrub.filter_environment (Unix.environment ()))
-         ~cwd:dir argv
+         argv
      with
      | Error refusal ->
        Error

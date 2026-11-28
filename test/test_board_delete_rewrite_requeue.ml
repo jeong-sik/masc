@@ -316,6 +316,12 @@ let test_delete_refuses_changed_same_cursor_bytes () =
   let module Paths = Masc_board_handlers.Board_paths in
   Alcotest.(check bool) "refused guard writes no marker" false
     (Sys.file_exists (Paths.store_file_path active Paths.Deletion));
+  (* The refused deletion leaves the model as the store had observed it. The
+     table is read directly: a Dispatch read would read the file again first. *)
+  (match Hashtbl.find_opt active.posts post_id with
+   | None -> Alcotest.fail "the refused deletion removed the post from the model"
+   | Some observed ->
+     Alcotest.(check string) "refusal preserves the observed model" doomed.body observed.body);
   (* #55460: a refusal for changed content is one a fresh read clears, and the
      next Dispatch call makes that read. The post is still there, and it is the
      file's row, as a restart would show it. *)

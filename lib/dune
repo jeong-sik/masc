@@ -1,7 +1,8 @@
 (include_subdirs unqualified)
 (library
  (name masc)
- (flags :standard)
+ ; Sqlite3 here has no READONLY open (Masc_sqlite3, #36195).
+ (flags :standard -open Masc_sqlite3)
  (public_name masc)
  (private_modules
   keeper_checkpoint_read_observation
@@ -145,7 +146,6 @@
   ; Already in this library's link closure through masc.agent_core.
   uucp
   otoml
-  sqlite3
   masc.sqlite_file
   base64
   graphql

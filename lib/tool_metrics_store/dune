@@ -5,12 +5,13 @@
  (public_name masc.tool_metrics_store)
  (wrapped false)
  (modules tool_metrics_store tool_metrics_series)
+ ; Sqlite3 here has no READONLY open (Masc_sqlite3, #36195).
+ (flags (:standard -open Masc_sqlite3))
  (libraries
   fs_compat
   masc.config
   masc.tool_types
   masc_core
-  sqlite3
   masc.sqlite_file
   threads
   unix

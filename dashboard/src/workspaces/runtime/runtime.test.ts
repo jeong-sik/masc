@@ -1265,10 +1265,12 @@ describe('workspaces/runtime', () => {
     await flushUi(15)
 
     const form = container.querySelector('form') as HTMLFormElement
-    const textInput = form.querySelector('input[type="text"]') as HTMLInputElement
+    // A signed-in person picks the provider from the key-capable integrations;
+    // there is no free-text provider id.
+    expect(form.querySelector('input[type="text"]')).toBeNull()
+    const providerSelect = form.querySelector('select') as HTMLSelectElement
+    expect(providerSelect.value).toBe('openai_codex')
     const pwInput = form.querySelector('input[type="password"]') as HTMLInputElement
-    textInput.value = 'openai_codex'
-    textInput.dispatchEvent(new Event('input', { bubbles: true }))
     pwInput.value = 'sk-test-1234'
     pwInput.dispatchEvent(new Event('input', { bubbles: true }))
     await flushUi(10)
@@ -2421,11 +2423,10 @@ describe('workspaces/runtime', () => {
     }) as typeof fetch
 
     render(html`<${RuntimeWorkspace} subroute="quotas" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
+    // A person with no account sees the list open, with no click.
     await vi.waitFor(() => {
-      expect(container.querySelector('[data-testid="provider-inventory-toggle"]')).not.toBeNull()
-    })
-    container.querySelector<HTMLButtonElement>('[data-testid="provider-inventory-toggle"]')!.click()
-    await vi.waitFor(() => {
+      const toggle = container.querySelector<HTMLButtonElement>('[data-testid="provider-inventory-toggle"]')
+      expect(toggle?.getAttribute('aria-expanded')).toBe('true')
       expect(container.textContent).toContain('제공자 연동 목록 조회 실패')
       expect(container.textContent).toContain('integrations')
     })

@@ -345,6 +345,8 @@ export interface MultiAccountIntegration {
   readonly connect: readonly string[]
   readonly models: readonly string[]
   readonly calls?: string
+  /** With `calls: "refused"`: the code of the refusal. */
+  readonly refusal?: string
 }
 
 export interface MultiAccountIntegrationsResponse {

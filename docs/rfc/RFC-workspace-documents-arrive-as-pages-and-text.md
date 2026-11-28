@@ -323,6 +323,12 @@ type outcome = Rendered of rendition | Refused of refusal | Unavailable of unava
 - reader 는 Keeper 턴 안에서 돈다. 그 턴이 기다리는 시간의 끝은 §3.2 의 경계다.
 
 모델이 문서 원본을 직접 받는 경로(PDF native block)는 바꾸지 않는다.
+
+PDF 가 아닌 여덟 형식은 runtime 이 문서를 받는다고 해도 원본 블록으로 보내지 않는다. 늘 글로 읽는다.
+Claude API 는 document 블록에 DOCX·XLSX 같은 바이너리 형식을 받지 않는다([PDF support](https://platform.claude.com/docs/en/build-with-claude/pdf-support), 2026-11-28 확인).
+원본 블록으로 보내면 턴이 provider 의 400 으로 끝난다.
+이 규칙은 첨부 저장소가 문서를 받기 시작하는 L2 층에 같이 넣는다.
+L5 의 reader 가 생기기 전까지 여덟 형식은 `no_matching_reader` 로 「읽을 수 없음」 표시가 된다.
 DOCX 처럼 모델이 받지 못하는 형식은 지금의 「원본을 못 받는 후보」 경로로 reading 이 들어간다.
 
 ### 3.6 클라이언트

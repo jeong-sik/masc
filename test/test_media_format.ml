@@ -83,6 +83,7 @@ let describe = function
   | M.Encrypted None -> "encrypted ?"
   | M.Unknown No_document_signature -> "no_document_signature"
   | M.Unknown (Zip_package fault) -> fault_to_string fault
+  | M.Unknown (Compound_file _) -> "compound_file"
 ;;
 
 let expect expected bytes = check string expected expected (describe (M.detect bytes))

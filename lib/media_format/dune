@@ -10,7 +10,13 @@
  (name masc_media_format)
  (public_name masc.media_format)
  (wrapped false)
- (modules document_format package_xml zip_package_identity media_format)
+ (modules
+  document_format
+  package_xml
+  zip_package_identity
+  compound_file
+  compound_identity
+  media_format)
  (flags
   (:standard -w +4 -w +33 -w +37))
  ; [Document_format.all] is derived, so a new format is in it by construction.

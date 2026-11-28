@@ -5,8 +5,10 @@
 
 type unknown =
   | No_document_signature
-      (** The bytes start with neither [%PDF-] nor a ZIP signature. *)
+      (** The bytes start with none of [%PDF-], a ZIP signature and the
+          Compound File signature. *)
   | Zip_package of Zip_package_identity.fault
+  | Compound_file of Compound_identity.fault
 
 type detection =
   | Document of Document_format.t

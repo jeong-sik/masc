@@ -70,6 +70,11 @@ val rewrite : store -> snapshot -> unit write_outcome
     rewrite authority. Proven transient nonwrites retain the prior expectation. *)
 
 val require_readable : store -> (unit, board_error) result
+val reobservation_due : store -> bool
+(** Pure. True only when this store is refused because its file moved away
+    from the observation it holds (another writer appended or replaced it), so
+    one fresh read can clear the refusal. False for every other refusal and
+    for a pending publication or an unknown write (#55449). *)
 val observe_guard_refusal : store -> comments_source_observation ->
   Fs_compat.private_jsonl_guard_failure -> unit
 (** Notify only this exact current observation after a parent guard refusal.

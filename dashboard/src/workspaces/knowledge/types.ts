@@ -68,38 +68,6 @@ export function asStringArray(v: unknown): string[] {
   return v.filter((x): x is string => typeof x === 'string' && x.trim().length > 0)
 }
 
-const PARSED_ISO_CACHE_MAX = 512
-const parsedIsoMsCache = new Map<string, number>()
-
-function parseIsoTimestampMs(raw: string): number {
-  const cached = parsedIsoMsCache.get(raw)
-  if (cached !== undefined) return cached
-  const parsed = Date.parse(raw)
-  if (parsedIsoMsCache.size >= PARSED_ISO_CACHE_MAX) {
-    parsedIsoMsCache.clear()
-  }
-  parsedIsoMsCache.set(raw, parsed)
-  return parsed
-}
-
-export function formatRelativeTime(tsInput: number | string | null | undefined, nowMs = Date.now()): string {
-  if (tsInput === null || tsInput === undefined || tsInput === '') return '없음'
-  let ms: number
-  if (typeof tsInput === 'number') {
-    if (!Number.isFinite(tsInput)) return '없음'
-    ms = tsInput < 1_000_000_000_000 ? tsInput * 1000 : tsInput
-  } else {
-    const parsed = parseIsoTimestampMs(tsInput)
-    if (Number.isNaN(parsed)) return tsInput
-    ms = parsed
-  }
-  const diffSec = Math.round((nowMs - ms) / 1000)
-  if (diffSec < 45) return '방금 전'
-  if (diffSec < 3600) return `${Math.floor(diffSec / 60)}분 전`
-  if (diffSec < 86400) return `${Math.floor(diffSec / 3600)}시간 전`
-  return `${Math.floor(diffSec / 86400)}일 전`
-}
-
 export function formatBytes(bytes: number | null | undefined): string {
   if (bytes === null || bytes === undefined || !Number.isFinite(bytes)) return '없음'
   if (bytes < 1024) return `${Math.trunc(bytes)} B`

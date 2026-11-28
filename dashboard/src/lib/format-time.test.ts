@@ -3,6 +3,7 @@ import {
   formatElapsed, formatDuration, formatDurationCompound, formatDurationMs,
   formatElapsedCompact, formatDelta, formatCompactAge,
   formatRelativeSec, formatRelativeUntilSec, formatTimeAgo,
+  formatRelativeTime, formatScheduledTime,
 } from './format-time'
 
 describe('formatElapsed', () => {
@@ -82,5 +83,65 @@ describe('relative time finite guards', () => {
 
   it('returns 정보 없음 for invalid timestamps instead of throwing', () => {
     expect(formatTimeAgo('not-a-date')).toBe('정보 없음')
+  })
+})
+
+// Local wall-clock times, so each case reads the same in any time zone.
+const at = (day: number, hour: number, minute = 0, second = 0) =>
+  new Date(2026, 10, day, hour, minute, second).getTime()
+
+describe('formatRelativeTime', () => {
+  it('reads a calendar day in whole local days, not from UTC midnight', () => {
+    const now = at(28, 15)
+    expect(formatRelativeTime('2026-11-28', now)).toBe('오늘')
+    expect(formatRelativeTime('2026-11-27', now)).toBe('어제')
+    expect(formatRelativeTime('2026-11-24', now)).toBe('4일 전')
+  })
+
+  it('reads a calendar day by the local date just after midnight', () => {
+    const now = at(28, 0, 30)
+    expect(formatRelativeTime('2026-11-28', now)).toBe('오늘')
+    expect(formatRelativeTime('2026-11-27', now)).toBe('어제')
+  })
+
+  it('reads an instant in seconds, minutes, hours and days', () => {
+    const now = at(28, 15)
+    expect(formatRelativeTime(new Date(at(28, 14, 59, 30)).toISOString(), now)).toBe('방금 전')
+    expect(formatRelativeTime(new Date(at(28, 14, 57)).toISOString(), now)).toBe('3분 전')
+    expect(formatRelativeTime(new Date(at(28, 13)).toISOString(), now)).toBe('2시간 전')
+    expect(formatRelativeTime(new Date(at(25, 15)).toISOString(), now)).toBe('3일 전')
+  })
+
+  it('takes unix seconds and unix milliseconds alike', () => {
+    const now = at(28, 15)
+    const fiveMinutesAgoMs = at(28, 14, 55)
+    expect(formatRelativeTime(fiveMinutesAgoMs, now)).toBe('5분 전')
+    expect(formatRelativeTime(fiveMinutesAgoMs / 1000, now)).toBe('5분 전')
+  })
+
+  it('reads an event ahead of the local clock as now', () => {
+    const now = at(28, 15)
+    expect(formatRelativeTime(new Date(at(28, 15, 0, 12)).toISOString(), now)).toBe('방금 전')
+    expect(formatRelativeTime('2026-11-29', now)).toBe('오늘')
+  })
+
+  it('says 없음 without a time and shows text that is no time as written', () => {
+    const now = at(28, 15)
+    expect(formatRelativeTime(null, now)).toBe('없음')
+    expect(formatRelativeTime('', now)).toBe('없음')
+    expect(formatRelativeTime(Number.NaN, now)).toBe('없음')
+    expect(formatRelativeTime('2026-02-30', now)).toBe('2026-02-30')
+    expect(formatRelativeTime('not-a-date', now)).toBe('not-a-date')
+  })
+})
+
+describe('formatScheduledTime', () => {
+  it('reads a time ahead of now as ahead, and a passed one as past', () => {
+    const now = at(28, 15)
+    expect(formatScheduledTime(new Date(at(28, 15, 0, 20)).toISOString(), now)).toBe('20초 후')
+    expect(formatScheduledTime(new Date(at(28, 17)).toISOString(), now)).toBe('2시간 후')
+    expect(formatScheduledTime(new Date(at(28, 14, 58)).toISOString(), now)).toBe('2분 전')
+    expect(formatScheduledTime('2026-11-29', now)).toBe('내일')
+    expect(formatScheduledTime('2026-12-01', now)).toBe('3일 후')
   })
 })

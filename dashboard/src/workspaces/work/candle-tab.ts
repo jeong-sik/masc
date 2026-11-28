@@ -24,6 +24,7 @@ import {
 import { markViewSynced } from '../../core/observer'
 import { observedAbsent, observedValue, resourceCache } from '../../core/resource-cache'
 import { apiGet, apiGetV2, apiMutate } from '../../core/transport'
+import { formatRelativeTime } from '../../lib/format-time'
 import { err, ok } from '../../lib/result'
 import { KeeperBadge } from '../../components/keeper-badge'
 import { DataTable, type DataTableColumn } from '../../components/primitives/data-table'
@@ -36,7 +37,6 @@ import {
   buildCandleTrendSeries,
   decodeCandleLedger,
   formatMilliCandles,
-  formatRelativeTime,
   isRecord,
   readWorkspacePrecondition,
   type CandleBalanceRow,

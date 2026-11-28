@@ -67,12 +67,125 @@ export function formatRelativeAgeMs(ageMs: number): string {
   return formatRelativeSec(Math.max(0, Math.round(ageMs / 1000)))
 }
 
-/** Relative time from ISO string — "3분 전", "2시간 전" etc. Uses Intl.RelativeTimeFormat. */
-export function relativeTime(iso?: string | null, fallback: string = NO_TIME_INFO): string {
-  if (!iso) return fallback
-  const ts = Date.parse(iso)
-  if (Number.isNaN(ts)) return iso
-  return formatRelativeAgeMs(Date.now() - ts)
+const MS_PER_DAY = SECONDS_PER_DAY * 1000
+const RECENT_SECONDS = 45
+const CALENDAR_DAY_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/
+const PARSED_ISO_CACHE_MAX = 512
+const parsedIsoMsCache = new Map<string, number>()
+
+/** What a relative label is made from. */
+type RelativeTimeInput =
+  | { readonly kind: 'instant'; readonly ms: number }
+  | { readonly kind: 'day'; readonly localMidnightMs: number }
+  | { readonly kind: 'unreadable'; readonly raw: string }
+
+function parseIsoMs(raw: string): number {
+  const cached = parsedIsoMsCache.get(raw)
+  if (cached !== undefined) return cached
+  const parsed = Date.parse(raw)
+  if (parsedIsoMsCache.size >= PARSED_ISO_CACHE_MAX) parsedIsoMsCache.clear()
+  parsedIsoMsCache.set(raw, parsed)
+  return parsed
+}
+
+/** Local midnight of `YYYY-MM-DD`, or null when it names no real day (`2026-02-30`). */
+function localMidnightOfCalendarDay(raw: string): number | null {
+  const match = CALENDAR_DAY_PATTERN.exec(raw)
+  if (match === null) return null
+  const year = Number(match[1])
+  const monthIndex = Number(match[2]) - 1
+  const day = Number(match[3])
+  const date = new Date(year, monthIndex, day)
+  const real = date.getFullYear() === year && date.getMonth() === monthIndex && date.getDate() === day
+  return real ? date.getTime() : null
+}
+
+function readRelativeTimeInput(tsInput: number | string): RelativeTimeInput | null {
+  if (typeof tsInput === 'number') {
+    if (!Number.isFinite(tsInput)) return null
+    return { kind: 'instant', ms: normalizeTimestampMs(tsInput) }
+  }
+  if (CALENDAR_DAY_PATTERN.test(tsInput)) {
+    const localMidnightMs = localMidnightOfCalendarDay(tsInput)
+    return localMidnightMs === null
+      ? { kind: 'unreadable', raw: tsInput }
+      : { kind: 'day', localMidnightMs }
+  }
+  const ms = parseIsoMs(tsInput)
+  return Number.isNaN(ms) ? { kind: 'unreadable', raw: tsInput } : { kind: 'instant', ms }
+}
+
+/** What a time ahead of now reads as. An event (a write, a post, a vote)
+ *  cannot lie ahead, so one that does only shows the two clocks disagree and
+ *  reads as now. A schedule's next run can lie ahead. */
+type AheadOfNow = 'reads_as_now' | 'reads_as_ahead'
+
+function formatInstantFromNow(diffSec: number, ahead: AheadOfNow): string {
+  if (diffSec < 0) {
+    switch (ahead) {
+      case 'reads_as_now':
+        return '방금 전'
+      case 'reads_as_ahead': {
+        const aheadSec = -diffSec
+        if (aheadSec < SECONDS_PER_MINUTE) return `${aheadSec}초 후`
+        if (aheadSec < SECONDS_PER_HOUR) return `${Math.floor(aheadSec / SECONDS_PER_MINUTE)}분 후`
+        if (aheadSec < SECONDS_PER_DAY) return `${Math.floor(aheadSec / SECONDS_PER_HOUR)}시간 후`
+        return `${Math.floor(aheadSec / SECONDS_PER_DAY)}일 후`
+      }
+    }
+  }
+  if (diffSec < RECENT_SECONDS) return '방금 전'
+  if (diffSec < SECONDS_PER_HOUR) return `${Math.floor(diffSec / SECONDS_PER_MINUTE)}분 전`
+  if (diffSec < SECONDS_PER_DAY) return `${Math.floor(diffSec / SECONDS_PER_HOUR)}시간 전`
+  return `${Math.floor(diffSec / SECONDS_PER_DAY)}일 전`
+}
+
+function formatDayFromToday(daysAgo: number, ahead: AheadOfNow): string {
+  if (daysAgo < 0) {
+    switch (ahead) {
+      case 'reads_as_now':
+        return '오늘'
+      case 'reads_as_ahead':
+        return daysAgo === -1 ? '내일' : `${-daysAgo}일 후`
+    }
+  }
+  if (daysAgo === 0) return '오늘'
+  if (daysAgo === 1) return '어제'
+  return `${daysAgo}일 전`
+}
+
+function formatRelative(tsInput: number | string | null | undefined, nowMs: number, ahead: AheadOfNow): string {
+  if (tsInput === null || tsInput === undefined || tsInput === '') return '없음'
+  const input = readRelativeTimeInput(tsInput)
+  if (input === null) return '없음'
+  switch (input.kind) {
+    case 'unreadable':
+      return input.raw
+    case 'instant':
+      return formatInstantFromNow(Math.round((nowMs - input.ms) / 1000), ahead)
+    case 'day': {
+      const today = new Date(nowMs)
+      today.setHours(0, 0, 0, 0)
+      return formatDayFromToday(Math.round((today.getTime() - input.localMidnightMs) / MS_PER_DAY), ahead)
+    }
+  }
+}
+
+/**
+ * How long ago an event happened, from unix seconds or milliseconds, an ISO
+ * instant, or a calendar day: "방금 전", "3분 전", "어제", "4일 전". A calendar
+ * day (`2026-11-28`) has no time of day, so it reads in whole days. A time
+ * ahead of now reads as now. Returns "없음" without input and the text itself
+ * when it is no time.
+ */
+export function formatRelativeTime(tsInput: number | string | null | undefined, nowMs = Date.now()): string {
+  return formatRelative(tsInput, nowMs, 'reads_as_now')
+}
+
+/** {@link formatRelativeTime} for a time that can lie ahead, such as a
+ *  schedule's next run: "3분 후", "내일", and "2분 전" once it has passed. */
+export function formatScheduledTime(tsInput: number | string | null | undefined, nowMs = Date.now()): string {
+  return formatRelative(tsInput, nowMs, 'reads_as_ahead')
 }
 
 /** Format elapsed seconds — "3초", "5분", "2시간". Returns NO_TIME_INFO for invalid. */

@@ -15,6 +15,7 @@ import { authSession, canUseSingleUserTokenAdmin, currentSessionEpoch, isEpochCu
 import { markViewSnapshot } from '../../core/observer'
 import { resourceCache, type Observed } from '../../core/resource-cache'
 import { apiGet } from '../../core/transport'
+import { formatRelativeTime } from '../../lib/format-time'
 import { containsWorkspaceMediaRef } from '../../lib/keeper-media'
 import { ok } from '../../lib/result'
 import {
@@ -34,7 +35,6 @@ import {
   asString,
   decodePublishedArtifactItem,
   formatBytes,
-  formatRelativeTime,
   isRecord,
   type ArtifactDocumentData,
   type PublishedArtifactItem,

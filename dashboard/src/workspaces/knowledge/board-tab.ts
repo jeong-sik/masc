@@ -34,6 +34,7 @@ import {
 } from '../../core/observer'
 import { resourceCache } from '../../core/resource-cache'
 import { apiGet, apiMutate } from '../../core/transport'
+import { formatRelativeTime } from '../../lib/format-time'
 import { ok } from '../../lib/result'
 import { KeeperBadge } from '../../components/keeper-badge'
 import { MasterDetail } from '../../components/primitives/master-detail'
@@ -48,7 +49,6 @@ import {
   decodeBoardComment,
   decodeBoardPost,
   foldSuccessionChains,
-  formatRelativeTime,
   isRecord,
   partitionReactions,
   type BoardAudience,

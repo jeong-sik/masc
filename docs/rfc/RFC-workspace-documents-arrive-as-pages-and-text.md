@@ -176,10 +176,8 @@ LibreOffice 를 호스트에서 돌리지 않는다. 문서 안의 외부 링크
 
 **문서 탓과 변환기 탓을 가른다**
 
-- 변환 도구가 정상 종료하면서 실패를 알렸을 때만 worker 가 manifest 에 refusal 을 적는다.
-  예를 들면 non-zero exit 이고 signal 이 아니며, 결과 파일이 없는 경우다.
-- 도구가 signal 로 끝났거나(메모리 초과 포함) worker 가 manifest 를 쓰지 못했으면 `Unavailable` 이다.
-- 그래서 메모리 초과가 「문서가 깨졌다」로 영구 저장되지 않는다.
+- 형식 검사나 변환기 어댑터가 문서 자체의 실패(확인된 암호 보호, 손상, 미지원 기능)를 판정한 경우에만 `Refused` 를 기록한다. 종료 코드와 결과 파일 부재만으로는 문서 손상을 판정할 수 없다.
+- signal, timeout, profile 충돌, 저장 공간 부족, 판정할 수 없는 non-zero 종료나 manifest 부재는 `Unavailable` 이다. 이 결과는 저장하지 않아, 환경을 고친 뒤 같은 문서를 다시 변환할 수 있다.
 
 **한 번에 하나**
 
@@ -300,9 +298,9 @@ type outcome = Rendered of rendition | Refused of refusal | Unavailable of unava
 ### 3.4 HTTP
 
 기존 `/api/v1/attachments/<id>` 아래에 붙인다. 권한과 ephemeral 범위는 지금의 `read_permission` 을 그대로 따른다.
-모든 응답은 지금 첨부 응답의 머리글을 그대로 쓴다:
-`X-Content-Type-Options: nosniff`, `Content-Security-Policy: default-src 'none'; sandbox`, 내용 digest `ETag`, `immutable` 캐시
-(`server_routes_http_routes_attachments.mli:11-17`).
+모든 응답에 `X-Content-Type-Options: nosniff` 와 `Content-Security-Policy: default-src 'none'; sandbox` 를 붙인다.
+파생 결과의 요청 URL 은 원본 첨부를 가리키므로 `Rendered`·`Refused` 는 `Cache-Control: private, no-cache` 를 써서 다시 확인한다. `ETag` 는 변환기 키와 응답 표현의 digest 를 함께 포함하며, 새 변환기 판이면 이전 ETag 로 304 를 보내지 않는다. `Unavailable` 은 `Cache-Control: no-store` 다.
+검증은 임시 실패 뒤 같은 URL 의 재요청이 성공하는지, 그리고 변환기 판 변경 뒤 옛 ETag 가 새 결과를 가리지 않는지 확인한다.
 
 | 경로 | 응답 |
 |---|---|

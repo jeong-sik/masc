@@ -260,7 +260,7 @@ type save_result =
 | 경로 | 하는 일 |
 |---|---|
 | `POST /api/v1/artifact-drafts` | `artifact_id`·`revision` 으로 원고를 연다(§4.5 open) |
-| `GET /api/v1/artifact-drafts/<artifact_id>` | 원고 전체. `?generation=<g>&since=<revision>` 이면 그 뒤 바뀐 블록과 지운 id |
+| `GET /api/v1/artifact-drafts/<artifact_id>` | 원고 전체. `?generation=<g>&since=<revision>` 이면 그 뒤 바뀐 블록, 지운 id, 현재 전체 블록 id 순서 |
 | `POST …/<artifact_id>/saves` | `save` 하나. 결과는 `save_result` |
 | `POST …/<artifact_id>/discussion` | 댓글 명령(§4.4) |
 | `POST …/<artifact_id>/publications` | 게시(§4.5 publish) |
@@ -273,6 +273,7 @@ type save_result =
 - 화면은 무효화를 받으면 마지막으로 본 리비전으로 `GET …?since=` 를 부른다.
   무효화가 합쳐지거나, 연결이 끊겼다 다시 이어져도 같은 요청이다. 그래서 빠지는 저장이 없다.
 - `generation` 이 다르거나 `since` 가 그 원고에 없는 리비전이면 원고 전체를 돌려준다.
+- `since` 응답은 현재 리비전의 `block_order` 를 함께 보낸다. 클라이언트는 바뀐 블록을 적용하고 지운 id 를 제거한 뒤 그 순서대로 나열한다. 목록과 로컬 블록이 맞지 않으면 전체를 다시 읽는다. Keeper 의 `read since` 도 같은 모양을 쓴다. 형제 사이 삽입과 내용 변경 없는 이동을 델타로 복원하는 시험을 둔다.
 - 사람이 편집 중인 블록이 바뀌었으면 덮어쓰지 않는다. 「다른 쪽이 이 블록을 고쳤어요」를 띄우고, 저장할 때 §4.2 의 병합을 탄다.
 - 블록 옆의 「마지막으로 고친 이」는 블록의 `edited_by`·`edited_at` 이다. 따로 저장하는 presence 상태는 없다.
   가시성은 authority 가 아니라 projection 이다.
@@ -312,8 +313,9 @@ type anchor_state =
 - 그래서 받는 Keeper 를 typed 값으로 넘기는 입구가 있어야 한다. 원고·스레드·블록을 어디에 실을지는 열린 결정 1 이다(§11).
 - Keeper 마다 메시지 하나를 보낸다. request id(`Workspace_request_id.t`)는 (댓글 사건, Keeper)마다 하나다. 그 id 를 댓글 사건에 같이 적는다.
 - audience 는 `Fleet_conversation` 이다. 사람이 Keeper 에게 건 말이기 때문이다.
-- 전달 결과는 여섯 가지다: `Passive`·`Pending`·`Accepted`·`Already_accepted`·`Deferred _`·`Rejected _`(`workspace_broadcast.mli:26-32`).
-  `Pending` 은 나중에 바뀐다. 그래서 결과를 저장하지 않는다. 스레드를 읽을 때 `find_broadcast`(`:165-168`)로 그 행을 다시 읽어 댓글 옆에 보인다.
+- 댓글 저장 응답은 Keeper 별 전달 결과를 별도로 싣는다. 전송이 거절됐거나 전송 오류가 반환되면 실패 이유를 즉시 보여 주고, 댓글 저장 결과는 그대로 유지한다.
+- 스레드를 읽을 때는 저장된 request id 로 `find_broadcast` 를 조회한다. 행이 있으면 `Passive`·`Pending`·`Accepted`·`Already_accepted`·`Deferred _`·`Rejected _` 를 그린다. `Ok None` 은 「전달 기록 없음」, 조회 `Error` 는 「전달 확인 불가」로 표시한다. 기록 없음은 댓글 커밋 직후 프로세스가 중단된 경우도 포함하므로 전달 성공을 뜻하지 않는다.
+- 검증은 전송 오류와 댓글 커밋 직후 중단, 이후 조회 오류를 각각 재현해 사용자에게 보이는 결과를 확인한다.
 - 이 메시지는 계약이 아니다. 답할 의무, 기다림, 재시도를 만들지 않는다. Keeper 는 답할지, 고칠지, 아무것도 안 할지 고를 수 있다.
 
 ### 4.5 Keeper 도구

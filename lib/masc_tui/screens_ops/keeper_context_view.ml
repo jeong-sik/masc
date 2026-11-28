@@ -1740,6 +1740,8 @@ let draw_context_tab grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
           draw_input_map_subtab grid ~rect:body_r ~theme ~model ~st
       | Keeper_context_store.Ctx_response ->
           draw_response_subtab grid ~rect:body_r ~theme ~model ~st
+      | Keeper_context_store.Ctx_prompt_blocks ->
+          Keeper_prompt_blocks_view.draw grid ~rect:body_r ~theme ~model ~st
 
 (* ---------- Per-Keeper Tool Calls Tab ---------- *)
 

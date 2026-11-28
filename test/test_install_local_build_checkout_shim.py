@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""A local install rebuilds a source-built guest shim from its checkout (#53164)."""
+"""A local install rebuilds a guest shim of another source from its checkout (#53164)."""
 import os
 from pathlib import Path
 import shutil
@@ -93,9 +93,57 @@ def no_release_env(root):
     return env
 
 
-def install(root, repo, build, base, *more):
+# An mv that refuses the one rename whose source and target match the shell
+# patterns [source] and [target], and is the real mv for every other.
+# no_release_env puts the hooks directory first on PATH.
+def refusing_mv(root, source, target):
+    hooks = root / "hooks"
+    hooks.mkdir(exist_ok=True)
+    mv = hooks / "mv"
+    mv.write_text(f'''#!/bin/sh
+for target; do :; done
+case "$1 -> $target" in
+  {source}" -> "{target}) echo "fixture: mv refused" >&2; exit 1 ;;
+esac
+exec {shutil.which("mv")} "$@"
+''')
+    mv.chmod(0o755)
+
+
+# An mv that sends [signal] to the shell that called it, the subshell of the
+# step, before each rename whose source and target match one of the shell
+# pattern pairs in [renames]. It then waits, so a shell that runs its cleanup
+# the moment the signal arrives runs it beside a rename that has not happened
+# yet. It is the real mv for every other rename.
+def signalling_mv(root, signal, renames):
+    hooks = root / "hooks"
+    hooks.mkdir(exist_ok=True)
+    mv = hooks / "mv"
+    arms = "\n".join(f'  {source}" -> "{target}) kill -{signal} "$PPID"; sleep 0.3 ;;'
+                     for source, target in renames)
+    mv.write_text(f'''#!/bin/sh
+for target; do :; done
+case "$1 -> $target" in
+{arms}
+esac
+exec {shutil.which("mv")} "$@"
+''')
+    mv.chmod(0o755)
+
+
+# The shells a host runs the script with: the bash first on PATH and, where
+# that is another program, /bin/bash (3.2 on macOS).
+def shells():
+    found = {}
+    for candidate in (shutil.which("bash"), "/bin/bash"):
+        if candidate and Path(candidate).exists():
+            found.setdefault(os.path.realpath(candidate), candidate)
+    return list(found.values())
+
+
+def install(root, repo, build, base, *more, shell="bash"):
     return subprocess.run(
-        ["bash", str(repo / "scripts" / local_build.SCRIPT.name), "--skip-build",
+        [shell, str(repo / "scripts" / local_build.SCRIPT.name), "--skip-build",
          "--build-dir", str(build), "--prefix", str(root / "prefix"),
          "--base-path", str(base), *more],
         env=no_release_env(root), cwd=root, capture_output=True, text=True)
@@ -215,9 +263,17 @@ class CheckoutGuestShim(unittest.TestCase):
             self.assertIn(f"so no shim was built for {shim}", result.stderr)
             self.assertIn(f"{BY_HAND} arm64 && install -m 755 dist/remote-ssh/masc-exec-shim-linux-arm64",
                           result.stderr)
+            # Docker is what a host without microVM Keepers is least likely to
+            # have, so the refusal says the shim can go instead.
+            self.assertIn(f"A workspace that runs no microVM Keeper needs no shim: remove {shim} and install again.",
+                          result.stderr)
             # printf %q escapes the space in the fixture's workspace path.
             quoted = str(shim).replace(" ", "\\ ")
             self.assertIn(f"&& mv {quoted}.partial {quoted}", result.stderr)
+            # The command ends the message: a period after it was copied into
+            # the shell as part of the shim's name.
+            self.assertTrue(result.stderr.rstrip("\n").endswith(f"&& mv {quoted}.partial {quoted}"),
+                            result.stderr)
 
     # The checkout changed after the server was built: its shim would be
     # refused like the old one.
@@ -233,22 +289,178 @@ class CheckoutGuestShim(unittest.TestCase):
                 declared = "none" if source is None else source
                 self.assertIn(f"declares {declared} instead", result.stderr)
 
-    # A release shim keeps its sidecar and goes through --refresh-guest-shim.
-    def test_a_shim_with_a_sidecar_is_left_alone(self):
+    # 2026-11-21: a release shim with its sidecar was put under a checkout
+    # server. The install left it alone and ended 0 at least fourteen times,
+    # every restarted server refused it, and three microVM Keepers ran
+    # no guest command for 73 hours. The sidecar says where the bytes came
+    # from; whether this build's server runs them is the identity they declare.
+    def test_a_release_shim_of_another_source_is_rebuilt_and_loses_its_sidecar(self):
+        for (machine, arch), old_source in ((arch, source) for arch in GUEST_ARCHES
+                                            for source in (OTHER_SOURCE, None)):
+            with self.subTest(arch=arch, old_source=old_source), \
+                    tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary).resolve()
+                repo = checkout(root)
+                old = elf(machine, old_source)
+                base, shim, sidecar = guest_shim.workspace_with_shim(
+                    root, content=old, sidecar=guest_shim.sidecar_line(old))
+                result = install(root, repo, guest_shim.build_naming(root), base)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                [call] = build_calls(repo)
+                self.assertTrue(call.startswith(
+                    f"{repo} --arch {arch} --out dist/remote-ssh/install-local-build."), call)
+                self.assertEqual(shim.read_bytes(), elf(machine, BUILD_SOURCE))
+                self.assertFalse(sidecar.exists(),
+                                 "the sidecar of the replaced shim stayed beside a shim it does not describe")
+                self.assertEqual(guest_shim.shim_directory(shim), ["masc-exec-shim", PREVIOUS])
+                self.assertEqual((shim.parent / PREVIOUS).read_bytes(), old)
+                self.assertIn(f"{sidecar} described the replaced shim and was removed", result.stdout)
+                self.assertFalse((root / "release-requested").exists(),
+                                 "a default install requested a release")
+                self.assertTrue((root / "prefix/masc").is_file())
+
+    # The sidecar still describes these bytes, so it stays with them.
+    # The server trims the sidecar and reads what precedes the first space, so
+    # a digest alone, or one after a blank line, verifies the shim as well.
+    def test_a_release_shim_of_this_build_keeps_its_sidecar_and_nothing_is_built(self):
+        current = elf(EM_AARCH64, BUILD_SOURCE)
+        digest = guest_shim.sha256(current)
+        for label, recorded in (
+                ("the release line", guest_shim.sidecar_line(current)),
+                ("the digest alone", digest),
+                ("after a blank line", f"\n\t{digest} \n")):
+            with self.subTest(label), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary).resolve()
+                repo = checkout(root)
+                base, shim, sidecar = guest_shim.workspace_with_shim(root, content=current, sidecar=recorded)
+                inode = shim.stat().st_ino
+                result = install(root, repo, guest_shim.build_naming(root), base)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(build_calls(repo), [])
+                self.assertEqual(shim.stat().st_ino, inode, "a current shim was replaced")
+                self.assertEqual(sidecar.read_text(), recorded)
+                self.assertEqual(guest_shim.shim_directory(shim), guest_shim.PAIR)
+                self.assertFalse((root / "release-requested").exists(),
+                                 "a default install requested a release")
+                self.assertTrue((root / "prefix/masc").is_file())
+
+    # A shim built from this checkout was put over a release shim by hand and
+    # the sidecar stayed. The identity is this build's, and the server still
+    # refuses the pair (microvm_shim_hash_mismatch) because the sidecar names
+    # the release bytes that are gone.
+    def test_a_shim_of_this_build_loses_a_sidecar_that_names_other_bytes(self):
+        for label, written in (
+                ("the sha256 of other bytes", guest_shim.sidecar_line(elf(EM_AARCH64, OTHER_SOURCE))),
+                ("no sha256", "not a checksum line\n"),
+                ("empty", "")):
+            with self.subTest(label), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary).resolve()
+                repo = checkout(root)
+                current = elf(EM_AARCH64, BUILD_SOURCE)
+                base, shim, sidecar = guest_shim.workspace_with_shim(root, content=current, sidecar=written)
+                inode = shim.stat().st_ino
+                result = install(root, repo, guest_shim.build_naming(root), base)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(build_calls(repo), [])
+                self.assertEqual(shim.stat().st_ino, inode, "a current shim was replaced")
+                self.assertFalse(sidecar.exists(), "a sidecar the server refuses the shim for stayed")
+                self.assertEqual(guest_shim.shim_directory(shim), ["masc-exec-shim"])
+                self.assertIn(f"removed {sidecar}", result.stdout)
+                self.assertTrue((root / "prefix/masc").is_file())
+
+    # A refused rebuild leaves the pair as it was: the server in place still
+    # runs that shim, and no new server is put beside it.
+    def test_a_failed_build_leaves_a_release_shim_and_its_sidecar(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary).resolve()
-            repo = checkout(root)
+            repo = checkout(root, build_fails=True)
             old = elf(EM_AARCH64, OTHER_SOURCE)
             recorded = guest_shim.sidecar_line(old)
             base, shim, sidecar = guest_shim.workspace_with_shim(root, content=old, sidecar=recorded)
             result = install(root, repo, guest_shim.build_naming(root), base)
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(build_calls(repo), [])
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("nothing installed", result.stderr)
             self.assertEqual(shim.read_bytes(), old)
             self.assertEqual(sidecar.read_text(), recorded)
             self.assertEqual(guest_shim.shim_directory(shim), guest_shim.PAIR)
-            self.assertNotIn("guest exec shim", result.stdout + result.stderr)
-            self.assertTrue((root / "prefix/masc").is_file())
+            self.assertEqual(leftover_builds(repo), [])
+            self.assertFalse((root / "prefix").exists(),
+                             "the server was replaced beside a shim it refuses")
+            # A shim put in place by hand beside the old sidecar would be
+            # refused for its sha256, so the command removes the sidecar first.
+            quoted = str(shim).replace(" ", "\\ ")
+            self.assertIn(f"&& rm -f {quoted}.sha256 && mv {quoted}.partial {quoted}", result.stderr)
+
+    # The two renames that touch the pair. When either is refused the install
+    # stops with the release shim and its sidecar as they were; the copy in
+    # masc-exec-shim.previous is the one thing a late refusal leaves.
+    def test_a_refused_rename_leaves_a_release_shim_with_its_sidecar(self):
+        for label, source, target, said in (
+                ("the sidecar is not set aside", "*/masc-exec-shim.sha256", "*",
+                 "could not be set aside"),
+                ("the built shim is not renamed", "*/masc-exec-shim.partial.*", "*/masc-exec-shim",
+                 "could not be renamed")):
+            with self.subTest(label), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary).resolve()
+                repo = checkout(root)
+                old = elf(EM_AARCH64, OTHER_SOURCE)
+                recorded = guest_shim.sidecar_line(old)
+                base, shim, sidecar = guest_shim.workspace_with_shim(root, content=old, sidecar=recorded)
+                refusing_mv(root, source, target)
+                result = install(root, repo, guest_shim.build_naming(root), base)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("fixture: mv refused", result.stderr)
+                self.assertIn(said, result.stderr)
+                self.assertIn("nothing installed", result.stderr)
+                self.assertEqual(shim.read_bytes(), old)
+                self.assertEqual(sidecar.read_text(), recorded)
+                self.assertEqual(guest_shim.shim_directory(shim),
+                                 sorted([*guest_shim.PAIR, PREVIOUS]))
+                self.assertEqual(leftover_builds(repo), [])
+                self.assertFalse((root / "prefix").exists(),
+                                 "the server was replaced beside a shim it refuses")
+
+    # A signal reaches the step while one of the two renames that touch the
+    # pair is under way. With only an EXIT trap, bash 5 ran the cleanup at once
+    # on SIGTERM, beside a rename still to happen, and left the new shim beside
+    # the old sidecar, the pair the server refuses; bash 3.2 ran no cleanup on
+    # SIGTERM and SIGHUP and left the sidecar under its set-aside name. The
+    # install ends with the signal's status and replaces no server. A second
+    # signal, sent while the cleanup puts the sidecar back, does not cut the
+    # cleanup short.
+    def test_a_signal_during_either_rename_leaves_a_pair_the_server_accepts(self):
+        set_aside = ("*/masc-exec-shim.sha256", "*")
+        put_back = ("*/masc-exec-shim.sha256.replaced.*", "*/masc-exec-shim.sha256")
+        swap = ("*/masc-exec-shim.partial.*", "*/masc-exec-shim")
+        cases = (
+            ("the sidecar is being set aside", [set_aside], False),
+            ("the built shim is being renamed", [swap], True),
+            ("the sidecar is being set aside, and again while it is put back", [set_aside, put_back], False))
+        for shell in shells():
+            for signal, status in (("HUP", 129), ("INT", 130), ("TERM", 143)):
+                for label, renames, swapped in cases:
+                    with self.subTest(shell=shell, signal=signal, during=label), \
+                            tempfile.TemporaryDirectory() as temporary:
+                        root = Path(temporary).resolve()
+                        repo = checkout(root)
+                        old = elf(EM_AARCH64, OTHER_SOURCE)
+                        recorded = guest_shim.sidecar_line(old)
+                        base, shim, sidecar = guest_shim.workspace_with_shim(
+                            root, content=old, sidecar=recorded)
+                        signalling_mv(root, signal, renames)
+                        result = install(root, repo, guest_shim.build_naming(root), base, shell=shell)
+                        self.assertEqual(result.returncode, status, result.stderr)
+                        if swapped:
+                            self.assertEqual(shim.read_bytes(), elf(EM_AARCH64, BUILD_SOURCE))
+                            self.assertEqual(guest_shim.shim_directory(shim), ["masc-exec-shim", PREVIOUS])
+                        else:
+                            self.assertEqual(shim.read_bytes(), old)
+                            self.assertEqual(guest_shim.shim_directory(shim),
+                                             sorted([*guest_shim.PAIR, PREVIOUS]))
+                            self.assertEqual(sidecar.read_text(), recorded)
+                        self.assertEqual(leftover_builds(repo), [])
+                        self.assertFalse((root / "prefix").exists(),
+                                         "the server was replaced by an install a signal ended")
 
     # No guess from this shell: an architecture the header does not name is
     # refused before anything is built.

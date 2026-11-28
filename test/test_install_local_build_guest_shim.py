@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Local installs refresh a workspace's release guest shim only when requested."""
+"""--refresh-guest-shim replaces a workspace's release guest shim with the build's release asset."""
 import hashlib
 import os
 from pathlib import Path
@@ -229,27 +229,6 @@ class GuestShim(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertFalse((base / ".masc/microvm").exists())
             self.assertNotIn("guest exec shim", result.stdout + result.stderr)
-
-    def test_default_install_leaves_the_shim_and_asks_no_release(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary).resolve()
-            base, shim, sidecar = workspace_with_shim(root)
-            hooks = root / "hooks"
-            hooks.mkdir()
-            requested = root / "release-requested"
-            curl = hooks / "curl"
-            curl.write_text(f'#!/bin/sh\ntouch "{requested}"\nexit 99\n')
-            curl.chmod(0o755)
-            env = local_build.unnamed_env(root)
-            env["PATH"] = str(hooks) + os.pathsep + env["PATH"]
-            result = install(root, build_naming(root), release_base(root), base,
-                             env=env, refresh=False)
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(shim.read_bytes(), OLD_SHIM)
-            self.assertEqual(sidecar.read_text(), sidecar_line(OLD_SHIM))
-            self.assertFalse(requested.exists(), "a default install requested a release")
-            self.assertNotIn("guest exec shim", result.stdout + result.stderr)
-            self.assertTrue((root / "prefix/masc").is_file())
 
     # A sidecar that names no release asset says nothing about which
     # architecture to fetch, and a guess could install the wrong one.

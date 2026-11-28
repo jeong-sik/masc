@@ -140,12 +140,20 @@ keeper 를 돌리지 않는 호스트는 `--no-guest-shim` 으로 건너뛴다.
 같은 버전이 이미 깔려 있으면 설치기는 shim 도 그대로 둔다. shim 만 다시 받으려면
 `scripts/install.sh --version vX.Y.Z --force --base-path <workspace>` 로 돌린다.
 
-평소 로컬 빌드 설치는 릴리즈 shim(sidecar 가 있는 shim)을 그대로 두며 릴리즈를 조회하지 않는다.
-sidecar 가 없는 shim 은 소스 빌드다. 이 shim 의 소스 신원이 새 서버와 다르면
-설치가 서버를 바꾸기 전에 같은 checkout 에서 shim 을 다시 빌드한다(아래 「직접 빌드」).
-microVM 에 서버·shim 변경을 배포하거나 `remote_shim_outdated` 를 해결할 때는
-`scripts/install-local-build.sh --refresh-guest-shim` 으로 이미 있는 릴리즈 shim 을
-맞춘다. 빌드가 끝났으면 `--skip-build` 도 붙인다. 새로 놓지는 않는다.
+평소 로컬 빌드 설치는 릴리즈를 조회하지 않는다. 작업 공간 shim 의 소스 신원이 새
+서버와 다르면(신원을 안 적은 shim 포함) 설치가 서버를 바꾸기 전에 같은 checkout 에서
+shim 을 다시 빌드한다(아래 「직접 빌드」). 릴리즈 shim(sidecar 가 있는 shim)도 같다.
+이때 옛 sidecar 는 지운다. 옛 바이트의 sha256 이라서, 남기면 서버가 새 shim 을
+`microvm_shim_hash_mismatch` 로 거절한다. 신원이 이미 같은 shim 은 sidecar 와 함께 그대로 둔다.
+단 그 sidecar 가 shim 의 sha256 을 적고 있지 않으면 sidecar 를 지운다(손으로 shim 만 바꿔 넣은 경우).
+microVM Keeper 를 돌리지 않는 workspace 는 shim 이 필요 없다. 다시 빌드할 수 없으면(Docker 없음)
+`masc-exec-shim` 을 지우고 설치한다.
+checkout 에서 고친 서버·shim 을 microVM 에 배포할 때는 옵션 없이
+`scripts/install-local-build.sh` 를 돌린다. 위에 적은 대로 신원이 다른 shim 을 다시 빌드한다.
+`--refresh-guest-shim` 은 이미 있는 릴리즈 shim 을 그 릴리즈의 자산으로 맞춘다.
+빌드한 서버가 그 릴리즈와 같은 소스일 때만 shim 을 바꾼다. checkout 빌드는 릴리즈를 읽으면
+아래 표의 소스 신원 행에서 멈추고, 릴리즈를 못 읽으면 WARN 한 줄 뒤 shim 을 둔 채 설치를 계속한다.
+빌드가 끝났으면 `--skip-build` 도 붙인다. 새로 놓지는 않는다.
 이 옵션을 주고 workspace 에 바이너리와 sidecar 가 둘 다 있으면, 빌드한
 서버가 말하는 버전의 릴리즈에서 같은 자산을 받아 `SHA256SUMS` 와 맞춰 보고 두 파일을
 바꾼다. 어느 자산(arm64, amd64)인지는 sidecar 에 적힌 이름에서 읽는다.
@@ -196,16 +204,18 @@ shim(0.73.1 이하 릴리즈, 이 변경 전 checkout 빌드)은 값이 없다.
 거절은 멈추거나 지울 게스트가 있는 백엔드(Apple `container`, nerdctl·Kata,
 microsandbox) 모두에서 그 게스트를 건드리기 전에 난다.
 릴리즈 서버는 같은 태그의 자산이 맞는다(`scripts/install.sh --version vX.Y.Z
---force`). checkout 으로 빌드한 서버는 어떤 릴리즈 자산과도 맞지 않으니, 같은
+--force --base-path <workspace>`). checkout 으로 빌드한 서버는 어떤 릴리즈 자산과도 맞지 않으니, 같은
 checkout 에서 shim 을 빌드한다. `install-local-build.sh --refresh-guest-shim` 도
-이 경우 릴리즈 shim 을 깔지 않고 멈춘다. 작업 공간의 shim 에 sidecar 가 없으면
-`install-local-build.sh` 가 설치할 때 아래 빌드를 대신 한다. 아키텍처는 옛 shim 의
+이 경우 릴리즈 shim 을 깔지 않고 멈춘다. 그 옵션 없이 돌린 `install-local-build.sh` 는
+작업 공간 shim 의 신원이 다르면 sidecar 가 있든 없든 아래 빌드를 대신 한다. 아키텍처는 옛 shim 의
 ELF 헤더에서 읽는다. 옛 shim 은 옆에 `masc-exec-shim.previous` 로 남는다. 이 파일은
 마지막으로 바꾼 shim 하나만 담고, 다음 빌드가 덮어쓴다.
 빌드가 실패하면(Docker 가 꺼져 있을 때 등) 아무것도 설치하지 않고 아래 명령을 알려 준다.
 설치한 뒤 `masc restart` 전까지는 아직 도는 옛 서버가 새 shim 을 거절한다. 그래서
 설치하고 바로 재시작한다. 재시작 전에 되돌리려면 `masc-exec-shim.previous` 를
-`masc-exec-shim` 으로 옮긴다.
+`masc-exec-shim` 으로 옮긴다. 옛 shim 이 릴리즈 shim 이었다면 sidecar 는 이미 지워져서
+되돌린 shim 은 sha256 대조 없이 돈다. sidecar 까지 되돌리려면
+`scripts/install.sh --version vX.Y.Z --force --base-path <workspace>` 로 같은 작업 공간에 그 릴리즈를 다시 깐다.
 릴리즈 없이 지금 트리로 만들어야 할 때는 아래처럼 직접 빌드한다. 손으로 빌드한
 shim 에는 sidecar 가 없어야 한다. 없으면 부팅이 검증 없이 돌리고 로그에 그렇게
 적는다.

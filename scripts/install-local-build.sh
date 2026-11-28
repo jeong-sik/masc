@@ -17,31 +17,39 @@
 #
 # The server runs only a guest exec shim built from its own source (#52968,
 # RFC host-and-shim-share-one-build-identity), so the shim goes with the
-# server (#53164). A workspace shim without a sha256 sidecar was built from
-# source. When it declares another source identity than this build's
-# main_eio.exe, scripts/remote-ssh/build-shim.sh builds a new one from this
-# checkout for the guest architecture the old shim's ELF header names. The
+# server (#53164). When the workspace shim declares another source identity
+# than this build's main_eio.exe, or none, scripts/remote-ssh/build-shim.sh
+# builds a new one from this checkout for the guest architecture the old
+# shim's ELF header names. That holds for a release shim too (one with a
+# sha256 sidecar, #53296): the sidecar says where the bytes came from, and
+# whether this build's server runs them is the identity they declare. The
 # new shim must declare this build's identity. It replaces the old one in
 # one rename, and the old one stays beside it as masc-exec-shim.previous,
-# which holds only the shim the latest rebuild replaced. All of this happens
+# which holds only the shim the latest rebuild replaced. The sidecar of a
+# replaced release shim is removed: it is the sha256 of the old bytes, and
+# the server refuses a shim whose sidecar names other bytes. All of this happens
 # before any binary is replaced. A failed build (build-shim.sh needs Docker), an architecture
 # this cannot build or a built shim of another source stops the install with
 # exit status 1. The shim and the binaries are then as they were, and the
 # error gives the command that builds the shim by hand; only a rename that
 # fails after masc-exec-shim.previous was written leaves that file holding a
 # copy of the shim still in place. A shim that already declares this build's
-# identity is kept. A workspace with no shim is given none.
+# identity is kept, with its sidecar when that names the shim's sha256; a
+# sidecar that names other bytes is removed, because the server refuses the
+# pair. A workspace with no shim is given none.
 #
 # The server still running refuses the new shim from this install until
 # masc restart, as the restarted server refused the old one before (#53164):
 # its readiness check reads the shim again for every guest it has not
 # verified. So restart right after installing. To go back before a restart,
-# rename masc-exec-shim.previous to masc-exec-shim.
+# rename masc-exec-shim.previous to masc-exec-shim. A sidecar removed with
+# the replaced shim does not come back that way, and the server runs the shim
+# without one.
 #
-# A release shim (masc-exec-shim with its sha256 sidecar) is left alone, and
-# no release is asked for, unless --refresh-guest-shim is given. That option
-# updates an existing release shim when deploying a server/shim change to
-# microVM Keepers. The release installer places it initially.
+# No release is asked for unless --refresh-guest-shim is given. That option
+# hands a release shim (masc-exec-shim with its sha256 sidecar) to the
+# release instead of the source build above. The release installer places
+# it initially.
 # With this option, an existing release shim is replaced by
 # the same asset of the release this build names, checked against that
 # release's SHA256SUMS. Which asset is read from the sidecar, which records
@@ -92,15 +100,16 @@
 #                   leave the workspace's browser Add-on package and declaration
 #                   as they are. Without the Add-on no browser route works.
 #   --refresh-guest-shim fetch release checksums and refresh an existing release
-#                   guest exec shim (one with a sha256 sidecar); default
-#                   installation leaves a release shim as it is
+#                   guest exec shim (one with a sha256 sidecar) from the
+#                   release this build names, instead of the source build
+#                   below; default installation asks no release
 #   --print-build-targets print the exact Dune inputs for this install and exit
 #                   without locking, building, checking or changing a workspace
 #
-#   By default a workspace guest exec shim without a sha256 sidecar is rebuilt
-#   from this checkout (scripts/remote-ssh/build-shim.sh, which needs Docker)
-#   when it declares another source than this build. A failed rebuild installs
-#   nothing.
+#   By default a workspace guest exec shim is rebuilt from this checkout
+#   (scripts/remote-ssh/build-shim.sh, which needs Docker) when it declares
+#   another source than this build, and the sha256 sidecar of a release shim
+#   replaced this way is removed. A failed rebuild installs nothing.
 set -euo pipefail
 
 repo=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
@@ -383,6 +392,15 @@ sha256_of() {
   python3 -c 'import hashlib, sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$1"
 }
 
+# The digest a sidecar names, read the way the server reads it
+# (Keeper_sandbox_microvm_shim.sidecar_provenance): the file is trimmed, and
+# what precedes the first space is trimmed again.
+sidecar_digest_of() {
+  python3 -c 'import sys
+blank = b" \x0c\n\r\t"
+print(open(sys.argv[1], "rb").read().strip(blank).split(b" ")[0].strip(blank).decode("ascii", "replace"))' "$1"
+}
+
 # The assets a release ships for the guest shim (scripts/install.sh,
 # guest_shim_asset).
 guest_shim_assets="masc-exec-shim-linux-arm64 masc-exec-shim-linux-amd64"
@@ -568,15 +586,41 @@ refresh_guest_shim() (
 checkout_guest_shim() (
   shim_dir="$workspace_root/.masc/microvm/shim"
   shim="$shim_dir/masc-exec-shim"
+  sidecar="$shim.sha256"
   [ -e "$shim" ] || exit 0
-  # The opposite of refresh_guest_shim's test, so each shim goes to exactly
-  # one of the two steps.
-  [ ! -f "$shim.sha256" ] || exit 0
+  # --refresh-guest-shim asks for the release's asset, so a release shim (one
+  # with a sidecar) goes to refresh_guest_shim and each shim goes to exactly
+  # one of the two steps. Without the option this step takes it: the sidecar
+  # says where the bytes came from, and whether this build's server runs them
+  # is the identity they declare, read below.
+  if [ "$guest_shim" = true ] && [ -f "$sidecar" ]; then
+    exit 0
+  fi
   if ! required_source=$(source_identity_of "$build_dir/main_eio.exe"); then
     echo "install-local-build: $build_dir/main_eio.exe does not declare exactly one source identity (found: $required_source), so its server refuses every guest exec shim, $shim too; nothing installed" >&2
     exit 1
   fi
   if installed_source=$(source_identity_of "$shim") && [ "$installed_source" = "$required_source" ]; then
+    # The server also refuses a shim whose sidecar does not begin with the
+    # sha256 of its bytes (microvm_shim_hash_mismatch, _sidecar_invalid),
+    # whatever left the two together: a shim copied over a release shim by
+    # hand, or a swap that SIGKILL ended. The sidecar does not describe the
+    # bytes in place, so it goes.
+    if [ -f "$sidecar" ]; then
+      if ! shim_sha256=$(sha256_of "$shim"); then
+        echo "install-local-build: the sha256 of $shim could not be computed; nothing installed" >&2
+        exit 1
+      fi
+      recorded=$(sidecar_digest_of "$sidecar" 2>/dev/null) || recorded=""
+      if [ "$recorded" != "$shim_sha256" ]; then
+        if ! rm -f "$sidecar"; then
+          echo "install-local-build: guest exec shim $shim is $shim_sha256 and $sidecar names '$recorded', so this build's server refuses the pair, and the sidecar could not be removed; nothing installed" >&2
+          exit 1
+        fi
+        echo "guest exec shim in $shim_dir already declares this build's source identity $required_source; removed $sidecar, which named '$recorded' while the shim is $shim_sha256 (the server refuses that pair)"
+        exit 0
+      fi
+    fi
     echo "guest exec shim in $shim_dir already declares this build's source identity $required_source"
     exit 0
   fi
@@ -589,10 +633,16 @@ checkout_guest_shim() (
   fi
   # The command puts the shim in place with one rename, as this step does,
   # so a guest that boots meanwhile never reads a partial file.
-  by_hand=$(printf 'cd %q && scripts/remote-ssh/build-shim.sh --arch %s && install -m 755 dist/remote-ssh/masc-exec-shim-linux-%s %q && mv %q %q' \
-    "$repo" "$arch_arg" "$arch_arg" "$shim.partial" "$shim.partial" "$shim")
+  by_hand=$(printf 'cd %q && scripts/remote-ssh/build-shim.sh --arch %s && install -m 755 dist/remote-ssh/masc-exec-shim-linux-%s %q' \
+    "$repo" "$arch_arg" "$arch_arg" "$shim.partial")
+  # The sidecar holds the sha256 of the shim in place, and the server refuses
+  # a shim whose sidecar names other bytes.
+  if [ -f "$sidecar" ]; then
+    by_hand+=$(printf ' && rm -f %q' "$sidecar")
+  fi
+  by_hand+=$(printf ' && mv %q %q' "$shim.partial" "$shim")
   refuse() {
-    echo "install-local-build: guest exec shim $shim declares source identity $installed_source, but this build is $required_source and its server refuses that shim. $1; nothing installed. Build the shim by hand, then install again: $by_hand" >&2
+    echo "install-local-build: guest exec shim $shim declares source identity $installed_source, but this build is $required_source and its server refuses that shim. $1; nothing installed. A workspace that runs no microVM Keeper needs no shim: remove $shim and install again. Otherwise build the shim by hand, then install again: $by_hand" >&2
     exit 1
   }
   [ "$guest_arch_status" -eq 0 ] ||
@@ -601,17 +651,41 @@ checkout_guest_shim() (
   out=""
   staged=""
   staged_previous=""
+  set_aside=""
   # Cleanup that fails says so and does not change how the step ended: under
   # errexit a failing last command here would turn a finished swap into a
   # failed install after the shim was already replaced.
   remove_staged() {
+    # A second signal does not cut the cleanup short.
+    trap '' HUP INT TERM
+    # A sidecar still set aside when the step ends goes back beside the shim
+    # it describes. That shim is gone once the staged one was renamed over
+    # it, which is when the staged file no longer exists: no rename is under
+    # way while this runs (see the signal traps below).
+    if [ -n "$set_aside" ] && [ -e "$set_aside" ]; then
+      if [ -n "$staged" ] && [ -e "$staged" ]; then
+        mv "$set_aside" "$sidecar" ||
+          echo "install-local-build: the sha256 sidecar of $shim could not be put back; it is $set_aside" >&2
+      else
+        rm -f "$set_aside" || echo "install-local-build: could not remove $set_aside" >&2
+      fi
+    fi
     if [ -n "$out" ]; then rm -rf "$out" || echo "install-local-build: could not remove $out" >&2; fi
     if [ -n "$staged" ]; then rm -f "$staged" || echo "install-local-build: could not remove $staged" >&2; fi
     if [ -n "$staged_previous" ]; then
       rm -f "$staged_previous" || echo "install-local-build: could not remove $staged_previous" >&2
     fi
   }
+  # Each signal trap exits itself (128+n), and that exit runs remove_staged.
+  # bash runs a signal trap when the command in the foreground has returned,
+  # so the cleanup never runs beside a rename that is still to happen. With
+  # the EXIT trap alone, bash 5 ran it the moment SIGTERM arrived and put the
+  # old sidecar back just before the new shim was renamed into place, and
+  # bash 3.2 ran no cleanup on SIGTERM and SIGHUP.
   trap remove_staged EXIT
+  trap 'exit 129' HUP
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
   # build-shim.sh takes --out relative to the top of the checkout it runs in.
   # Git ignores dist/, so the build directory does not change the source
   # identity the shim is built with.
@@ -643,12 +717,32 @@ checkout_guest_shim() (
     refuse "The shim in place could not be kept as $previous"
   fi
   staged_previous=""
+  # The sidecar is the sha256 of the shim being replaced, and the server
+  # refuses a shim whose sidecar names other bytes. It is renamed aside before
+  # the swap and removed after it, and remove_staged puts it back when the
+  # swap did not happen. The name is set before the rename, so a step that a
+  # failure or a signal ends anywhere from here leaves the old shim with its
+  # sidecar or the new shim without one. SIGKILL runs no cleanup: between the
+  # two renames it leaves the old shim and the sidecar as $set_aside.
+  if [ -f "$sidecar" ]; then
+    set_aside="$sidecar.replaced.$$"
+    mv "$sidecar" "$set_aside" || refuse "Its sha256 sidecar $sidecar could not be set aside"
+  fi
   # A failure here leaves the shim in place and $previous holding a copy of it.
   if ! mv "$staged" "$shim"; then
     refuse "The built shim could not be renamed to $shim"
   fi
   staged=""
-  echo "installed the $guest_arch guest exec shim built from $repo into $shim_dir (source identity $required_source; the previous one is kept as $previous). The running server refuses it until masc restart."
+  sidecar_note=""
+  if [ -n "$set_aside" ]; then
+    if rm -f "$set_aside"; then
+      sidecar_note=" $sidecar described the replaced shim and was removed."
+    else
+      sidecar_note=" $sidecar described the replaced shim and is now $set_aside, which could not be removed."
+    fi
+    set_aside=""
+  fi
+  echo "installed the $guest_arch guest exec shim built from $repo into $shim_dir (source identity $required_source; the previous one is kept as $previous).$sidecar_note The running server refuses it until masc restart."
 )
 checkout_guest_shim
 refresh_guest_shim

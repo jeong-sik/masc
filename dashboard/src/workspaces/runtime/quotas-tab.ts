@@ -2324,7 +2324,11 @@ export function QuotasTab(props: WorkspaceViewProps) {
               ? (multiAccounts.length === 0
                 ? (inventoryObs.kind === 'failed'
                   ? null
-                  : html`<div class="dtable-absent">${inventoryObs.kind === 'loading' ? '불러오는 중…' : '연결된 개인 제공자 계정이 없어요. 위 목록에서 구독을 연결해요.'}</div>`)
+                  : html`<div class="dtable-absent">${inventoryObs.kind === 'loading'
+                    ? '불러오는 중…'
+                    : personIntegObs.kind === 'value'
+                      ? '연결된 개인 제공자 계정이 없어요. 위 목록에서 구독을 연결해요.'
+                      : '연결된 개인 제공자 계정이 없어요.'}</div>`)
                 : html`
                     <div style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-2)' }}>
                       ${multiAccounts.map((acc, i) => {

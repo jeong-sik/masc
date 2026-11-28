@@ -148,8 +148,7 @@ masc start --base-path <base> --port <port>
   `masc start` runs. A binary installed in `~/.local/bin` finds none of them
   for a new base path. Set `MASC_ASSETS_DIR` to an `assets` directory that
   holds `dashboard/index.html`, such as `assets` of the checkout the binary
-  was built from. Without one, `/dashboard` answers 503 and `/health` reports
-  the assets as missing.
+  was built from. Without one, `/dashboard` answers 503.
 - The server binds the TLS listener of `[transport] https_port` in
   `<base>/.masc/config/runtime.toml` (8938 when the file sets none, `0`
   turns it off). `MASC_HTTPS_PORT` in the environment comes before the file.

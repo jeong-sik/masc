@@ -11,7 +11,7 @@
  */
 
 import { effect } from '@preact/signals'
-import { persistentSignal } from './persistent-signal'
+import { persistentSignal } from './persisted-ui-signal'
 import {
   applyContrast,
   applyTheme,

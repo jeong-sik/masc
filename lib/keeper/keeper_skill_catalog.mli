@@ -8,9 +8,7 @@ type surface =
   | Instruction
 
 type provenance = private
-  { identity : Skill_catalog_snapshot.identity
-  ; source : Skill_source_config.source
-  ; source_root : string option
+  { source_root : string option
   ; resource_read_max_bytes : Skill_source_config.resource_read_max_bytes option
   ; directory : string
   }
@@ -120,6 +118,5 @@ val skills : t -> skill list
 val find : t -> string -> skill option
 val instruction_entries : t -> (string * string * string) list
 val surface_to_string : surface -> string
-val provenance_to_yojson : provenance -> Yojson.Safe.t
 val error_code : error -> string
 val error_to_string : error -> string

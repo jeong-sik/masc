@@ -15,37 +15,6 @@ let validate_observed_task_skills ~config ~meta ~skill_snapshot =
     (resolve_observed_task_skills ~config ~meta ~skill_snapshot)
 ;;
 
-let composition_skill ~name ~execution =
-  Printf.sprintf
-    {|---
-name: %s
-description: Effective surface fixture.
----
-
-```toml composition
-[[compositions]]
-name = "%s"
-description = "Effective surface fixture."
-execution = "%s"
-
-[[compositions.nodes]]
-id = "lane"
-tool = "keeper_lane_status"
-[compositions.nodes.input]
-kind = "literal"
-value = {}
-
-[[compositions.nodes]]
-id = "board"
-tool = "masc_board_stats"
-[compositions.nodes.input]
-kind = "literal"
-value = {}
-```
-|}
-    name name execution
-;;
-
 let instruction_skill ?(description = "Read these instructions before working.") name =
   Printf.sprintf
     {|---
@@ -104,21 +73,11 @@ let skill_snapshot_with_description description =
     ~source_id:"fixture-catalog"
     ~anchor:"base-path"
     ~path:"skills"
-    [ "guide", instruction_skill ~description "guide"
-    ; "snapshot", composition_skill ~name:"snapshot" ~execution:"async"
-    ]
+    [ "guide", instruction_skill ~description "guide" ]
 ;;
 
 let skill_snapshot () =
   skill_snapshot_with_description "Read these instructions before working."
-;;
-
-let configured_external_skill_snapshot () =
-  configured_snapshot
-    ~source_id:"shared-catalog"
-    ~anchor:"absolute"
-    ~path:"/srv/shared-agent-skills"
-    [ "snapshot", composition_skill ~name:"snapshot" ~execution:"async" ]
 ;;
 
 let reference_by_name snapshot name =
@@ -187,14 +146,22 @@ let project
 
 let test_skill_name_selection_is_structured_and_filters_task () =
   ignore (Masc_test_deps.init_unified_tool_registry ());
-  let snapshot = skill_snapshot () in
-  let task_snapshot = reference_by_name snapshot "snapshot" in
+  let snapshot =
+    configured_snapshot
+      ~source_id:"fixture-catalog"
+      ~anchor:"base-path"
+      ~path:"skills"
+      [ "guide", instruction_skill "guide"
+      ; "task-pinned", instruction_skill "task-pinned"
+      ]
+  in
+  let task_pinned = reference_by_name snapshot "task-pinned" in
   let selected =
     match
       project
         ~snapshot
         ~skill_names:(Some [ "guide"; "missing" ])
-        ~task_skill_references:[ task_snapshot ]
+        ~task_skill_references:[ task_pinned ]
         ~native_posture:Runtime_native_tools.Native_read
         ()
     with
@@ -202,7 +169,8 @@ let test_skill_name_selection_is_structured_and_filters_task () =
     | Error error -> fail (Keeper_effective_tool_surface.projection_error_to_string error)
   in
   check int "one selected instruction" 1 (List.length selected.instruction_skills);
-  check int "Task composition is filtered" 0 (List.length selected.composition_skills);
+  check bool "the Task Skill outside the configured names is filtered" false
+    (List.exists (Skill_reference.equal task_pinned) selected.instruction_skills);
   let json = Keeper_effective_tool_surface.to_yojson (Available selected) in
   check string
     "operator projection does not claim to be a frozen executed turn"
@@ -242,15 +210,14 @@ let test_skill_name_selection_is_structured_and_filters_task () =
       project
         ~snapshot
         ~skill_names:(Some [])
-        ~task_skill_references:[ task_snapshot ]
+        ~task_skill_references:[ task_pinned ]
         ~native_posture:Runtime_native_tools.Native_read
         ()
     with
     | Ok surface -> surface
     | Error error -> fail (Keeper_effective_tool_surface.projection_error_to_string error)
   in
-  check int "explicit empty has no instruction Skills" 0 (List.length none.instruction_skills);
-  check int "explicit empty has no composition Skills" 0 (List.length none.composition_skills)
+  check int "explicit empty has no instruction Skills" 0 (List.length none.instruction_skills)
 ;;
 
 let test_projection_names_equal_turn_surface_authority () =
@@ -404,8 +371,8 @@ let test_projection_names_equal_turn_surface_authority () =
 
 
 (* Verify that the surface's JSON serialization writes the expected origin kind
-   and skill provenance for every projected tool. *)
-let test_the_tui_reads_the_origin_of_every_tool_this_surface_writes () =
+   for every projected tool. *)
+let test_every_tool_row_writes_its_origin_kind () =
   ignore (Masc_test_deps.init_unified_tool_registry ());
   let surface =
     match
@@ -422,7 +389,7 @@ let test_the_tui_reads_the_origin_of_every_tool_this_surface_writes () =
         ~skills_left_out:[]
         ~task_skill_references:[]
         ~task_selection:None
-        ~skill_snapshot:(configured_external_skill_snapshot ())
+        ~skill_snapshot:(skill_snapshot ())
     with
     | Ok surface -> surface
     | Error error -> fail (Keeper_effective_tool_surface.projection_error_to_string error)
@@ -432,32 +399,20 @@ let test_the_tui_reads_the_origin_of_every_tool_this_surface_writes () =
       (fun (tool : Keeper_effective_tool_surface.tool) ->
          ( tool.name
          , match tool.origin with
-           | Keeper_effective_tool_surface.Descriptor -> ("descriptor", None)
-           | Instruction_skill -> ("instruction_skill", None)
-           | Composition_skill { provenance = Some provenance } ->
-             ( "composition_skill"
-             , Some (Skill_source_config.source_id_to_string provenance.identity.source_id) )
-           | Composition_skill { provenance = None } -> ("composition_skill", None)
-           | Composition_control -> ("composition_control", None) ))
+           | Keeper_effective_tool_surface.Descriptor -> "descriptor"
+           | Instruction_skill -> "instruction_skill" ))
       surface.tools
   in
   check bool "the fixture carries a descriptor" true
-    (List.exists (fun (_, (k, _)) -> String.equal k "descriptor") expected);
+    (List.exists (fun (_, kind) -> String.equal kind "descriptor") expected);
   let wire = Keeper_effective_tool_surface.to_yojson (Available surface) in
   let open Yojson.Safe.Util in
   let actual =
     wire |> member "tools" |> to_list
     |> List.map (fun row ->
       let name = row |> member "name" |> to_string in
-      let origin = member "origin" row in
-      let kind = origin |> member "kind" |> to_string in
-      let src =
-        match member "skill_provenance" origin with
-        | `Assoc _ as prov ->
-          Some (prov |> member "identity" |> member "source_id" |> to_string)
-        | _ -> None
-      in
-      (name, (kind, src)))
+      let kind = row |> member "origin" |> member "kind" |> to_string in
+      (name, kind))
   in
   check bool "every tool serializes to the exact origin written by the surface" true
     (actual = expected)
@@ -867,8 +822,6 @@ let test_runtime_capability_suppression_is_explicit_and_empty () =
     check (list string) "no tool reaches the model" [] (names surface);
     check int "instruction tool is not readable" 0
       (List.length surface.instruction_skills);
-    check int "composition tools are not callable" 0
-      (List.length surface.composition_skills);
     let open Yojson.Safe.Util in
     let delivery =
       Keeper_effective_tool_surface.to_yojson (Available surface)
@@ -1105,67 +1058,11 @@ let test_addon_factory_ownership_survives_concurrency_and_releases_retired_input
   check bool "factory issuance does not retain a retired descriptor" false (Weak.check dead_descriptor 0)
 ;;
 
-let test_addon_composition_diagnostics_follow_frozen_authority () =
-  ignore (Masc_test_deps.init_unified_tool_registry ());
-  let source = {|---
-name: machine-command
-description: Call the attached machine.
----
-```toml composition
-[[compositions]]
-name = "machine-command"
-description = "Call the attached machine."
-execution = "inline"
-[[compositions.nodes]]
-id = "input"
-tool = "fixture_machine_input"
-[compositions.nodes.input]
-kind = "literal"
-value = {}
-```
-|} in
-  let snapshot = configured_snapshot ~source_id:"machine-skills" ~anchor:"absolute"
-    ~path:"/srv/machine-skills"
-    [ "machine-command", source
-    ; "snapshot", composition_skill ~name:"snapshot" ~execution:"async" ] in
-  let project_with descriptors =
-    let selection = match Keeper_task_skill_turn.bind_surface ~descriptors
-      ~snapshot Keeper_task_skill_turn.empty with
-      | Ok (selection,_) -> selection
-      | Error error -> fail (Keeper_task_skill_turn.error_to_string error) in
-    match Keeper_effective_tool_surface.For_testing.project
-      ~keeper_name:"fixture" ~runtime_id:"fixture.runtime" ~skills_left_out:[]
-      ~official_client_kind:"agent_core"
-      ~tool_delivery:Keeper_effective_tool_surface.Tools_delivered
-      ~native_posture:None ~tool_deny:[] ~sandbox_profile:Keeper_types_profile.Docker
-      ~skill_names:None ~current_task_id:None ~task_skill_references:[]
-      ~task_selection:(Some selection) ~skill_snapshot:snapshot with
-    | Ok surface -> surface
-    | Error error -> fail (Keeper_effective_tool_surface.projection_error_to_string error) in
-  let static = Keeper_tool_descriptor.all_descriptors () in
-  let attached = project_with (static @ [addon_descriptor "fixture_machine_input"]) in
-  check bool "attached machine composition is callable" true
-    (List.mem "keeper_compose_machine-command" (names attached));
-  check bool "unrelated static composition remains callable with Add-on present" true
-    (List.mem "keeper_compose_snapshot" (names attached));
-  check (list string) "attached composition is not falsely reported unavailable" []
-    attached.skills_left_out;
-  let detached = project_with static in
-  check bool "new detached projection omits machine composition" false
-    (List.mem "keeper_compose_machine-command" (names detached));
-  check bool "new detached projection reports missing tool" true
-    (detached.skills_left_out <> []);
-  check bool "frozen attached surface retains its original view" true
-    (List.mem "keeper_compose_machine-command" (names attached))
-;;
-
-let test_masc_disabled_withholds_all_tools_skills_and_composition_controls () =
+let test_masc_disabled_withholds_all_tools_and_skills () =
   let snapshot =
     configured_snapshot ~source_id:"masc-disabled-skills" ~anchor:"absolute"
       ~path:"/srv/masc-disabled-skills"
-      [ "guide", instruction_skill "guide"
-      ; "snap", composition_skill ~name:"snap" ~execution:"async"
-      ]
+      [ "guide", instruction_skill "guide" ]
   in
   let descriptors = Keeper_tool_descriptor.all_descriptors () in
   let selection =
@@ -1189,15 +1086,13 @@ let test_masc_disabled_withholds_all_tools_skills_and_composition_controls () =
   in
   let enabled_surface = project_with true in
   check bool "masc_enabled=true marks masc_enabled true" true enabled_surface.masc_enabled;
-  check bool "masc_enabled=true exposes host/composition tools" true (enabled_surface.tools <> []);
+  check bool "masc_enabled=true exposes tools" true (enabled_surface.tools <> []);
   let disabled_surface = project_with false in
   check bool "masc_enabled=false marks masc_enabled false" false disabled_surface.masc_enabled;
-  check (list string) "masc_enabled=false exposes zero tools (no descriptors or async controls)" []
+  check (list string) "masc_enabled=false exposes zero tools" []
     (names disabled_surface);
   check int "masc_enabled=false emits zero instruction skills" 0
     (List.length disabled_surface.instruction_skills);
-  check int "masc_enabled=false emits zero composition skills" 0
-    (List.length disabled_surface.composition_skills);
   check int "masc_enabled=false yields zero tool_surface_bytes" 0 disabled_surface.tool_surface_bytes;
   check int "masc_enabled=false yields zero skill_tool_surface_bytes" 0
     disabled_surface.skill_tool_surface_bytes
@@ -1211,16 +1106,14 @@ let () =
             test_addon_plan_preserves_factory_authority
         ; test_case "Add-on factory ownership survives concurrency and releases retired inputs" `Quick
             test_addon_factory_ownership_survives_concurrency_and_releases_retired_inputs
-        ; test_case "Add-on composition diagnostics follow frozen authority" `Quick
-            test_addon_composition_diagnostics_follow_frozen_authority
         ; test_case "names equal turn setup authority" `Quick
             test_projection_names_equal_turn_surface_authority
         ; test_case "Skill names filter Task and expose unavailable" `Quick
             test_skill_name_selection_is_structured_and_filters_task
         ; test_case "unprojectable Task Skill is a typed row" `Quick
             test_unprojectable_task_skill_is_a_typed_row
-        ; test_case "the TUI reads the origin of every tool this surface writes" `Quick
-            test_the_tui_reads_the_origin_of_every_tool_this_surface_writes
+        ; test_case "every tool row writes its origin kind" `Quick
+            test_every_tool_row_writes_its_origin_kind
         ; test_case "instruction skill does not require Read" `Quick
             test_instruction_skill_without_read_is_admitted
         ; test_case "left out skills reach the surface" `Quick
@@ -1237,8 +1130,8 @@ let () =
             test_runtime_capability_suppression_is_explicit_and_empty
         ; test_case "frozen selection carries the shadowed exact reference" `Quick
             test_frozen_selection_carries_the_shadowed_exact_reference
-        ; test_case "masc_enabled false withholds all descriptors, skills, and composition controls" `Quick
-            test_masc_disabled_withholds_all_tools_skills_and_composition_controls
+        ; test_case "masc_enabled false withholds all descriptors and skills" `Quick
+            test_masc_disabled_withholds_all_tools_and_skills
         
 ] )
     ]

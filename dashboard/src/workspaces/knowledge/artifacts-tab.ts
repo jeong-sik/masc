@@ -13,7 +13,7 @@ import { MarkdownContent } from '../../components/common/markdown-renderer'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { authSession, canUseSingleUserTokenAdmin, currentSessionEpoch, isEpochCurrent, sessionEpoch } from '../../core/auth'
 import { markViewSnapshot } from '../../core/observer'
-import { resourceCache } from '../../core/resource-cache'
+import { resourceCache, type Observed } from '../../core/resource-cache'
 import { apiGet } from '../../core/transport'
 import { containsWorkspaceMediaRef } from '../../lib/keeper-media'
 import { ok } from '../../lib/result'
@@ -44,6 +44,18 @@ import {
 export interface ArtifactListBundle {
   readonly artifacts: readonly PublishedArtifactItem[]
   readonly diagnostics: readonly { readonly id: string; readonly error: string }[]
+}
+
+/** Cache key the artifacts tab and the wiki embed picker share for `GET /api/v1/published-artifacts`. */
+export const PUBLISHED_ARTIFACTS_LIST_KEY = 'kn:artifacts:list'
+
+/** Reads the published artifact list through the shared cache entry. */
+export function readPublishedArtifactsList(reason: 'mount' | 'manual'): Promise<Observed<ArtifactListBundle>> {
+  return resourceCache.fetch<ArtifactListBundle>(
+    PUBLISHED_ARTIFACTS_LIST_KEY,
+    fetchPublishedArtifactsList,
+    { ttlMs: 15_000, topics: ['artifacts'], reason },
+  )
 }
 
 export async function fetchPublishedArtifactsList(signal: AbortSignal) {
@@ -123,11 +135,7 @@ export function ArtifactsTab(props: WorkspaceViewProps) {
     const startEpoch = currentSessionEpoch()
     setLoading(true)
     setLoadError(null)
-    const obs = await resourceCache.fetch<ArtifactListBundle>(
-      'kn:artifacts:list',
-      fetchPublishedArtifactsList,
-      { ttlMs: 15_000, topics: ['artifacts'], reason },
-    )
+    const obs = await readPublishedArtifactsList(reason)
     if (!mountedRef.current || !isEpochCurrent(startEpoch)) return
     setLoading(false)
     if (obs.kind === 'value') {

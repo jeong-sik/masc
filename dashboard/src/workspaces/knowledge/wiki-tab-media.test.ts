@@ -476,4 +476,178 @@ describe('WikiTab authoring productivity UX', () => {
       expect(container.querySelector('[data-testid="wiki-embed-option-wiki-media-guide"]')).not.toBeNull()
     }, { timeout: 5000 })
   })
+  it('shows a failed read of every wiki page in WikiEmbedPicker under a tag filter and reads it again on retry', async () => {
+    const base = makeWikiMocks()
+    let allPagesReads = 0
+    const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
+      if (String(input) === '/api/v1/wiki?sort=updated') {
+        allPagesReads += 1
+        // Read 1 is the index on screen before the filter; read 2 is the picker's.
+        if (allPagesReads === 2) return jsonResponse({ error: 'internal', message: 'wiki index unavailable' }, 500)
+      }
+      return base(input, init)
+    })
+    globalThis.fetch = fetchMock
+    render(
+      html`<${WikiTab} subroute="wiki" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`,
+      container,
+    )
+
+    const tagBtn = await vi.waitFor(() => {
+      const btn = container.querySelector<HTMLButtonElement>('[data-testid="wiki-tag-filter"]')
+      expect(btn).not.toBeNull()
+      return btn!
+    }, { timeout: 5000 })
+    tagBtn.click()
+    const coreOpt = await vi.waitFor(() => {
+      const opt = container.querySelector<HTMLButtonElement>('[data-testid="wiki-tag-core"]')
+      expect(opt).not.toBeNull()
+      return opt!
+    }, { timeout: 5000 })
+    coreOpt.click()
+
+    const editBtn = await vi.waitFor(() => {
+      const btn = [...container.querySelectorAll<HTMLButtonElement>('button')].find((b) =>
+        b.textContent?.includes('CAS 편집'),
+      )
+      expect(btn).toBeDefined()
+      return btn!
+    }, { timeout: 5000 })
+    editBtn.click()
+
+    const pickerTrigger = await vi.waitFor(() => {
+      const btn = container.querySelector<HTMLButtonElement>('[data-testid="wiki-embed-picker-trigger"]')
+      expect(btn).not.toBeNull()
+      return btn!
+    }, { timeout: 5000 })
+    // Another writer changed the wiki (what a wiki_updated push does), so the
+    // picker reads every page again instead of the cached index.
+    resourceCache.invalidateTopic('wiki')
+    pickerTrigger.click()
+
+    const retry = await vi.waitFor(() => {
+      const btn = container.querySelector<HTMLButtonElement>('[data-testid="wiki-embed-picker-wiki-error-retry"]')
+      expect(btn).not.toBeNull()
+      return btn!
+    }, { timeout: 5000 })
+    expect(allPagesReads).toBe(2)
+    expect(container.querySelector('[data-testid="wiki-embed-option-wiki-media-guide"]')).toBeNull()
+
+    retry.click()
+    await vi.waitFor(() => {
+      expect(container.querySelector('[data-testid="wiki-embed-option-wiki-media-guide"]')).not.toBeNull()
+    }, { timeout: 5000 })
+    expect(allPagesReads).toBe(3)
+    expect(container.querySelector('[data-testid="wiki-embed-picker-wiki-error"]')).toBeNull()
+  })
+
+  it('shows a failed unfiltered read in WikiEmbedPicker after the tag filter is cleared, not the filtered pages', async () => {
+    const base = makeWikiMocks()
+    let failAllPages = false
+    const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
+      if (failAllPages && String(input) === '/api/v1/wiki?sort=updated') {
+        return jsonResponse({ error: 'internal', message: 'wiki index unavailable' }, 500)
+      }
+      return base(input, init)
+    })
+    globalThis.fetch = fetchMock
+    render(
+      html`<${WikiTab} subroute="wiki" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`,
+      container,
+    )
+
+    const tagBtn = await vi.waitFor(() => {
+      const btn = container.querySelector<HTMLButtonElement>('[data-testid="wiki-tag-filter"]')
+      expect(btn).not.toBeNull()
+      return btn!
+    }, { timeout: 5000 })
+    tagBtn.click()
+    const coreOpt = await vi.waitFor(() => {
+      const opt = container.querySelector<HTMLButtonElement>('[data-testid="wiki-tag-core"]')
+      expect(opt).not.toBeNull()
+      return opt!
+    }, { timeout: 5000 })
+    coreOpt.click()
+    const editBtn = await vi.waitFor(() => {
+      const btn = [...container.querySelectorAll<HTMLButtonElement>('button')].find((b) =>
+        b.textContent?.includes('CAS 편집'),
+      )
+      expect(btn).toBeDefined()
+      return btn!
+    }, { timeout: 5000 })
+    editBtn.click()
+    await flushUi()
+
+    // The wiki changed elsewhere and the next unfiltered read fails; the index
+    // the tab still holds is the #core one.
+    failAllPages = true
+    resourceCache.invalidateTopic('wiki')
+    container.querySelector<HTMLButtonElement>('[data-testid="wiki-tag-filter"]')!.click()
+    const allOpt = await vi.waitFor(() => {
+      const opt = container.querySelector<HTMLButtonElement>('[data-testid="wiki-tag-all"]')
+      expect(opt).not.toBeNull()
+      return opt!
+    }, { timeout: 5000 })
+    allOpt.click()
+    await flushUi()
+    container.querySelector<HTMLButtonElement>('[data-testid="wiki-embed-picker-trigger"]')!.click()
+
+    const retry = await vi.waitFor(() => {
+      const btn = container.querySelector<HTMLButtonElement>('[data-testid="wiki-embed-picker-wiki-error-retry"]')
+      expect(btn).not.toBeNull()
+      return btn!
+    }, { timeout: 5000 })
+    expect(container.querySelector('[data-testid="wiki-embed-option-wiki-arch-notes"]')).toBeNull()
+
+    failAllPages = false
+    retry.click()
+    await vi.waitFor(() => {
+      expect(container.querySelector('[data-testid="wiki-embed-option-wiki-media-guide"]')).not.toBeNull()
+      expect(container.querySelector('[data-testid="wiki-embed-option-wiki-arch-notes"]')).not.toBeNull()
+    }, { timeout: 5000 })
+  })
+
+  it('shows an unfiltered index read that ends absent in WikiEmbedPicker with a retry', async () => {
+    const base = makeWikiMocks()
+    let allPagesReads = 0
+    const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
+      if (String(input) === '/api/v1/wiki?sort=updated') {
+        allPagesReads += 1
+        if (allPagesReads === 1) return jsonResponse({ error: 'not_found', message: 'no wiki index' }, 404)
+      }
+      return base(input, init)
+    })
+    globalThis.fetch = fetchMock
+    render(
+      html`<${WikiTab} subroute="wiki" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`,
+      container,
+    )
+
+    const newBtn = await vi.waitFor(() => {
+      const btn = [...container.querySelectorAll<HTMLButtonElement>('button')].find((b) =>
+        b.textContent?.includes('새 페이지'),
+      )
+      expect(btn).toBeDefined()
+      return btn!
+    }, { timeout: 5000 })
+    await vi.waitFor(() => expect(allPagesReads).toBe(1), { timeout: 5000 })
+    newBtn.click()
+    const pickerTrigger = await vi.waitFor(() => {
+      const btn = container.querySelector<HTMLButtonElement>('[data-testid="wiki-embed-picker-trigger"]')
+      expect(btn).not.toBeNull()
+      return btn!
+    }, { timeout: 5000 })
+    pickerTrigger.click()
+
+    const retry = await vi.waitFor(() => {
+      const btn = container.querySelector<HTMLButtonElement>('[data-testid="wiki-embed-picker-wiki-error-retry"]')
+      expect(btn).not.toBeNull()
+      return btn!
+    }, { timeout: 5000 })
+    retry.click()
+    await vi.waitFor(() => {
+      expect(container.querySelector('[data-testid="wiki-embed-option-wiki-media-guide"]')).not.toBeNull()
+    }, { timeout: 5000 })
+    expect(allPagesReads).toBe(2)
+  })
 })

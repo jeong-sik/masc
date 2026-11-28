@@ -888,6 +888,71 @@ let test_stops_when_a_redirect_is_not_on_the_base_url () =
           Alcotest.(check (option int)) "no port is recorded for the CLI" None (recorded_port ~base)))
 ;;
 
+(* The shell sets no base URL, and runtime.toml of the base path names one
+   (transport.http_base_url, which the loader leaves in the boot store): the
+   boot compares the redirect with the address of the file. The listener
+   writes neither that address nor the one it bound into the variable, so the
+   settings panel, which reads the layer from the variable, still sees the
+   file's value as the file's. *)
+let test_compares_a_redirect_with_the_base_url_of_the_file () =
+  Unix.putenv github_secret_env "secret-of-the-case";
+  with_installation
+    ~auth_config:
+      (with_github_client ~redirect_uri:https_redirect ~client_secret_env:github_secret_env)
+    (fun env { base; config = _; store = _; multi_account } ->
+      Unix.unsetenv Env_config_core.http_base_url_env_key;
+      Config_boot_overrides.set Env_config_core.http_base_url_env_key "https://other.example";
+      Fun.protect
+        ~finally:(fun () ->
+          Config_boot_overrides.reset_for_tests ();
+          Unix.putenv Env_config_core.http_base_url_env_key "")
+        (fun () ->
+          Alcotest.(check string)
+            "the boot under the base URL of the file"
+            "github redirect on https://masc.example, the base URL is on https://other.example"
+            (boot_outcome env ~port:(free_port ()) multi_account);
+          Alcotest.(check (option string))
+            "the listener left the variable unset"
+            None
+            (Sys.getenv_opt Env_config_core.http_base_url_env_key);
+          Alcotest.(check bool)
+            "the base URL is still the file's"
+            true
+            (match Config_boot_overrides.source Env_config_core.http_base_url_env_key with
+             | Config_boot_overrides.Boot_override -> true
+             | Config_boot_overrides.Env | Config_boot_overrides.Default -> false);
+          Alcotest.(check (option string))
+            "the getter reads the file's base URL"
+            (Some "https://other.example")
+            (Env_config_core.masc_http_base_url_opt ());
+          Alcotest.(check (option int)) "no port is recorded for the CLI" None (recorded_port ~base)))
+;;
+
+(* With no base URL configured, the listener writes the address it bound and
+   records it as the process's own, so the settings panel does not report it
+   as an export of the shell. *)
+let test_the_bound_address_is_written_by_the_process () =
+  let key = Env_config_core.http_base_url_env_key in
+  Unix.unsetenv key;
+  Config_boot_overrides.reset_for_tests ();
+  Fun.protect
+    ~finally:(fun () ->
+      Config_boot_overrides.reset_for_tests ();
+      Unix.putenv key "")
+    (fun () ->
+      let _http_config = Server_bootstrap_http.make_http_config ~address:loopback ~port:8935 in
+      Alcotest.(check (option string))
+        "the variable holds the bound address"
+        (Some (Server_bootstrap_http.advertised_base_url ~address:loopback ~port:8935))
+        (Sys.getenv_opt key);
+      Alcotest.(check bool)
+        "its source is not the environment"
+        true
+        (match Config_boot_overrides.source key with
+         | Config_boot_overrides.Default -> true
+         | Config_boot_overrides.Env | Config_boot_overrides.Boot_override -> false))
+;;
+
 let test_stops_on_an_http_mode_outside_its_vocabulary () =
   with_installation (fun env { base; config = _; store; multi_account } ->
     (* The store is gone too: a boot that opened the zone before it read the
@@ -1767,6 +1832,14 @@ let () =
             "the boot stops when a redirect is not on the base URL"
             `Quick
             test_stops_when_a_redirect_is_not_on_the_base_url
+        ; Alcotest.test_case
+            "compares a redirect with the base URL of runtime.toml"
+            `Quick
+            test_compares_a_redirect_with_the_base_url_of_the_file
+        ; Alcotest.test_case
+            "the bound address is written by the process"
+            `Quick
+            test_the_bound_address_is_written_by_the_process
         ; Alcotest.test_case
             "the boot stops when the port cannot be announced"
             `Quick

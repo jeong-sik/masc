@@ -57,4 +57,12 @@ type source =
   | Default
 
 val source : string -> source
-(** The layer that would supply [name]. *)
+(** The layer that would supply [name]. A variable that holds the value this
+    process wrote with {!put_process_env} is not counted as the environment's:
+    the layer is then the boot value or the default. *)
+
+val put_process_env : string -> string -> unit
+(** [put_process_env name value] writes [value] into the variable [name] of
+    this process, as [Unix.putenv] does, and records that the process wrote it.
+    For a value the process derives itself, such as the address the listener
+    bound, so {!source} does not report it as the shell's. *)

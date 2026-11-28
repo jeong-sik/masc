@@ -330,7 +330,8 @@ admission or lifecycle policy.
 라우팅, 인증, credential I/O보다 먼저 `Server_request_authority`가 요청의
 authority를 한 번만 분류한다. HTTP/1.1은 case-insensitive `Host` 필드 전체를
 읽어 `Missing | Single authority | Multiple | Malformed | Untrusted`로 닫고,
-configured bind identity 또는 명시된 `MASC_HTTP_BASE_URL` identity와 일치하는
+configured bind identity 또는 명시된 base URL(`MASC_HTTP_BASE_URL`, 없으면 runtime.toml
+`transport.http_base_url`) identity와 일치하는
 `Single`만 request fiber에 바인딩한다. 바인딩 값은 `(scheme, authority,
 trust_class)`를 함께 보존한다. HTTP/2는 `:authority`만 authority 원천으로 쓰며
 `Host`가 함께 있으면 정규화한 host와 typed `:scheme` 기본 port가 같은지 교차
@@ -408,8 +409,8 @@ credential 을 읽지 않고 모든 요청에 같은 본문을 준다.
 
 전체 본문은 `paths`, `build`, `startup` 을 담은 `/health` 응답이고, `?full=1` 이면
 캐시된 full health 다. strict 는 7.3 의 Strict HTTP 다. `MASC_HTTP_AUTH_STRICT` 를
-켰거나, bind host 가 loopback 이 아니거나, `MASC_HTTP_BASE_URL` 의 host 가 loopback 이
-아니면 strict 다.
+켰거나, bind host 가 loopback 이 아니거나, 명시된 base URL(`MASC_HTTP_BASE_URL`, 없으면
+`transport.http_base_url`)의 host 가 loopback 이 아니면 strict 다.
 
 - 작업공간이 게시되기 전에는 credential 이 있든 없든 공개 probe 를 받는다.
 - 공개 probe 를 받는 요청은 `?full=1` 을 붙여도 같은 본문을 받는다. full health

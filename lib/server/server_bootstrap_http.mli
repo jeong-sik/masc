@@ -25,7 +25,13 @@ val make_http_config :
   address:Ipaddr.t -> port:int -> Http_server_eio.config
 (** [make_http_config ~address ~port] builds the listener config. Its [host]
     is [address] written out by {!Ipaddr.to_string}. Other config fields
-    default via {!Http_server_eio.default_config}. *)
+    default via {!Http_server_eio.default_config}. When no base URL is
+    configured ([MASC_HTTP_BASE_URL] unset or blank, and no
+    [transport.http_base_url] in the loaded runtime.toml) it writes
+    {!advertised_base_url} into [MASC_HTTP_BASE_URL]. A configured base URL
+    is left where it is: the file's value is not copied into the variable.
+    A blank variable hides the file, as it does for every setting of the
+    file. *)
 
 val advertised_base_url : address:Ipaddr.t -> port:int -> string
 (** The base URL {!make_http_config} writes for a listener bound to

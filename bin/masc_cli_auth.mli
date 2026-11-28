@@ -10,10 +10,13 @@
 
     The command takes the BasePath lease, so a running server, another
     activation, or a server that starts meanwhile waits on the lease or is
-    refused. Before anything is written it reads [MASC_HTTP_BASE_URL], the
-    public address that the person opens, and refuses when it is not an http(s)
-    origin with no path; [MASC_HOST] and [MASC_HTTP_PORT] are not read, because
-    the server can listen elsewhere. It then runs the two steps of
+    refused. Before anything is written it reads the public address that the
+    person opens, as a server started on the base path from this shell reads
+    it: [MASC_HTTP_BASE_URL], or else [transport.http_base_url] of the
+    runtime.toml of the base path, which it loads as the server does (settings
+    that do not load refuse the command). It refuses when the address is not an
+    http(s) origin with no path; [MASC_HOST] and [MASC_HTTP_PORT] are not read,
+    because the server can listen elsewhere. It then runs the two steps of
     {!Authz_activation}
     with the anonymous-mutation setting of this process's environment, which a
     server started from the same environment reads, and prints
@@ -54,7 +57,7 @@ val service_credential_list : base_path:string -> int
 
 (** [masc auth off]: turns the accounts of an activated workspace off with
     {!Authz_off.turn_off}, under the lease of {!bootstrap}, and prints the
-    workspace (design 10.5, plan F3a-2). It reads neither [MASC_HTTP_BASE_URL]
+    workspace (design 10.5, plan F3a-2). It reads neither the base URL
     nor the anonymous-mutation setting: the Off depends on the log and the
     external store alone. Returns [0] once the Off is committed, [1] otherwise,
     with the reason on standard error. *)

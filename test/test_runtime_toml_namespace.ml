@@ -562,13 +562,18 @@ temperature = 0.25
 h2_max_concurrent_streams = 250
 https_port = 9443
 tls_cert_file = "/etc/masc/cert.pem"
+http_base_url = "https://masc-accounts.example.test/"
 |}
   in
   let path = Filename.concat cfg_dir "runtime.toml" in
   Out_channel.with_open_bin path (fun oc -> output_string oc toml);
   Config_boot_overrides.reset_for_tests ();
+  (* The file is read only where the shell sets no value of its own. *)
+  let inherited_base_url = Sys.getenv_opt Env_config_core.http_base_url_env_key in
+  Unix.unsetenv Env_config_core.http_base_url_env_key;
   Fun.protect
     ~finally:(fun () ->
+      Option.iter (Unix.putenv Env_config_core.http_base_url_env_key) inherited_base_url;
       Config_boot_overrides.reset_for_tests ();
       Fs_compat.remove_tree base_path)
     (fun () ->
@@ -606,12 +611,91 @@ tls_cert_file = "/etc/masc/cert.pem"
          Alcotest.(check (option string)) "transport.tls_cert_file consumer"
            (Some "/etc/masc/cert.pem")
            (Env_config_runtime.Transport.tls_cert_file ());
+         Alcotest.(check (option string)) "transport.http_base_url consumer"
+           (Some "https://masc-accounts.example.test")
+           (Env_config_core.masc_http_base_url_opt ());
+         (* A value of the shell is a per-launch override and wins. *)
+         Unix.putenv Env_config_core.http_base_url_env_key "https://masc.example.test";
+         Alcotest.(check (option string)) "MASC_HTTP_BASE_URL wins over the file"
+           (Some "https://masc.example.test")
+           (Env_config_core.masc_http_base_url_opt ());
+         Unix.unsetenv Env_config_core.http_base_url_env_key;
          (* Fail closed if a string consumer encounters a non-string typed boot value *)
          Config_boot_overrides.set_typed "MASC_TEST_TYPED_STRING_MISMATCH" (Config_boot_overrides.Int 7);
          Alcotest.(check bool) "get_string fails closed on typed non-string" true
            (match Env_config_core.get_string ~default:"fallback" "MASC_TEST_TYPED_STRING_MISMATCH" with
             | _ -> false
             | exception Env_config_core.Config_error _ -> true))
+;;
+
+(* A file value that is not an origin stops the load, and the refusal names
+   the key: a host with no scheme, an origin with a path, and an empty string,
+   which would otherwise read as no base URL at all. *)
+let test_a_base_url_that_is_not_an_origin_stops_the_load () =
+  List.iter
+    (fun value ->
+       let base_path = Filename.temp_dir "base-url-ns-" "" in
+       let cfg_dir = Filename.concat (Filename.concat base_path ".masc") "config" in
+       Sys.mkdir (Filename.concat base_path ".masc") 0o755;
+       Sys.mkdir cfg_dir 0o755;
+       Out_channel.with_open_bin (Filename.concat cfg_dir "runtime.toml") (fun oc ->
+         output_string oc (Printf.sprintf "[transport]\nhttp_base_url = %S\n" value));
+       Config_boot_overrides.reset_for_tests ();
+       Fun.protect
+         ~finally:(fun () ->
+           Config_boot_overrides.reset_for_tests ();
+           Fs_compat.remove_tree base_path)
+         (fun () ->
+            match Keeper_runtime_config.load_and_apply ~base_path with
+            | Ok _ -> Alcotest.failf "the base URL %S was accepted" value
+            | Error failure ->
+              Alcotest.(check bool)
+                (Printf.sprintf "the refusal of %S names the key" value)
+                true
+                (String_util.contains_substring
+                   (Keeper_runtime_config.load_failure_to_string failure)
+                   Env_config_core.http_base_url_toml_key)))
+    [ "masc.example.com"; "https://masc.example.com/app"; "" ]
+;;
+
+(* A server that started with no base URL holds the address it bound in the
+   variable, written by the process itself. A base URL the operator then adds
+   to the file waits for a restart; it is not hidden by an export. A value the
+   shell exported does hide it. *)
+let test_a_first_base_url_in_the_file_waits_for_a_restart () =
+  let key = Env_config_core.http_base_url_env_key in
+  let inherited = Sys.getenv_opt key in
+  Config_boot_overrides.reset_for_tests ();
+  Fun.protect
+    ~finally:(fun () ->
+      (match inherited with
+       | Some value -> Unix.putenv key value
+       | None -> Unix.unsetenv key);
+      Config_boot_overrides.reset_for_tests ())
+    (fun () ->
+       let doc =
+         match
+           Keeper_toml_loader.parse_toml
+             "[transport]\nhttp_base_url = \"https://masc.example.test\"\n"
+         with
+         | Ok doc -> doc
+         | Error message -> Alcotest.failf "the document does not parse: %s" message
+       in
+       let status () =
+         match Keeper_runtime_config.overlay_application_to_yojson doc with
+         | `Assoc fields ->
+           (match List.assoc_opt "status" fields with
+            | Some (`String status) -> status
+            | Some _ | None -> Alcotest.fail "the overlay has no status")
+         | _ -> Alcotest.fail "the overlay is not an object"
+       in
+       Config_boot_overrides.put_process_env key "http://127.0.0.1:8935";
+       Alcotest.(check string)
+         "the bound address does not hide the file"
+         "pending_restart"
+         (status ());
+       Unix.putenv key "https://shell.example.test";
+       Alcotest.(check string) "an export of the shell does" "preempted_by_env" (status ()))
 ;;
 
 let () =
@@ -653,5 +737,9 @@ let () =
             test_parameterized_effort_on_models_and_bindings
         ; Alcotest.test_case "typed boot overrides decoded without string roundtrip" `Quick
             test_typed_boot_overrides_decoded_without_string_roundtrip
+        ; Alcotest.test_case "a base URL that is not an origin stops the load" `Quick
+            test_a_base_url_that_is_not_an_origin_stops_the_load
+        ; Alcotest.test_case "a first base URL in the file waits for a restart" `Quick
+            test_a_first_base_url_in_the_file_waits_for_a_restart
         ] )
     ]

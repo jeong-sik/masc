@@ -72,10 +72,10 @@ let disabled_reason_detail = function
       expected_path
   | Redirect_uri_origin_mismatch { base_url_origin; redirect_origin } ->
     Printf.sprintf
-      "redirect_uri origin %s does not match %s origin %s"
+      "redirect_uri origin %s does not match the origin %s of the base URL (%s)"
       redirect_origin
-      Env_config_core.http_base_url_env_key
       base_url_origin
+      Env_config_core.http_base_url_setting_names
 ;;
 
 let disabled_reason_to_json reason =
@@ -146,7 +146,7 @@ let refusal_to_string refusal =
          server (%s) is on %s"
         (provider_name provider)
         redirect_origin
-        Env_config_core.http_base_url_env_key
+        Env_config_core.http_base_url_setting_names
         base_url_origin
     | Redirect_not_read { provider; redirect_uri = _ } ->
       Printf.sprintf

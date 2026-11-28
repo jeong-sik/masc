@@ -313,6 +313,10 @@ let masc_host () =
     Defined here (above [masc_http_base_url]) so the constant is in scope
     before first use. *)
 let http_base_url_env_key = "MASC_HTTP_BASE_URL"
+let http_base_url_toml_key = "transport.http_base_url"
+
+let http_base_url_setting_names =
+  Printf.sprintf "%s, else %s of runtime.toml" http_base_url_env_key http_base_url_toml_key
 let mcp_url_env_key = "MASC_URL"
 
 let rec masc_http_base_url () =

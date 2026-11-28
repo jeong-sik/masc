@@ -88,9 +88,32 @@ let is_file_owned name =
   StringSet.mem name (Atomic.get file_owned)
 ;;
 
+(* Values this process wrote into its own environment. The listener writes the
+   address it bound into MASC_HTTP_BASE_URL when no base URL is configured, so
+   its readers and its children see one address. A variable that still holds
+   the value the process wrote did not come from the shell that started it. *)
+let process_written : string StringMap.t Atomic.t = Atomic.make StringMap.empty
+
+let put_process_env name value =
+  Unix.putenv name value;
+  let rec loop () =
+    let current = Atomic.get process_written in
+    let updated = StringMap.add name value current in
+    if not (Atomic.compare_and_set process_written current updated) then loop ()
+  in
+  loop ()
+;;
+
+let written_by_this_process name value =
+  match StringMap.find_opt name (Atomic.get process_written) with
+  | Some written -> String.equal written value
+  | None -> false
+;;
+
 let reset_for_tests () =
   Atomic.set table StringMap.empty;
-  Atomic.set file_owned StringSet.empty
+  Atomic.set file_owned StringSet.empty;
+  Atomic.set process_written StringMap.empty
 ;;
 
 type source =
@@ -107,6 +130,6 @@ let source name =
   if is_file_owned name then boot_or_default ()
   else
     match Sys.getenv_opt name with
-    | Some _ -> Env
-    | None -> boot_or_default ()
+    | Some value when not (written_by_this_process name value) -> Env
+    | Some _ | None -> boot_or_default ()
 ;;

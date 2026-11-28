@@ -230,8 +230,6 @@ let speaker_of_endpoint endpoint =
 let default_agent_voices () = []
 ;;
 
-let trim_opt = Env_config_core.trim_opt
-
 let normalize_base_url value =
   let trimmed = String.trim value in
   if String.length trimmed > 1 && String.ends_with ~suffix:"/" trimmed
@@ -241,7 +239,8 @@ let normalize_base_url value =
 
 (* Where the overlay reaches the MASC server.
 
-   [MASC_HTTP_BASE_URL] says it outright and wins. Without it the server is the
+   A configured base URL ([MASC_HTTP_BASE_URL], or else transport.http_base_url
+   of runtime.toml) says it outright and wins. Without it the server is the
    one on this machine, so the address is loopback and the port is the one it
    listens on.
 
@@ -256,7 +255,7 @@ let normalize_base_url value =
    arms produced the same string, and the predicate that picked between them
    had this as its only caller. *)
 let default_session_base_url () =
-  match Sys.getenv_opt Env_config_core.http_base_url_env_key |> trim_opt with
+  match Env_config_core.masc_http_base_url_opt () with
   | Some base_url -> normalize_base_url base_url
   | None ->
     Printf.sprintf

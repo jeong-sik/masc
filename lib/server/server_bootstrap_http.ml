@@ -38,9 +38,19 @@ let make_http_config ~address ~port : Http.config =
   Unix.putenv
     Env_config_core.mcp_url_env_key
     (base_url ^ "/mcp");
-  (match Sys.getenv_opt Env_config_core.http_base_url_env_key with
-   | Some existing when String.trim existing <> "" -> ()
-   | _ -> Unix.putenv Env_config_core.http_base_url_env_key base_url);
+  (* The variable is written only when no base URL is configured: the
+     address the listener binds, which the trust policy reads back as the
+     explicit identity. A base URL of the operator stays where the operator
+     put it. The variable keeps its own; transport.http_base_url stays in the
+     file, where the getter reads it. Copying the file's value into the
+     variable would hide the file (the variable wins over it), report it to
+     the settings panel as the environment's, and hand it to every child. *)
+  (match Env_config_core.masc_http_base_url_opt () with
+   | Some (_ : string) -> ()
+   | None ->
+     (* Recorded as written by the process, so the settings panel does not
+        take the bound address for an export of the shell. *)
+     Config_boot_overrides.put_process_env Env_config_core.http_base_url_env_key base_url);
   config
 ;;
 

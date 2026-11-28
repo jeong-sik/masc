@@ -4962,13 +4962,14 @@ supports_structured_output = true
 supports_native_streaming = true
 ignored_sampling_parameters = ["temperature", "top_p"]
 
-# K2.7 Code Highspeed. The official model table gives it up to 262144 tokens,
-# and its FAQ names kimi-for-coding-highspeed among the models without 1M
-# context (https://www.kimi.com/code/docs/en/kimi-code/models.html, checked 2026-11-28T12:58Z).
 [[models]]
 model_id = "kimi-for-coding-highspeed"
 provider_name = "kimi_coding"
 base = "openai_chat"
+# K2.7 Code Highspeed. The official model table gives it up to 262144 tokens,
+# and its FAQ names kimi-for-coding-highspeed among the models without 1M
+# context. Checked 2026-11-28T12:58Z:
+# https://www.kimi.com/code/docs/en/kimi-code/models.html.
 max_context_tokens = 262144
 max_output_tokens = 131072
 supports_tools = true
@@ -5041,11 +5042,11 @@ supports_prompt_caching = true
 supports_native_streaming = true
 ignored_sampling_parameters = ["temperature", "top_p"]
 
-# Same model as the kimi_coding row above: up to 262144 tokens, no 1M context.
 [[models]]
 model_id = "kimi-for-coding-highspeed"
 provider_name = "kimi_coding_anthropic"
 base = "kimi"
+# The window of the kimi_coding row: up to 262144 tokens, no 1M context.
 max_context_tokens = 262144
 max_output_tokens = 131072
 supports_tools = true

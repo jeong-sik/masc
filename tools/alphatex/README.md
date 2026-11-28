@@ -109,10 +109,13 @@ pnpm test
 
 `--render` draws the whole score as one PNG. `--export-midi` writes a
 Standard MIDI File (format 0, one channel per instrument). `--audio` writes
-44.1 kHz stereo WAV. Each prints one JSON line: engine, version, title,
+44.1 kHz stereo WAV, about 10 MB a minute. `--audio-max-bytes N` stops the
+WAV before it passes N bytes, header included: the partial file is removed
+and the export exits 73. Each prints one JSON line: engine, version, title,
 tracks and bars. Source that does not parse exits 65 with alphaTab's
 diagnostics on stderr; any other failure exits 1. MASC's
-`keeper_music_render` tool runs these exports on the server host.
+`keeper_music_render` tool runs these exports on the server host and passes
+the attachment store's file limit as `--audio-max-bytes`.
 
 Exports refuse to overwrite an existing file. Rendering and synthesis in the
 interactive view run on workers. Only the active generation may replace the

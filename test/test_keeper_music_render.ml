@@ -49,6 +49,7 @@ let test_arguments () =
 type ending =
   | Summary
   | Source_error
+  | Audio_too_long
   | Crash
 
 let write_file ?(perm = 0o644) path contents =
@@ -65,6 +66,8 @@ let fake_alphatex ~dir ending =
     | Summary ->
       {|printf '%s\n' '{"engine":"alphaTab","version":"test","title":"Riff","tracks":1,"bars":2}'|}
     | Source_error -> "echo 'alphaTex: Error AT202(1,8)->(1,9): Unexpected token' >&2; exit 65"
+    | Audio_too_long ->
+      "echo 'alphaTex: the audio passes 20971520 bytes after 118.9 s; shorten the score' >&2; exit 73"
     | Crash -> "echo 'node crashed' >&2; exit 1"
   in
   let script = Filename.concat dir "masc-alphatex" in
@@ -75,12 +78,13 @@ let fake_alphatex ~dir ending =
        ; "cat \"$1\" > " ^ quoted "source"
        ; "shift"
        ; "while [ $# -gt 0 ]; do"
+       ; "  fixture="
        ; "  case \"$1\" in"
        ; "    --render) fixture=" ^ quoted "score.png" ^ " ;;"
        ; "    --export-midi) fixture=" ^ quoted "score.mid" ^ " ;;"
        ; "    --audio) fixture=" ^ quoted "score.wav" ^ " ;;"
        ; "  esac"
-       ; "  if [ -f \"$fixture\" ]; then cp \"$fixture\" \"$2\"; fi"
+       ; "  if [ -n \"$fixture\" ] && [ -f \"$fixture\" ]; then cp \"$fixture\" \"$2\"; fi"
        ; "  shift 2"
        ; "done"
        ; tail
@@ -131,8 +135,10 @@ let test_rendered_files_are_stored () =
     (read_file (Filename.concat fixtures "source"));
   (match String.split_on_char '\n' (String.trim (read_file (Filename.concat fixtures "argv"))) with
    | _source_path :: flags_and_paths ->
-     check (list string) "one flag per output, in score, midi, audio order"
-       [ "--render"; "score.png"; "--export-midi"; "score.mid"; "--audio"; "score.wav" ]
+     check (list string) "one flag per output, in score, midi, audio order, then the WAV limit"
+       [ "--render"; "score.png"; "--export-midi"; "score.mid"; "--audio"; "score.wav"
+       ; "--audio-max-bytes"; string_of_int (Attachment_store.max_bytes ())
+       ]
        (List.mapi (fun index arg -> if index mod 2 = 0 then arg else Filename.basename arg)
           flags_and_paths)
    | [] -> fail "masc-alphatex was given no arguments");
@@ -218,7 +224,20 @@ let test_files_too_large_to_store_are_refused_before_storing () =
   in
   check bool "each file of the next case fits one attachment" true
     (wav_bytes <= Attachment_store.max_bytes ());
-  refused "files over the budget together" ~wav_bytes ~names:"the files total"
+  refused "files over the budget together" ~wav_bytes ~names:"the files total";
+  (* masc-alphatex stops a WAV at the limit it is given and exits 73, so a
+     long score never fills the disk with audio the store would refuse. *)
+  let stopped =
+    run_with ~base_path ~fixtures Audio_too_long {|{"source":":4 3.6","outputs":["score","audio"]}|}
+  in
+  (match failure_of stopped with
+   | Some (Tool_result.Policy_rejection, Tool_result.Proven_pre_effect) -> ()
+   | Some _ | None ->
+     failf "a WAV stopped at its limit: not a Policy_rejection before any effect: %s"
+       stopped.raw_output);
+  check bool "a WAV stopped at its limit: masc-alphatex's reason is passed on" true
+    (contains ~sub:"the audio passes" stopped.raw_output);
+  check int "a WAV stopped at its limit: nothing stored" 0 (stored_for_alice ~base_path)
 
 let test_absent_executable_is_a_missing_dependency () =
   let saved = Sys.getenv_opt "PATH" in

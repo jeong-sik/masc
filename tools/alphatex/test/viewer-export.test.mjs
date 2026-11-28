@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -50,5 +50,34 @@ test('--export-midi does not overwrite an existing file', () => {
   try {
     assert.equal(run.status, 1)
     assert.equal(readFileSync(join(directory, 'taken.mid'), 'utf8'), 'kept')
+  } finally { rmSync(directory, { recursive: true, force: true }) }
+})
+
+test('--audio-max-bytes stops a WAV that would pass the limit and leaves no file', () => {
+  const { directory, run } = exportScore(directory => ['--audio', join(directory, 'riff.wav'), '--audio-max-bytes', '50000'])
+  try {
+    assert.equal(run.status, 73, run.stderr)
+    assert.match(run.stderr, /passes 50000 bytes/)
+    assert.equal(existsSync(join(directory, 'riff.wav')), false)
+  } finally { rmSync(directory, { recursive: true, force: true }) }
+})
+
+test('--audio-max-bytes lets a WAV within the limit through', () => {
+  const limit = 20 * 1024 * 1024
+  const { directory, run } = exportScore(directory => ['--audio', join(directory, 'riff.wav'), '--audio-max-bytes', String(limit)])
+  try {
+    assert.equal(run.status, 0, run.stderr)
+    const size = statSync(join(directory, 'riff.wav')).size
+    assert.ok(size > 44 && size <= limit, `a WAV of ${size} bytes`)
+  } finally { rmSync(directory, { recursive: true, force: true }) }
+})
+
+test('a limit that is not a positive integer is refused before any file is written', () => {
+  const { directory, run } = exportScore(directory => ['--export-midi', join(directory, 'riff.mid'), '--audio', join(directory, 'riff.wav'), '--audio-max-bytes', '0'])
+  try {
+    assert.equal(run.status, 1)
+    assert.match(run.stderr, /--audio-max-bytes must be a positive integer/)
+    assert.equal(existsSync(join(directory, 'riff.mid')), false)
+    assert.equal(existsSync(join(directory, 'riff.wav')), false)
   } finally { rmSync(directory, { recursive: true, force: true }) }
 })

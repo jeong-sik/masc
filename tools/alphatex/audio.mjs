@@ -19,14 +19,20 @@ export function waveHeader(dataBytes, sampleRate) {
   return header
 }
 
-export function exportWave(source, path, { soundfontPath, tracks, cancelled = () => false } = {}) {
+export function exportWave(source, path, { soundfontPath, tracks, cancelled = () => false, maxBytes } = {}) {
   const sampleRate = 44100
   const soundfont = soundfontPath ? readFileSync(soundfontPath) : undefined
   const exporter = createAudioExporter(source, { soundfont, tracks, sampleRate })
-  return writeExporterWave(exporter, path, { sampleRate, cancelled })
+  return writeExporterWave(exporter, path, { sampleRate, cancelled, maxBytes })
 }
 
-export function writeExporterWave(exporter, path, { sampleRate = 44100, cancelled = () => false, frames } = {}) {
+// sysexits EX_CANTCREAT: the score plays longer than the file it may make.
+export const exitAudioTooLarge = 73
+
+// [maxBytes] bounds the whole file, header included. Synthesis stops before
+// the chunk that would pass it, so the disk never holds more than that, and
+// the partial file is removed like any unfinished one.
+export function writeExporterWave(exporter, path, { sampleRate = 44100, cancelled = () => false, frames, maxBytes } = {}) {
   const fd = openSync(path, 'wx', 0o600)
   let dataBytes = 0
   let peak = 0
@@ -45,6 +51,9 @@ export function writeExporterWave(exporter, path, { sampleRate = 44100, cancelle
         peak = Math.max(peak, Math.abs(sample))
         if (sample < -1 || sample > 1) clippedSamples++
         pcm.writeInt16LE(Math.round(Math.max(-1, Math.min(1, sample)) * 32767), i * 2)
+      }
+      if (maxBytes !== undefined && 44 + dataBytes + pcm.length > maxBytes) {
+        throw Object.assign(new Error(`the audio passes ${maxBytes} bytes after ${(dataBytes / (sampleRate * 4)).toFixed(1)} s; shorten the score or leave audio out`), { exitCode: exitAudioTooLarge })
       }
       writeSync(fd, pcm)
       dataBytes += pcm.length

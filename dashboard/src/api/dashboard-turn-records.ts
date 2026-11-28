@@ -27,7 +27,6 @@ export const TURN_PROMPT_BLOCK_IDS = [
   'recalled_memory',
   'recalled_memory_status',
   'operator_note',
-  'skill_compositions',
   'arrived_stimuli',
 ] as const
 

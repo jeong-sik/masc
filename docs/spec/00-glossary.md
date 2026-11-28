@@ -2934,8 +2934,7 @@ status: reference
   `dynamic_context`(연속성 스냅샷·skill route·worktree·telemetry 피드백·turn
   지시·최근 실패 기억을 한 문자열로 합친 소프트 컨텍스트),
   `temporal_summary`, `memory_os_recall`, `recalled_memory`(기억 판정이 고른 기억 본문),
-  `recalled_memory_status`(그 판정이 무엇이었는지 말하는 줄), `operator_note`,
-  `skill_compositions`(그 턴의 도구 표면이 실은 composition Skill들).
+  `recalled_memory_status`(그 판정이 무엇이었는지 말하는 줄), `operator_note`.
   생산자가 없는 값은 닫힌 계약에서 일부러 빠져 있다. block id 하나가
   대시보드의 turn record 디코더 목록(`TURN_PROMPT_BLOCK_IDS`)에서 빠지면
   그 Keeper의 전체 turn record가 거부되므로, id 추가·변경은 decode 경로

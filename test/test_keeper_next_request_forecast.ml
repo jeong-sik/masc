@@ -721,12 +721,12 @@ let test_the_pinned_blocks_follow_the_assemblys_cache_order () =
       [ component (Turn_record.Prompt_block Prompt_block_id.Temporal_summary) 36
       ; component (Turn_record.Prompt_block Prompt_block_id.Dynamic_context) 17_218
       ; component (Turn_record.Prompt_block Prompt_block_id.Memory_os_recall) 139_966
-      ; component (Turn_record.Prompt_block Prompt_block_id.Skill_compositions) 321
+      ; component (Turn_record.Prompt_block Prompt_block_id.Constitution_amendments) 321
       ; component (Turn_record.Prompt_block Prompt_block_id.Keeper_instructions) 10_832
       ]
   in
-  Alcotest.(check (list string)) "skills, recall, dynamic context, clock"
-    [ "skill_compositions"; "memory_os_recall"; "dynamic_context"; "temporal_summary" ]
+  Alcotest.(check (list string)) "amendments, recall, dynamic context, clock"
+    [ "constitution_amendments"; "memory_os_recall"; "dynamic_context"; "temporal_summary" ]
     (block_names composition.Keeper_next_request_forecast.pinned_blocks)
 
 (* The two recall blocks ride the first round only, like the recall notice, so
@@ -976,7 +976,7 @@ let parts_for_assembly : Keeper_next_request_forecast.measured_parts =
   ; pinned_runtime_id = glm
   ; pinned_bytes = 157_541
   ; pinned_blocks =
-      [ Prompt_block_id.Skill_compositions, 321
+      [ Prompt_block_id.Constitution_amendments, 321
       ; Prompt_block_id.Memory_os_recall, 139_966
       ; Prompt_block_id.Dynamic_context, 17_218
       ; Prompt_block_id.Temporal_summary, 36
@@ -1028,7 +1028,7 @@ let test_the_assembly_travels_prompt_tools_history_wake_then_context () =
     Alcotest.(check int) "the wake line as the encoder counts it" 191 wake;
     Alcotest.(check int) "the context is the pinned total" 157_541 context;
     Alcotest.(check (list string)) "with its blocks in assembly order"
-      [ "skill_compositions"; "memory_os_recall"; "dynamic_context"; "temporal_summary" ]
+      [ "constitution_amendments"; "memory_os_recall"; "dynamic_context"; "temporal_summary" ]
       (block_names blocks)
   | _ -> Alcotest.fail "five slots without a preamble"
 

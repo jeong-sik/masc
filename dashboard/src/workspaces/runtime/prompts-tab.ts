@@ -12,24 +12,37 @@
  * - Overrides the server saved but does not apply (`held_back`) are listed
  *   with the server's reason above the list. Clearing one removes it from
  *   disk; the server's clear takes held-back entries too.
- * - Transport decodes only a 2xx answer, so an answer that fails to decode is
- *   a change the server already made: the catalog is read again and the
+ * - A failed answer is read by `failureOutcome`. Transport decodes only a 2xx
+ *   answer, so one that fails to decode is a change the server made: the
  *   operator is told the answer was unreadable, not that the change failed.
- * - Drafts and requests are kept per prompt here, not in the detail, because
- *   picking another prompt unmounts the detail. A request answered while its
- *   prompt is not on screen still drops the right draft, and a refusal for it
- *   is also told in a toast.
+ *   With no answer, or a 5xx, the outcome is unknown and the operator is told
+ *   so. Either way the catalog is read again; a refusal changed nothing.
+ * - A write ends when the catalog read after it does, so the detail never
+ *   shows the text a save just replaced.
+ * - Drafts and requests live in `prompt-edits.ts`, so they outlast the detail
+ *   and the tab. An outcome for a prompt whose detail is not on screen is
+ *   also told in a toast.
  */
 
 import { html } from 'htm/preact'
-import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
+import { useEffect, useLayoutEffect, useMemo, useState } from 'preact/hooks'
 import { apiGet, apiMutate, authSession, resourceCache, sessionEpoch } from '../../core'
 import { MasterDetail } from '../../components/primitives/master-detail'
 import { RefreshButton } from '../../components/primitives'
 import { isAdminLockedForSession } from '../../routes/router'
 import { pushShellToast } from '../../shell/shell-state'
 import { Chip, SourceChip } from './prompt-chip'
-import { PromptDetail, type PromptWrite } from './prompt-detail'
+import { PromptDetail } from './prompt-detail'
+import {
+  beginPromptWrite,
+  finishPromptWrite,
+  isPromptShown,
+  markShownPrompt,
+  promptEditsFor,
+  setPromptDraft,
+  writeEndText,
+  type PromptWriteEnd,
+} from './prompt-edits'
 import {
   decodeOverrideApplied,
   decodePromptCatalog,
@@ -40,6 +53,7 @@ import {
   type PromptOverrideRequest,
 } from './prompts-wire'
 import type { WorkspaceViewProps } from './types'
+import { failureOutcome } from './write-outcome'
 
 export const PROMPT_CATALOG_CACHE_KEY = 'runtime:prompts'
 
@@ -95,15 +109,19 @@ export function PromptsTab(_props: WorkspaceViewProps) {
   const [withFragments, setWithFragments] = useState(false)
   const [onlyOverrides, setOnlyOverrides] = useState(false)
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
-  const [drafts, setDrafts] = useState<ReadonlyMap<string, string>>(new Map())
-  const [writes, setWrites] = useState<ReadonlyMap<string, PromptWrite>>(new Map())
-  // Read when an answer arrives, after the render that sent the request.
-  const shownKey = useRef<string | null>(null)
-  shownKey.current = selectedKey
+  const { drafts, writes } = promptEditsFor(epoch)
 
   useEffect(() => {
     void loadPromptCatalog('mount')
   }, [epoch])
+
+  // Synced as the render commits, not after paint: an answer that arrives
+  // right after another prompt is picked, or after the tab is gone, is told
+  // in a toast.
+  useLayoutEffect(() => {
+    markShownPrompt(selectedKey)
+    return () => markShownPrompt(null)
+  }, [selectedKey])
 
   const catalog = catalogObs.kind === 'value' ? catalogObs.data : null
   const categories = useMemo(
@@ -121,52 +139,44 @@ export function PromptsTab(_props: WorkspaceViewProps) {
   }, [catalog, search, category, withFragments, onlyOverrides])
   const selected = catalog?.prompts.find(p => p.key === selectedKey) ?? null
 
-  const setDraft = (key: string, text: string | undefined) => {
-    setDrafts(prev => {
-      const next = new Map(prev)
-      if (text === undefined) next.delete(key)
-      else next.set(key, text)
-      return next
-    })
-  }
+  const setDraft = (key: string, text: string | undefined) => setPromptDraft(epoch, key, text)
 
-  const setWrite = (key: string, write: PromptWrite | undefined) => {
-    setWrites(prev => {
-      const next = new Map(prev)
-      if (write === undefined) next.delete(key)
-      else next.set(key, write)
-      return next
-    })
-  }
-
-  /** Resolves to `null` when the server applied the request, or to why it did not. */
-  const send = async (request: PromptOverrideRequest): Promise<string | null> => {
-    setWrite(request.key, { kind: 'sending' })
-    const res = await apiMutate<OverrideApplied>('POST', '/api/v1/prompts', request, { decode: decodeOverrideApplied })
-    if (!res.ok && res.error.kind !== 'decode') {
-      setWrite(request.key, { kind: 'refused', why: res.error.message })
-      return res.error.message
-    }
-    setWrite(request.key, undefined)
-    if (request.action === 'set') setDraft(request.key, undefined)
-    if (res.ok) pushShellToast(appliedToast(request, res.value), 'success')
-    else pushShellToast(`${request.key}: 서버가 요청을 받았지만 답을 읽지 못했어요 (${res.error.message}). 목록을 다시 읽어요.`, 'warning')
+  const reread = async () => {
     resourceCache.invalidateTopic('prompts')
-    void loadPromptCatalog('manual')
-    return null
+    await loadPromptCatalog('manual')
   }
 
-  const sendFromDetail = async (request: PromptOverrideRequest): Promise<boolean> => {
-    const why = await send(request)
-    if (why !== null && shownKey.current !== request.key) {
-      pushShellToast(`${request.key}: 저장하지 못했어요: ${why}`, 'error')
+  /** Resolves to `true` once the server applied the request and the catalog read after it ended. */
+  const send = async (request: PromptOverrideRequest): Promise<boolean> => {
+    const { key } = request
+    if (!beginPromptWrite(epoch, key)) return false
+    const res = await apiMutate<OverrideApplied>('POST', '/api/v1/prompts', request, { decode: decodeOverrideApplied })
+    if (epoch !== sessionEpoch.peek()) return false
+    if (res.ok) {
+      await reread()
+      finishPromptWrite(epoch, key, undefined, request.action === 'set')
+      pushShellToast(appliedToast(request, res.value), 'success')
+      return true
     }
-    return why === null
-  }
-
-  const clearHeldBack = async (key: string) => {
-    const why = await send({ action: 'clear', key })
-    if (why !== null) pushShellToast(`${key} override 를 지우지 못했어요: ${why}`, 'error')
+    const failure = failureOutcome(res.error.kind)
+    if (failure !== 'refused') await reread()
+    const end: PromptWriteEnd | undefined = (() => {
+      switch (failure) {
+        case 'applied':
+          return undefined
+        case 'refused':
+          return { kind: 'refused', action: request.action, why: res.error.message }
+        case 'unknown':
+          return { kind: 'unknown', why: res.error.message }
+      }
+    })()
+    finishPromptWrite(epoch, key, end, end === undefined && request.action === 'set')
+    if (end === undefined) {
+      pushShellToast(`${key}: 서버가 요청을 받았지만 답을 읽지 못했어요 (${res.error.message}). 목록을 다시 읽었어요.`, 'warning')
+      return true
+    }
+    if (!isPromptShown(key)) pushShellToast(`${key}: ${writeEndText(end)}`, end.kind === 'refused' ? 'error' : 'warning')
+    return false
   }
 
   const master = html`
@@ -201,7 +211,7 @@ export function PromptsTab(_props: WorkspaceViewProps) {
             <div key=${h.key} style=${{ display: 'flex', gap: 'var(--sp-2)', alignItems: 'center', flexWrap: 'wrap' }}>
               <span class="mono" style=${{ fontSize: 'var(--fs-11)', overflowWrap: 'anywhere' }}>${h.key} (${h.bytes} bytes): ${h.reason}</span>
               ${canEdit && html`
-                <button type="button" class="btn-ghost btn-compact" data-testid="prompts-held-back-clear" onClick=${() => void clearHeldBack(h.key)}>
+                <button type="button" class="btn-ghost btn-compact" data-testid="prompts-held-back-clear" disabled=${writes.get(h.key)?.kind === 'sending'} onClick=${() => void send({ action: 'clear', key: h.key })}>
                   지우기
                 </button>
               `}
@@ -255,7 +265,7 @@ export function PromptsTab(_props: WorkspaceViewProps) {
         draft=${drafts.get(selected.key)}
         onDraft=${setDraft}
         write=${writes.get(selected.key)}
-        onSend=${sendFromDetail}
+        onSend=${send}
       />`
 
   return html`

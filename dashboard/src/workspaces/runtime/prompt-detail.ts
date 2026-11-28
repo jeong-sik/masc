@@ -2,15 +2,15 @@
  * One prompt of the catalog: the text in force, how it differs from the file,
  * and an editor for its override.
  *
- * The draft and the request in flight are the parent's (`draft`, `write`),
- * keyed by prompt, because picking another prompt unmounts this component.
- * Coming back keeps what was typed, keeps the editor read-only while that
- * prompt's request is in flight, and shows the reason the server refused it.
- * Saving sends the draft as the override and, once the server applies it, the
- * parent drops the draft. Clearing drops the override so the file text is in
- * force again; a draft the operator has not saved stays. The server checks
- * the template variables and answers with the text now in force, or with the
- * reason it refused.
+ * The draft and the request are kept per prompt outside this component
+ * (`prompt-edits.ts`), because picking another prompt unmounts it. Coming
+ * back keeps what was typed, keeps the editor read-only while that prompt's
+ * request is in flight, and shows what the server answered. Saving sends the
+ * draft as the override; once the server applies it and the catalog shows
+ * the new text, the draft is gone. Clearing drops the override so the file
+ * text is in force again; a draft the operator has not saved stays. The
+ * server checks the template variables and answers with the text now in
+ * force, or with the reason it refused.
  */
 
 import { html } from 'htm/preact'
@@ -18,14 +18,10 @@ import { useState } from 'preact/hooks'
 import { createTwoFilesPatch } from 'diff'
 import { UnifiedDiffView } from '../../components/common/unified-diff'
 import { Chip, SourceChip } from './prompt-chip'
+import { writeEndText, type PromptWrite } from './prompt-edits'
 import type { PromptEntry, PromptOverrideRequest } from './prompts-wire'
 
 type DetailView = 'text' | 'compare' | 'edit'
-
-/** A request for one prompt: in flight, or refused with the server's reason. */
-export type PromptWrite =
-  | { readonly kind: 'sending' }
-  | { readonly kind: 'refused'; readonly why: string }
 
 export interface PromptDetailProps {
   readonly entry: PromptEntry
@@ -33,9 +29,9 @@ export interface PromptDetailProps {
   /** What was typed for this key and not saved, `undefined` for nothing. */
   readonly draft: string | undefined
   readonly onDraft: (key: string, text: string | undefined) => void
-  /** This prompt's request in flight or last refusal, `undefined` for neither. */
+  /** This prompt's request in flight or how the last one ended, `undefined` for neither. */
   readonly write: PromptWrite | undefined
-  /** Sends the request; resolves to `true` when the server applied it. */
+  /** Sends the request; resolves to `true` once the server applied it and the catalog shows it. */
   readonly onSend: (request: PromptOverrideRequest) => Promise<boolean>
 }
 
@@ -71,7 +67,7 @@ export function PromptDetail({ entry, canEdit, draft, onDraft, write, onSend }: 
     (draft !== undefined || write !== undefined) && canEdit ? 'edit' : 'text',
   )
   const busy = write?.kind === 'sending'
-  const refusal = write?.kind === 'refused' ? write.why : null
+  const note = write === undefined || write.kind === 'sending' ? null : writeEndText(write)
   const patch = overridePatch(entry)
   // A view the entry can no longer show (the override is gone, or the session
   // lost admin) falls back to the text in force.
@@ -149,7 +145,7 @@ export function PromptDetail({ entry, canEdit, draft, onDraft, write, onSend }: 
           onInput=${(e: Event) => onDraft(entry.key, (e.currentTarget as HTMLTextAreaElement).value)}
           style=${{ ...preStyle, width: '100%', resize: 'vertical', maxHeight: undefined, minHeight: '16rem' }}
         />
-        ${refusal !== null && html`<div role="alert" class="ap-error" data-testid="prompt-refusal">저장하지 못했어요: ${refusal}</div>`}
+        ${note !== null && html`<div role="alert" class="ap-error" data-testid="prompt-refusal">${note}</div>`}
         <div style=${{ display: 'flex', gap: 'var(--sp-1)', flexWrap: 'wrap' }}>
           <button type="button" class="btn-primary" data-testid="prompt-save" disabled=${busy || !dirty} onClick=${() => void send({ action: 'set', key: entry.key, value: text })}>
             override 저장

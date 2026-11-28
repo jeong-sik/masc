@@ -3,7 +3,7 @@
 import { html } from 'htm/preact'
 import { render } from 'preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { authSession, resetAuthStateForTests, resourceCache } from '../../core'
+import { authSession, bumpSessionEpoch, resetAuthStateForTests, resourceCache } from '../../core'
 import { resetShellStateForTests, shellToasts } from '../../shell/shell-state'
 import { RuntimeWorkspace } from './index'
 
@@ -94,13 +94,18 @@ describe('Runtime → Prompts', () => {
 
   afterEach(() => {
     render(null, container)
+    // Drafts and requests outlast the tab within a session; a new one starts empty.
+    bumpSessionEpoch()
+    resetShellStateForTests()
     container.remove()
     resourceCache.clearAll()
     globalThis.fetch = originalFetch
     vi.restoreAllMocks()
   })
 
-  const mount = () => render(html`<${RuntimeWorkspace} subroute="prompts" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
+  const mount = (subroute = 'prompts') =>
+    render(html`<${RuntimeWorkspace} subroute=${subroute} onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
+  const lastToast = () => shellToasts.value.at(-1)
   const listKeys = () => Array.from(container.querySelectorAll('[role="listitem"] .mono')).map(n => n.textContent)
   const pick = async (key: string) => {
     const row = await vi.waitFor(() => {
@@ -222,6 +227,107 @@ describe('Runtime → Prompts', () => {
     await pick('keeper.worldview')
     expect(container.querySelector('[data-testid="prompt-refusal"]')?.textContent).toContain('SERVER-REASON')
     expect(container.querySelector<HTMLTextAreaElement>('textarea')?.value).toBe('<world>{{goal}}</world>')
+  })
+
+  it('tells a refusal that arrives after leaving the Prompts tab, and shows it with the draft on return', async () => {
+    let release: (r: Response) => void = () => {}
+    serve([prompt('keeper.worldview')], () => new Promise<Response>(resolve => { release = resolve }))
+    mount()
+    await pick('keeper.worldview')
+    click('[data-view="edit"]')
+    await flushUi()
+    await type('<world>{{goal}}</world>')
+    click('[data-testid="prompt-save"]')
+    await flushUi()
+    mount('tools')
+    await flushUi()
+    expect(container.querySelector('[data-testid="runtime-prompts-tab"]')).toBeNull()
+    release(jsonResponse({ ok: false, error: 'SERVER-REASON' }, 400))
+    await vi.waitFor(() => expect(lastToast()?.message).toContain('SERVER-REASON'))
+    expect(lastToast()?.tone).toBe('error')
+    expect(lastToast()?.message).toContain('keeper.worldview')
+    mount()
+    await pick('keeper.worldview')
+    expect(container.querySelector('[data-testid="prompt-refusal"]')?.textContent).toContain('SERVER-REASON')
+    expect(container.querySelector<HTMLTextAreaElement>('textarea')?.value).toBe('<world>{{goal}}</world>')
+  })
+
+  it('sends one request per prompt, from the editor or the held-back banner', async () => {
+    let release: (r: Response) => void = () => {}
+    const server = serve(
+      [prompt('keeper.worldview')],
+      () => new Promise<Response>(resolve => { release = resolve }),
+      [{ key: 'keeper.worldview', bytes: 12, reason: 'template variable {{post}} is no longer declared' }],
+    )
+    mount()
+    await pick('keeper.worldview')
+    click('[data-view="edit"]')
+    await flushUi()
+    await type('second')
+    click('[data-testid="prompt-save"]')
+    await vi.waitFor(() => expect(server.posts).toHaveLength(1))
+    const clear = container.querySelector<HTMLButtonElement>('[data-testid="prompts-held-back-clear"]')!
+    expect(clear.disabled).toBe(true)
+    clear.click()
+    await flushUi()
+    expect(server.posts).toHaveLength(1)
+    release(applied('keeper.worldview', 'override'))
+    await vi.waitFor(() => expect(container.querySelector('textarea')).toBeNull())
+  })
+
+  it('says the outcome is unknown, keeps the draft and reads the catalog again when no answer came back', async () => {
+    const server = serve([prompt('keeper.worldview')], () => { throw new TypeError('Failed to fetch') })
+    mount()
+    await pick('keeper.worldview')
+    click('[data-view="edit"]')
+    await flushUi()
+    await type('<world>maybe</world>')
+    click('[data-testid="prompt-save"]')
+    await vi.waitFor(() => expect(container.querySelector('[data-testid="prompt-refusal"]')?.textContent).toContain('결과를 알 수 없어요'))
+    expect(server.catalogReads()).toBe(2)
+    expect(container.querySelector<HTMLTextAreaElement>('textarea')?.value).toBe('<world>maybe</world>')
+  })
+
+  it('keeps the editor until the catalog read after a save answers', async () => {
+    let releaseRead: (r: Response) => void = () => {}
+    let wrote = false
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === 'POST') {
+        wrote = true
+        return applied('keeper.worldview', 'override')
+      }
+      if (String(input) === '/api/v1/prompts') {
+        const catalog = { prompts: [prompt('keeper.worldview', wrote ? { effective: 'NEW TEXT', source: 'override' } : {})], held_back: [], runtime_assets: [] }
+        return wrote ? new Promise<Response>(resolve => { releaseRead = () => resolve(jsonResponse(catalog)) }) : jsonResponse(catalog)
+      }
+      return jsonResponse({})
+    }) as typeof fetch
+    mount()
+    await pick('keeper.worldview')
+    click('[data-view="edit"]')
+    await flushUi()
+    await type('NEW TEXT')
+    click('[data-testid="prompt-save"]')
+    await flushUi(50)
+    expect(container.querySelector<HTMLTextAreaElement>('textarea')?.readOnly).toBe(true)
+    releaseRead(jsonResponse({}))
+    await vi.waitFor(() => expect(container.querySelector('textarea')).toBeNull())
+    expect(container.textContent).toContain('NEW TEXT')
+  })
+
+  it('tells the operator, without naming the prompt, that a session change lost the answer of a request in flight', async () => {
+    serve([prompt('keeper.worldview')], () => new Promise<Response>(() => {}))
+    mount()
+    await pick('keeper.worldview')
+    click('[data-view="edit"]')
+    await flushUi()
+    await type('lost')
+    click('[data-testid="prompt-save"]')
+    await flushUi()
+    bumpSessionEpoch()
+    await vi.waitFor(() => expect(lastToast()?.message).toContain('세션이 바뀌어서'))
+    expect(lastToast()?.tone).toBe('warning')
+    expect(lastToast()?.message).not.toContain('keeper.worldview')
   })
 
   it('keeps a draft when another prompt is picked and back again', async () => {

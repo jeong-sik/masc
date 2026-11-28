@@ -243,9 +243,7 @@ let test_rarely_changing_blocks_come_first () =
   before Block_id.Memory_os_recall Block_id.Dynamic_context;
   before Block_id.Memory_os_recall Block_id.Librarian_working_context;
   before Block_id.Librarian_working_context Block_id.Dynamic_context;
-  before Block_id.Memory_os_recall Block_id.Temporal_summary;
-  before Block_id.Skill_compositions Block_id.Dynamic_context;
-  before Block_id.Skill_compositions Block_id.Temporal_summary
+  before Block_id.Memory_os_recall Block_id.Temporal_summary
 ;;
 
 (* The recall body changes only when the set of carried memories does, so it

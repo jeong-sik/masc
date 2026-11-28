@@ -156,7 +156,7 @@ let is_turn_block = function
   | Prompt_block_id.(
       Keeper_instructions | Dynamic_context | Active_goals | Direct_input_source | Constitution_amendments
       | Temporal_summary | Memory_os_recall | Librarian_working_context | Recalled_memory
-      | Recalled_memory_status | Operator_note | Skill_compositions | Arrived_stimuli) -> false
+      | Recalled_memory_status | Operator_note | Arrived_stimuli) -> false
 ;;
 
 let turn_block_message turn_block = extra_system_context_message turn_block.text
@@ -462,7 +462,7 @@ let block_body assembly = function
   | Prompt_block_id.(
       Keeper_instructions | Active_goals | Direct_input_source | Completion_authority | Goals_awaiting_proof
       | Constitution_amendments | Temporal_summary | Memory_os_recall | Librarian_working_context | Recalled_memory
-      | Recalled_memory_status | Operator_note | Skill_compositions | Arrived_stimuli) -> Whole_text
+      | Recalled_memory_status | Operator_note | Arrived_stimuli) -> Whole_text
 ;;
 
 (* The context carrier splits into its typed blocks only when it is the exact
@@ -941,7 +941,7 @@ let resume_prompt ~goal ~held ~turn_observation ?composed_context
           Prompt_block_id.(
             Keeper_instructions | Active_goals | Direct_input_source | Completion_authority | Goals_awaiting_proof
             | Constitution_amendments | Temporal_summary | Memory_os_recall | Librarian_working_context | Recalled_memory
-            | Recalled_memory_status | Operator_note | Skill_compositions | Arrived_stimuli)
+            | Recalled_memory_status | Operator_note | Arrived_stimuli)
       | Session_store.Librarian_working_state
       | Session_store.Historical_task_reference | Session_store.Tool_result_receipts
       | Session_store.Codex_system_prompt ) -> false

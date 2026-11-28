@@ -55,7 +55,6 @@ let test_block_id_post_tool_round_classes () =
     ; (Prompt_block_id.Recalled_memory, false)
     ; (Prompt_block_id.Recalled_memory_status, false)
     ; (Prompt_block_id.Operator_note, true)
-    ; (Prompt_block_id.Skill_compositions, false)
     ; (Prompt_block_id.Arrived_stimuli, true)
     ]
   in

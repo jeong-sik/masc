@@ -197,12 +197,14 @@ let list_members t request reqd =
 type member_post_action =
   | Disable
   | Enable
+  | Grant_admin
   | Revoke_admin
 
 let parse_member_post_path rest =
   match String.split_on_char '/' rest with
   | [ user_id; "disable" ] when not (String.equal user_id "") -> Some (user_id, Disable)
   | [ user_id; "enable" ] when not (String.equal user_id "") -> Some (user_id, Enable)
+  | [ user_id; "grant-admin" ] when not (String.equal user_id "") -> Some (user_id, Grant_admin)
   | [ user_id; "revoke-admin" ] when not (String.equal user_id "") -> Some (user_id, Revoke_admin)
   | _ -> None
 ;;
@@ -228,6 +230,10 @@ let member_post_action t request reqd =
       with_browser request reqd (fun browser ->
         with_body reqd (fun (_ : string) ->
           respond reqd (Login_member_routes.enable t browser ~user_id)))
+    | Some (user_id, Grant_admin) ->
+      with_browser request reqd (fun browser ->
+        with_body reqd (fun (_ : string) ->
+          respond reqd (Login_member_routes.grant_admin t browser ~user_id)))
     | Some (user_id, Revoke_admin) ->
       with_browser request reqd (fun browser ->
         with_body reqd (fun body ->

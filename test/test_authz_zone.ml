@@ -335,6 +335,7 @@ let refusal_name : Authz_state.refusal -> string = function
   | Authz_state.Revocation_pending _ -> "Revocation_pending"
   | Authz_state.Admin_assignment_unreadable _ -> "Admin_assignment_unreadable"
   | Authz_state.Admin_assignment _ -> "Admin_assignment"
+  | Authz_state.Admin_grant _ -> "Admin_grant"
   | Authz_state.Principal_unreadable _ -> "Principal_unreadable"
   | Authz_state.Principal_event _ -> "Principal_event"
   | Authz_state.Author_inactive _ -> "Author_inactive"
@@ -924,6 +925,7 @@ let invite_draft
   ?(at_ms = at_ms + 1)
   ?(invite_id = invite_id)
   ?(token = "token-1")
+  ?(role = Invite_event.Admin)
   ()
   =
   let event =
@@ -931,7 +933,7 @@ let invite_draft
       { invite_id
       ; token_digest = Invite_event.Token_digest.of_token token
       ; expires_at_ms = at_ms + 1000
-      ; role = Invite_event.Admin
+      ; role
       }
   in
   match Invite_event.to_body event with
@@ -1363,6 +1365,13 @@ let admin_revocation_draft ~by ~user_id ~at_ms =
   | Error _ -> Alcotest.fail "fixture Admin revocation refused"
 ;;
 
+let admin_grant_draft ~by ~user_id ~at_ms =
+  match Authz_admin_event.to_body (Authz_admin_event.Granted { user_id }) with
+  | Ok body ->
+    timed ~at_ms ~author:(Author.Authenticated (Principal.Human by)) ~kind:R.Kind.Admin_assignment body
+  | Error _ -> Alcotest.fail "fixture Admin grant refused"
+;;
+
 (* Two Admins, and a revocation of the second that the store gave up. The
    second Admin joined before the revocation began, so a restart reads that
    admission as the writer did and starts the block after it: the log opens,
@@ -1412,6 +1421,52 @@ let an_aborted_admin_revocation_starts_after_the_admission () =
       "Refused Admin_assignment"
       restarted
       (admin_revocation_draft ~by:first_admin ~user_id:first_admin ~at_ms:(at_ms + 7)))
+;;
+
+let a_member = get (User_id.of_string "00112233445566778899aabbccddeeff")
+
+(* An Admin makes a Member an Admin. The grant raises the role epoch of the
+   Member, as an Admin admission does, so it goes through the store as an
+   intent and its answer. A restart folds the log onto that store and finds
+   the Member an Admin, with the same granter. *)
+let a_granted_admin_survives_a_restart () =
+  with_dirs (fun dirs ->
+    let (_ : B.completed) = bootstrap dirs in
+    let zone = open_zone dirs in
+    let (_ : Z.committed) = commit_ok zone (invite_draft ()) in
+    let (_ : Z.committed) = commit_ok zone (admission_draft ~at_ms:(at_ms + 2)) in
+    let (_ : Z.committed) =
+      commit_ok
+        zone
+        (invite_draft
+           ~author:(Author.Authenticated (Principal.Human first_admin))
+           ~at_ms:(at_ms + 3)
+           ~invite_id:second_invite_id
+           ~token:"token-2"
+           ~role:Invite_event.Member
+           ())
+    in
+    let (_ : Z.committed) =
+      commit_ok zone (admission_draft_of ~person:a_member ~sub:"333" ~invite_id:second_invite_id ~at_ms:(at_ms + 4))
+    in
+    let principals (state : Authz_state.t) = state.Authz_state.principals in
+    Alcotest.(check bool)
+      "the Member is not an Admin before the grant"
+      false
+      (Authz_principal_state.is_admin (principals (Z.snapshot zone).Z.state) a_member);
+    let granted = commit_ok zone (admin_grant_draft ~by:first_admin ~user_id:a_member ~at_ms:(at_ms + 5)) in
+    check_settled "nothing to close" "Nothing_to_settle" granted;
+    let check_granted label state =
+      Alcotest.(check bool) (label ^ ": an Admin") true (Authz_principal_state.is_admin (principals state) a_member);
+      Alcotest.(check (option string))
+        (label ^ ": the granter")
+        (Some (User_id.to_string first_admin))
+        (Option.map User_id.to_string (Authz_principal_state.admin_granter (principals state) a_member))
+    in
+    check_granted "the published state" granted.Z.snapshot.Z.state;
+    let opened = check_restart "a restart" dirs ~mode:on ~head:granted.Z.record_hash in
+    check_store "a restart" opened ~pending:None ~last_committed:granted.Z.record_hash ~aborted:[];
+    check_granted "the replay" opened.replay.Z.Replay.state)
 ;;
 
 (* ---- principal records ---- *)
@@ -2130,6 +2185,7 @@ let () =
             "an aborted Admin revocation starts after the admission"
             `Quick
             an_aborted_admin_revocation_starts_after_the_admission
+        ; Alcotest.test_case "a granted Admin survives a restart" `Quick a_granted_admin_survives_a_restart
         ; Alcotest.test_case
             "a disable and a deletion survive a restart"
             `Quick

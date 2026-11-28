@@ -155,6 +155,7 @@ type refusal =
   | Revocation_pending of Authz_records.Subject.t
   | Admin_assignment_unreadable of Authz_admin_event.error
   | Admin_assignment of Authz_principal_state.revocation_refusal
+  | Admin_grant of Authz_principal_state.grant_refusal
   | Principal_unreadable of Authz_principal_event.error
   | Principal_event of Authz_principal_state.principal_refusal
   | Author_inactive of Authz_types.User_id.t
@@ -213,6 +214,7 @@ let refusal_to_string = function
   | Admin_assignment_unreadable error ->
     "the Admin assignment record cannot be read: " ^ Authz_admin_event.error_to_string error
   | Admin_assignment refusal -> Authz_principal_state.revocation_refusal_to_string refusal
+  | Admin_grant refusal -> Authz_principal_state.grant_refusal_to_string refusal
   | Principal_unreadable error ->
     "the principal record cannot be read: " ^ Authz_principal_event.error_to_string error
   | Principal_event refusal -> Authz_principal_state.principal_refusal_to_string refusal
@@ -428,14 +430,32 @@ let held state user_id =
   is_pending state (Authz_records.Subject.Principal (Authz_types.Principal.Human user_id))
 ;;
 
-(* An Admin assignment that ends lowers the role epoch of its principal
-   (design 8.1), so the store takes a [Revoke] on that principal. *)
+(* An Admin assignment raises the role epoch of its principal when it is made
+   and lowers it when it ends (design 8.1). A grant is a [Grant] on that
+   principal, as an admission through an Admin invitation is, so a log
+   restored from before the grant disagrees with the store; the end is a
+   [Revoke]. *)
 let admin_assignment state (record : R.t) =
   match Authz_admin_event.of_body record.R.body with
   | Error error -> Error (Admin_assignment_unreadable error)
-  | Ok (Authz_admin_event.Revoked { user_id; cause = _ } as event) ->
+  | Ok (Authz_admin_event.Granted { user_id }) ->
     (match
-       Authz_principal_state.revoke_admin state.principals ~author:record.R.author ~held:(held state) event
+       Authz_principal_state.grant_admin state.principals ~author:record.R.author ~held:(held state) ~user_id
+     with
+     | Error refusal -> Error (Admin_grant refusal)
+     | Ok principals ->
+       Ok
+         { state = { state with principals }
+         ; high_water =
+             Some
+               (Authz_external_store.Change.Authz
+                  { event = Authz_external_store.Change.Grant
+                  ; subject = Authz_records.Subject.Principal (Authz_types.Principal.Human user_id)
+                  })
+         })
+  | Ok (Authz_admin_event.Revoked { user_id; cause = _ }) ->
+    (match
+       Authz_principal_state.revoke_admin state.principals ~author:record.R.author ~held:(held state) ~user_id
      with
      | Error refusal -> Error (Admin_assignment refusal)
      | Ok principals ->
@@ -544,6 +564,28 @@ let owner_behind state = function
   | Authz_records.Subject.Policy _ -> None
 ;;
 
+(* The Admin who granted a human principal its Admin assignment stands behind
+   that principal as the approver of its join does: an Admin invitation makes
+   its issuer both, and a grant makes its writer the second. *)
+let granted_by state subject canceller =
+  match subject with
+  | Authz_records.Subject.Principal (Authz_types.Principal.Human user_id) ->
+    (match Authz_principal_state.admin_granter state.principals user_id with
+     | Some granter -> Authz_types.User_id.equal granter canceller
+     | None -> false)
+  | Authz_records.Subject.Principal (Authz_types.Principal.Service _)
+  | Authz_records.Subject.Invite _
+  | Authz_records.Subject.Registration _
+  | Authz_records.Subject.Grant _
+  | Authz_records.Subject.Session _
+  | Authz_records.Subject.Pat _
+  | Authz_records.Subject.Service_credential _
+  | Authz_records.Subject.Credential _
+  | Authz_records.Subject.Runtime _
+  | Authz_records.Subject.Keeper_conversation _
+  | Authz_records.Subject.Policy _ -> false
+;;
+
 (* An eligible Admin lifts one block (design 8.3). The canceller is never the
    subject: a principal whose reduction is held is an author that
    [author_refusal] refuses before this. A cancel raises no epoch, so the store
@@ -564,6 +606,8 @@ let cancel state (record : R.t) =
           (match owner_behind state subject with
            | None -> Error (Cancel_owner_unknown subject)
            | Some (Admin_owned owner) when Authz_types.User_id.equal owner canceller ->
+             Error (Canceller_owns_the_subject subject)
+           | Some (Admin_owned _ | Local_operator_owned) when granted_by state subject canceller ->
              Error (Canceller_owns_the_subject subject)
            | Some (Admin_owned _ | Local_operator_owned) ->
              Ok

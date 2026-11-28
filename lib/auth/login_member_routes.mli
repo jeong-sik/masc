@@ -9,11 +9,13 @@
     - [POST /api/v1/auth/members/<id>/disable] disables a principal ({!disable}).
     - [POST /api/v1/auth/members/<id>/enable] re-enables a disabled principal
       ({!enable}).
+    - [POST /api/v1/auth/members/<id>/grant-admin] gives a Member the Admin
+      assignment ({!grant_admin}).
     - [POST /api/v1/auth/members/<id>/revoke-admin] revokes an Admin assignment
       with a required closed-sum cause ({!revoke_admin}).
     - [DELETE /api/v1/auth/members/<id>] deletes a principal ({!delete}).
 
-    The four mutations require an active, non-held Admin browser session on the
+    The five mutations require an active, non-held Admin browser session on the
     same origin with a valid CSRF token ({!Login_routes.acting_reading} plus
     the writer zone commit). Every answer carries [cache-control: no-store]; a
     refusal is JSON [{"error": ...}].
@@ -57,6 +59,19 @@ val disable
     the principal does not exist, 409 when the principal is not disabled, and
     503 when the zone is unavailable. *)
 val enable
+  :  Login_routes.t
+  -> Authz_browser_request.request
+  -> user_id:string
+  -> Login_routes.answer
+
+(** [POST /api/v1/auth/members/<id>/grant-admin]. Commits
+    {!Authz_admin_event.Granted}; the body is not read, as for {!disable}.
+    Answers 200 [{"user_id": ..., "role": "admin"}], 400 on an invalid
+    [user_id], 401/403 on authentication, CSRF, origin, or non-Admin refusal,
+    404 when the principal does not exist, 409 when the principal is disabled,
+    held by a revocation the store gave up, or an Admin already, and 503 when
+    the zone is unavailable. *)
+val grant_admin
   :  Login_routes.t
   -> Authz_browser_request.request
   -> user_id:string

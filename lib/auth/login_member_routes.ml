@@ -83,6 +83,14 @@ let principal_status = function
   | P.Would_leave_no_admin (_ : Authz_types.User_id.t) -> R.Conflict_409
 ;;
 
+let grant_status = function
+  | P.Granter_is_not_an_admin (_ : Authz_records.Author.t) -> R.Forbidden_403
+  | P.No_principal_to_grant (_ : Authz_types.User_id.t) -> R.Not_found_404
+  | P.Grantee_held (_ : Authz_types.User_id.t)
+  | P.Grantee_disabled (_ : Authz_types.User_id.t)
+  | P.Already_an_admin (_ : Authz_types.User_id.t) -> R.Conflict_409
+;;
+
 let revocation_status = function
   | P.Revoker_is_not_an_admin (_ : Authz_records.Author.t) -> R.Forbidden_403
   | P.Not_an_admin (_ : Authz_types.User_id.t) | P.Last_admin (_ : Authz_types.User_id.t) ->
@@ -92,6 +100,7 @@ let revocation_status = function
 let state_status = function
   | S.Principal_event refusal -> principal_status refusal
   | S.Admin_assignment refusal -> revocation_status refusal
+  | S.Admin_grant refusal -> grant_status refusal
   | S.Author_inactive (_ : Authz_types.User_id.t)
   | S.Revocation_pending (_ : Authz_records.Subject.t) -> R.Forbidden_403
   | S.Before_bootstrap (_ : Authz_record.Kind.t)
@@ -220,6 +229,22 @@ let enable (t : R.t) request ~user_id =
             R.Ok_200
             [ "user_id", `String (Authz_types.User_id.to_string target_id)
             ; "status", `String (status_name P.Active)
+            ])))
+;;
+
+let grant_admin (t : R.t) request ~user_id =
+  with_admin_mutation t request (fun ~admin ~state:(_ : S.t) ->
+    with_target_user_id user_id (fun target_id ->
+      commit_record
+        t
+        ~admin
+        ~kind:Authz_record.Kind.Admin_assignment
+        ~body_result:(Authz_admin_event.to_body (Authz_admin_event.Granted { user_id = target_id }))
+        ~on_ok:(fun () ->
+          R.json
+            R.Ok_200
+            [ "user_id", `String (Authz_types.User_id.to_string target_id)
+            ; "role", `String (Authz_invite_event.role_label Authz_invite_event.Admin)
             ])))
 ;;
 

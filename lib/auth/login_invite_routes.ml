@@ -46,6 +46,7 @@ let state_status = function
   | S.Admission _
   | S.Admin_assignment_unreadable _
   | S.Admin_assignment _
+  | S.Admin_grant _
   | S.Principal_unreadable _
   | S.Principal_event _
   | S.Registration_unreadable _

@@ -337,8 +337,6 @@ let refusals_are_told_apart () =
 
 (* ---- Admin assignments ---- *)
 
-module R = Authz_admin_event
-
 (* alice and bob, both Admins through the two Admin invitations. *)
 let two_admins () =
   let { P.principals; invites; _ } = alice_in () in
@@ -350,9 +348,7 @@ let two_admins () =
 
 let nobody_held (_ : User_id.t) = false
 
-let revoke ?(cause = R.Operational) ?(held = nobody_held) t ~by user_id =
-  P.revoke_admin t ~author:(as_person by) ~held (R.Revoked { user_id; cause })
-;;
+let revoke ?(held = nobody_held) t ~by user_id = P.revoke_admin t ~author:(as_person by) ~held ~user_id
 
 let check_revocation_refused label expected result =
   match result with
@@ -362,7 +358,7 @@ let check_revocation_refused label expected result =
 
 let an_admin_revokes_another () =
   let t = two_admins () in
-  match revoke ~cause:R.Security_incident t ~by:alice bob with
+  match revoke t ~by:alice bob with
   | Error refusal -> Alcotest.failf "refused: %s" (P.revocation_refusal_to_string refusal)
   | Ok after ->
     Alcotest.(check bool) "bob is no longer an Admin" false (P.is_admin after bob);
@@ -386,6 +382,55 @@ let an_admin_revokes_their_own_while_another_remains () =
   | Ok after ->
     Alcotest.(check bool) "alice is no longer an Admin" false (P.is_admin after alice);
     Alcotest.(check bool) "bob still is" true (P.is_admin after bob)
+;;
+
+(* alice, an Admin through the first invitation, and bob, a Member through
+   the registration. *)
+let an_admin_and_a_member () =
+  let { P.principals; invites; _ } = alice_in () in
+  let { P.principals; _ } =
+    admitted_ok
+      (admit_through
+         principals
+         ~invites
+         ~registrations:registered
+         ~user_id:bob
+         ~identity:(google "333")
+         (A.Registration registration))
+  in
+  principals
+;;
+
+let grant ?(held = nobody_held) t ~by user_id = P.grant_admin t ~author:(as_person by) ~held ~user_id
+
+let check_grant_refused label expected result =
+  match result with
+  | Ok _ -> Alcotest.failf "%s: the grant was taken" label
+  | Error refusal -> Alcotest.(check string) label expected (P.grant_refusal_to_string refusal)
+;;
+
+let an_admin_makes_a_member_an_admin () =
+  let t = an_admin_and_a_member () in
+  Alcotest.(check bool) "bob joined as a Member" false (P.is_admin t bob);
+  check_grant_refused
+    "a Member grants"
+    "the principal human:bob is not an Admin, and only an Admin gives an Admin assignment"
+    (grant t ~by:bob bob);
+  match grant t ~by:alice bob with
+  | Error refusal -> Alcotest.failf "refused: %s" (P.grant_refusal_to_string refusal)
+  | Ok after ->
+    Alcotest.(check bool) "bob is an Admin" true (P.is_admin after bob);
+    Alcotest.(check bool) "the assignment is the role" true (P.has_admin_assignment after bob);
+    Alcotest.(check (option string))
+      "alice granted it"
+      (Some "alice")
+      (Option.map User_id.to_string (P.admin_granter after bob));
+    Alcotest.(check bool) "the state before is as it was" false (P.is_admin t bob);
+    check_grant_refused "twice" "bob has an Admin assignment already" (grant after ~by:alice bob);
+    (* The granted Admin acts as one: alice is no longer the last. *)
+    (match revoke after ~by:bob alice with
+     | Error refusal -> Alcotest.failf "bob cannot revoke alice: %s" (P.revocation_refusal_to_string refusal)
+     | Ok revoked -> Alcotest.(check bool) "alice is a Member" false (P.is_admin revoked alice))
 ;;
 
 module Pe = Authz_principal_event
@@ -526,6 +571,25 @@ let a_deletion () =
   Alcotest.(check bool) "the mark stays after the identity joins again" true (P.was_deleted rejoined (google "222"))
 ;;
 
+let what_a_grant_refuses () =
+  let t = an_admin_and_a_member () in
+  let carol = get (User_id.of_string "carol") in
+  check_grant_refused "no principal" "there is no principal carol" (grant t ~by:alice carol);
+  check_grant_refused
+    "held"
+    "bob is held by a revocation the store gave up, so it is given no Admin assignment"
+    (grant ~held:(fun id -> User_id.equal id bob) t ~by:alice bob);
+  check_grant_refused
+    "disabled"
+    "bob is disabled, so it is given no Admin assignment"
+    (grant (applied_ok (event t ~by:alice (Pe.Disabled { user_id = bob }))) ~by:alice bob);
+  check_grant_refused
+    "the local operator"
+    "the local operator is not an Admin, and only an Admin gives an Admin assignment"
+    (P.grant_admin t ~author:Author.Local_operator ~held:nobody_held ~user_id:bob);
+  check_grant_refused "their own" "alice has an Admin assignment already" (grant t ~by:alice alice)
+;;
+
 let who_may_revoke () =
   let t = two_admins () in
   List.iter
@@ -533,7 +597,7 @@ let who_may_revoke () =
       check_revocation_refused
         label
         expected
-        (P.revoke_admin t ~author ~held:nobody_held (R.Revoked { user_id = bob; cause = R.Operational })))
+        (P.revoke_admin t ~author ~held:nobody_held ~user_id:bob))
     [ ( "the local operator"
       , Author.Local_operator
       , "the local operator is not an Admin, and only an Admin revokes an Admin assignment" )
@@ -567,6 +631,8 @@ let () =
         ; Alcotest.test_case "revokes their own" `Quick an_admin_revokes_their_own_while_another_remains
         ; Alcotest.test_case "a held Admin does not remain" `Quick a_held_admin_is_not_the_one_that_remains
         ; Alcotest.test_case "who may revoke" `Quick who_may_revoke
+        ; Alcotest.test_case "makes a Member an Admin" `Quick an_admin_makes_a_member_an_admin
+        ; Alcotest.test_case "what a grant refuses" `Quick what_a_grant_refuses
         ] )
     ; ( "principal records"
       , [ Alcotest.test_case "disable and enable" `Quick a_disable_and_an_enable

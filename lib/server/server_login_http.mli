@@ -37,6 +37,7 @@ val max_request_bytes : int
       [DELETE /api/v1/auth/invites/<id>]
     - [GET /api/v1/auth/members], [POST /api/v1/auth/members/<id>/disable],
       [POST /api/v1/auth/members/<id>/enable],
+      [POST /api/v1/auth/members/<id>/grant-admin],
       [POST /api/v1/auth/members/<id>/revoke-admin], and
       [DELETE /api/v1/auth/members/<id>]
     - [POST] and [GET /api/v1/auth/pats], and [DELETE /api/v1/auth/pats/<id>]

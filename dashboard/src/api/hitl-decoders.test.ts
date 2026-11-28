@@ -121,6 +121,13 @@ describe('Shared HITL wire decoders (SSOT)', () => {
 
   it('enforces strict Channel Gate queue contract across Inbox and Shell and rejects unconfirmed fast approvals', async () => {
     expect(decodeGateQueueStrict({ approval_queue: [{ id: 'g1', keeper_name: 'k', tool_name: 'bash', sequence: 2 }] }).ok).toBe(true)
+    // The row's own `requested_at` must survive decoding as `requestedAt`: the Inbox
+    // queue counts a Gate row's wait from it, not from the cached `waiting_s`.
+    const gateRows = decodeGateQueueStrict({ approval_queue: [{ id: 'g1', keeper_name: 'k', tool_name: 'bash', sequence: 2, requested_at: 1800000000.5, waiting_s: 90 }] })
+    expect(gateRows.ok && gateRows.rows[0]?.requestedAt).toBe(1800000000.5)
+    expect(gateRows.ok && gateRows.rows[0]?.waitingSec).toBe(90)
+    const gateRowsNoTime = decodeGateQueueStrict({ approval_queue: [{ id: 'g1', keeper_name: 'k', tool_name: 'bash', sequence: 2 }] })
+    expect(gateRowsNoTime.ok && gateRowsNoTime.rows[0]?.requestedAt).toBeNull()
     expect(decodeGateQueueStrict({ approval_queue: [{ id: 'g1', keeper_name: 'k', tool_name: 'bash' }] }).ok).toBe(false)
     expect(decodeGateQueueStrict({ approval_queue: [{ id: 'g1', keeper_name: 'k', tool_name: 'bash', sequence: 0 }] }).ok).toBe(false)
     expect(parseGateQueuePayload({ approval_queue: [{ id: 'g1', keeper_name: 'k', tool_name: 'bash' }] }, 'default')).toEqual([])

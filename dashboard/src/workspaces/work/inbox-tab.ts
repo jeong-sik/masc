@@ -44,7 +44,7 @@ import {
 } from '../../api/hitl-decoders'
 import { decodeApprovalQueuePhase, normalizeKeeperSummaryAttemptDisposition } from '../../api/board'
 import { decodeGateJudgeLane, normalizeGateDecisionSource } from '../../api/dashboard-gate'
-import { approvalPhaseView, decisionSourceLabel, judgeLaneText } from '../../lib/gate-approval-labels'
+import { approvalPhaseView, decisionSourceLabel, gateDecisionLabel, judgeLaneText } from '../../lib/gate-approval-labels'
 import { orderByWait, QueueWait, waitingSinceAskedAt, waitingSinceGateRead } from './inbox-queue'
 import { formatDuration } from '../../lib/format-time'
 import type { ApprovalQueuePhase, GateJudgeLane } from '../../types/gate'
@@ -732,8 +732,8 @@ export function InboxTab(props: WorkspaceViewProps) {
     setFeedback({
       kind: auditFailed ? 'err' : 'ok',
       message: auditFailed
-        ? `Gate ${item.id} (${item.toolName}) → ${decision} · 감사 기록 저장 실패`
-        : `Gate ${item.id} (${item.toolName}) → ${decision}`,
+        ? `Gate ${item.id} (${item.toolName}) → ${gateDecisionLabel(decision)}됨 · 감사 기록 저장 실패`
+        : `Gate ${item.id} (${item.toolName}) → ${gateDecisionLabel(decision)}됨`,
     })
     resourceCache.invalidateTopic('gate')
     await loadInbox('manual', ['channel_gate'])
@@ -862,7 +862,7 @@ export function InboxTab(props: WorkspaceViewProps) {
       header: '판정',
       cell: (r) => html`
         <span class=${`wk-badge ${r.decision === 'approve' ? 'wk-badge--ok' : 'wk-badge--err'}`}>
-          ${r.decision}
+          ${gateDecisionLabel(r.decision)}
         </span>
       `,
     },

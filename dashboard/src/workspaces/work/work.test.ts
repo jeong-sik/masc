@@ -1424,6 +1424,37 @@ describe('workspaces/work', () => {
     expect(verificationReads).toEqual(['first', 'second'])
   })
 
+  it('says a recorded Gate decision in the word of the button that makes it', async () => {
+    const resolved = (id: string, decision: 'approve' | 'reject') => ({
+      id, keeper_name: 'fixture-sender', tool_name: 'fixture-tool', decision_kind: decision,
+      decision_source: 'human_operator', decision_reason: decision === 'reject' ? 'not now' : null,
+      actor: 'op-1', resolved_at: Date.now() / 1000 - 60,
+    })
+    globalThis.fetch = vi.fn((input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.startsWith('/api/v1/keepers/tool-approvals')) return Promise.resolve(jsonResponse({ pending: [] }))
+      if (url.startsWith('/api/v1/keepers/asks')) return Promise.resolve(jsonResponse({ asks: [] }))
+      if (url.startsWith('/api/v1/dashboard/gate')) {
+        return Promise.resolve(jsonResponse({
+          approval_queue: [],
+          recent_resolved: [resolved('res-approve', 'approve'), resolved('res-reject', 'reject')],
+        }))
+      }
+      if (url.startsWith('/api/v1/dashboard/planning')) return Promise.resolve(jsonResponse({ goals: [], tasks: [] }))
+      return Promise.resolve(jsonResponse({}))
+    })
+
+    render(html`<${WorkWorkspace} subroute="inbox" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
+    await flushUi()
+    ;[...container.querySelectorAll<HTMLButtonElement>('.wk-chip')]
+      .find((element) => element.textContent?.trim().startsWith('24h Decisions'))!.click()
+    await flushUi()
+
+    const decisions = [...container.querySelectorAll('.wk-badge--ok, .wk-badge--err')].map((badge) => badge.textContent?.trim())
+    expect(decisions.sort()).toEqual(['거절', '승인'])
+    expect(container.textContent).not.toMatch(/\b(approve|reject)\b/)
+  })
+
   it('lists the Inbox queue longest wait first and says each row\'s wait', async () => {
     const nowSec = Date.now() / 1000
     globalThis.fetch = vi.fn((input: RequestInfo | URL) => {

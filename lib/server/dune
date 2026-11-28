@@ -211,6 +211,7 @@
   masc.mcp_transport_protocol
   masc.mcp_session
   masc.ag_ui
+  masc.keeper_chat_wire
   masc.repo_manager
   masc.otel_genai
   masc.otel_dispatch_hook

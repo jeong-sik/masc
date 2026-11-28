@@ -9,7 +9,7 @@ let sse_stream_headers = Server_mcp_transport_http_headers.sse_stream_headers
 let ag_ui_event_of_masc_event (delivery : Sse.delivery) =
   Ag_ui.of_custom
     ~timestamp:delivery.emitted_at
-    ~name:"MASC_EVENT"
+    ~name:Keeper_chat_wire.Keeper_chat_wire_t.Masc_event
     delivery.payload
   |> Ag_ui.event_to_sse ~id:delivery.event_id
 

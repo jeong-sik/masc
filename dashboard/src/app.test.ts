@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { h, render } from 'preact'
 import { act, fireEvent, waitFor, within } from '@testing-library/preact'
-import { App, shouldBootstrapCommandPaletteShortcut } from './app'
+import { App, RECONNECT_EVERY_MS, shouldBootstrapCommandPaletteShortcut } from './app'
 import { authSession, resetAuthStateForTests } from './core/auth'
 import { resetObserverStateForTests } from './core/observer'
 import { currentRoute, navigate, resetRouterForTests } from './routes/router'
@@ -299,7 +299,6 @@ describe('shouldBootstrapCommandPaletteShortcut', () => {
     expect(shouldBootstrapCommandPaletteShortcut({ altKey: false, ctrlKey: true, key: 'k', metaKey: false, defaultPrevented: true }, false)).toBe(false)
   })
 })
-
 describe('workspaces/registry preloadWorkspace', () => {
   afterEach(() => {
     vi.restoreAllMocks()
@@ -366,5 +365,94 @@ describe('workspaces/registry preloadWorkspace', () => {
       render(null, container)
       container.remove()
     }
+  })
+})
+
+describe('the gate while the server cannot be reached', () => {
+  let container: HTMLDivElement
+  let healthReads: number
+  let answerHealth: () => Promise<Response>
+
+  const down = async (): Promise<Response> => jsonResponse({ status: 'initializing' }, 503)
+  const signedOut = async (): Promise<Response> => jsonResponse({
+    account_mode: 'Multi_account',
+    auth_methods: { google: true, github: true, dev_token: false },
+  })
+  const gate = (name: string): Element | null => container.querySelector(`[data-testid="route-gate-${name}"]`)
+  const passTime = (ms: number): Promise<void> => act(async () => { await vi.advanceTimersByTimeAsync(ms) })
+
+  beforeEach(async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    container = document.createElement('div')
+    document.body.appendChild(container)
+    window.location.hash = '#/pulse'
+    resetAuthStateForTests()
+    resetObserverStateForTests()
+    resetRouterForTests('/pulse')
+    resetShellStateForTests()
+    healthReads = 0
+    answerHealth = down
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
+      if (url === '/health') {
+        healthReads += 1
+        return answerHealth()
+      }
+      if (url === '/api/v1/auth/session' || url === '/auth/session') return jsonResponse({ authenticated: false }, 401)
+      return jsonResponse({ error: 'unexpected' }, 500)
+    })
+    await act(async () => { render(h(App, {}), container) })
+    await passTime(0)
+  })
+
+  afterEach(() => {
+    render(null, container)
+    container.remove()
+    vi.useRealTimers()
+    vi.restoreAllMocks()
+  })
+
+  it('tries again on its own and leaves once the server answers', async () => {
+    expect(gate('unavailable')).not.toBeNull()
+    expect(gate('unavailable-retry')?.textContent?.trim())
+      .toBe(`연결될 때까지 ${RECONNECT_EVERY_MS / 1000}초마다 다시 시도합니다.`)
+    expect(healthReads).toBe(1)
+
+    await passTime(RECONNECT_EVERY_MS)
+    expect(healthReads).toBe(2)
+    expect(gate('unavailable')).not.toBeNull()
+
+    answerHealth = signedOut
+    await passTime(RECONNECT_EVERY_MS)
+    expect(healthReads).toBe(3)
+    expect(gate('unavailable')).toBeNull()
+    expect(gate('auth-required')).not.toBeNull()
+
+    // The gate is gone, and its timer with it.
+    await passTime(RECONNECT_EVERY_MS * 4)
+    expect(healthReads).toBe(3)
+  })
+
+  it('says a pressed try is out for as long as it is, and starts no second one beside it', async () => {
+    let settle: (response: Response) => void = () => {}
+    answerHealth = () => new Promise<Response>((resolve) => { settle = resolve })
+    const button = (): HTMLButtonElement => within(gate('unavailable') as HTMLElement).getAllByRole('button')[0] as HTMLButtonElement
+
+    // The gate's own try goes out and does not answer: nothing on screen changes.
+    await passTime(RECONNECT_EVERY_MS)
+    expect(healthReads).toBe(2)
+    expect(button().textContent?.trim()).toBe('다시 연결')
+    expect(button().disabled).toBe(false)
+
+    // A press joins that try instead of starting another.
+    await act(async () => { fireEvent.click(button()) })
+    expect(healthReads).toBe(2)
+    expect(button().textContent?.trim()).toBe('연결 중…')
+    expect(button().disabled).toBe(true)
+
+    await act(async () => { settle(await down()) })
+    await passTime(0)
+    expect(button().textContent?.trim()).toBe('다시 연결')
+    expect(button().disabled).toBe(false)
   })
 })

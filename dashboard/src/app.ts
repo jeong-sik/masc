@@ -11,7 +11,7 @@
 import { html } from 'htm/preact'
 import { Component, type ComponentChildren, type VNode } from 'preact'
 import { lazy, Suspense } from 'preact/compat'
-import { useEffect, useRef, useState } from 'preact/hooks'
+import { useCallback, useEffect, useRef, useState } from 'preact/hooks'
 import {
   authSession,
   bootstrapAuthSession,
@@ -213,6 +213,77 @@ export function ShellToastHost(): VNode | null {
   `
 }
 
+/** How long the gate waits after one try to reach the server before the next. */
+export const RECONNECT_EVERY_MS = 5_000
+
+/**
+ * The gate while the server cannot be reached. It tries again on its own, so
+ * a server that is still starting needs no press. A press tries at once, or
+ * joins the try already out, and the button says so until that try ends: one
+ * try can take the whole bootstrap deadline. The tries the gate makes on its
+ * own change nothing on screen, so the gate does not flicker every few
+ * seconds and a screen reader is not read the alert again each time.
+ */
+function ServerUnreachableGate({ reason }: { readonly reason: string }): VNode {
+  const [pressed, setPressed] = useState(false)
+  const attempt = useRef<Promise<void> | null>(null)
+  const shown = useRef(true)
+
+  const reconnect = useCallback((): Promise<void> => {
+    if (attempt.current) return attempt.current
+    const run = bootstrapAuthSession()
+      .then(() => startObserverStream())
+      .finally(() => { attempt.current = null })
+    attempt.current = run
+    return run
+  }, [])
+  const press = (): void => {
+    setPressed(true)
+    void reconnect().finally(() => { if (shown.current) setPressed(false) })
+  }
+
+  useEffect(() => {
+    shown.current = true
+    let timer: number | undefined
+    const wait = (): void => {
+      timer = window.setTimeout(() => {
+        void reconnect().then(() => { if (shown.current) wait() })
+      }, RECONNECT_EVERY_MS)
+    }
+    wait()
+    return () => {
+      shown.current = false
+      window.clearTimeout(timer)
+    }
+  }, [reconnect])
+
+  return html`
+    <section class="ap-gate" role="alert" data-testid="route-gate-unavailable">
+      <div class="ap-card">
+        <h1 class="ap-card-title">MASC 서버에 연결할 수 없습니다</h1>
+        <p class="ap-muted">${reason}</p>
+        <p class="ap-muted" data-testid="route-gate-unavailable-retry">
+          연결될 때까지 ${RECONNECT_EVERY_MS / 1000}초마다 다시 시도합니다.
+        </p>
+        <div class="ap-placeholder-actions">
+          <button
+            type="button"
+            class="btn-primary"
+            disabled=${pressed}
+            aria-busy=${pressed ? 'true' : undefined}
+            onClick=${press}
+          >
+            ${pressed ? '연결 중…' : '다시 연결'}
+          </button>
+          <button type="button" class="btn-ghost" onClick=${() => navigate('/account')}>
+            Account / Targets
+          </button>
+        </div>
+      </div>
+    </section>
+  `
+}
+
 function WorkspaceHost(): VNode {
   const route = currentRoute.value
   const session = authSession.value
@@ -292,26 +363,7 @@ function WorkspaceHost(): VNode {
       `
     }
     if (decision.reason === 'unavailable') {
-      return html`
-        <section class="ap-gate" role="alert" data-testid="route-gate-unavailable">
-          <div class="ap-card">
-            <h1 class="ap-card-title">MASC 서버에 연결할 수 없습니다</h1>
-            <p class="ap-muted">${session.kind === 'unavailable' ? session.reason : '서버 응답 없음'}</p>
-            <div class="ap-placeholder-actions">
-              <button
-                type="button"
-                class="btn-primary"
-                onClick=${() => { void bootstrapAuthSession().then(() => startObserverStream()) }}
-              >
-                다시 연결
-              </button>
-              <button type="button" class="btn-ghost" onClick=${() => navigate('/account')}>
-                Account / Targets
-              </button>
-            </div>
-          </div>
-        </section>
-      `
+      return html`<${ServerUnreachableGate} reason=${session.kind === 'unavailable' ? session.reason : '서버 응답 없음'} />`
     }
     return html`
       <section class="ap-gate" role="status" data-testid="route-gate-auth-required">

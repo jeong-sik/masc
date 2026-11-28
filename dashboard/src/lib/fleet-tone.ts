@@ -1,30 +1,10 @@
 // Fleet tone vocabulary — the single SSOT for the 5-tone health badge /
-// dot / pill / aside tone that the keeper workspace + agent-roster share.
-//
-// Two prior surfaces re-declared this vocabulary in parallel:
-//   - dashboard/src/components/agent-roster.ts (PR #22441, MERGED):
-//       `type FleetTone = 'ok' | 'warn' | 'bad' | 'busy' | 'idle'`
-//       `FL_TONE_LABEL = { ok:'실행', warn:'대기', bad:'주의', busy:'전이', idle:'정지' }`
-//   - dashboard/src/components/keeper-workspace/keeper-workspace-shared.ts
-//     (iter-2 PR #22466, DRAFT): local `DotTone = 'ok' | 'warn' | 'bad' | 'info' | 'idle'`
-//
-// The 'info' name is a drift: agent-roster and the repo-owned keeper-v2
-// fleet.css already shipped 'busy'. Lifting the SSOT here makes that
-// checked-in convention win.
+// dot / pill tone of the keeper surfaces.
 
 import { UNKNOWN_STATUS_LABEL } from './format-string'
 
 /** 5-tone health vocabulary shared across the Fleet surfaces. */
 export type FleetTone = 'ok' | 'warn' | 'bad' | 'busy' | 'idle'
-
-/** Korean tone label, used as the aside "selected runtime" state line. */
-export const FL_TONE_LABEL: Readonly<Record<FleetTone, string>> = {
-  ok: '실행',
-  warn: '대기',
-  bad: '주의',
-  busy: '전이',
-  idle: '정지',
-}
 
 /** The complete codomain of `keeperDisplayStatus`
  *  (`lib/keeper-runtime-display.ts`), as lower-cased tokens. The labels in
@@ -69,11 +49,7 @@ export type KeeperPhaseToken =
  *  instead of keeping parallel string classifiers.
  *
  *  `Draining` is `warn` here because it represents operator intent via
- *  the `stop` action's danger:true via-phase. The runtime band agrees:
- *  `monitoring-runtime.ts:keeperBand` routes `Draining` to the `paused`
- *  band, which `ROSTER_BAND_TONE` (`agent-roster.ts`) maps to `warn` —
- *  the workspace tone (`PHASE_TONE.draining = 'warn'`) and the rail
- *  agree.
+ *  the `stop` action's danger:true via-phase.
  *
  *  Why `Object.create(null)` instead of a plain object literal: the
  *  `isKeeperPhaseToken` guard uses own-property checks, and JS `in` /
@@ -97,9 +73,8 @@ export const PHASE_TONE: Readonly<Record<KeeperPhaseToken, FleetTone>> =
       stopped: 'idle',
       unbooted: 'idle',
       crashed: 'bad',
-      // Alive between turns. `ROSTER_BAND_TONE.active = 'ok'`
-      // (`agent-roster.ts`) already routes this band to `ok`; matching it
-      // keeps the dot colour of an idle keeper the same on both surfaces.
+      // Alive between turns — not an alarm, so the same `ok` dot as a
+      // running keeper.
       idle: 'ok',
       listening: 'ok',
       // Residual offline case — same "not running, not an error" bucket as
@@ -111,9 +86,7 @@ export const PHASE_TONE: Readonly<Record<KeeperPhaseToken, FleetTone>> =
 
 /** Korean phase label shown in roster sub-rows + chat header state pills.
  *  Keyed on the same lowercase tokens as `PHASE_TONE` so the two tables
- *  cannot drift. Previously lived at the bottom of `keeper-workspace-
- *  shared.ts` and missed the `Restarting` variant; lifted here
- *  so agent-roster can share it.
+ *  cannot drift.
  *
  *  Same null-prototype + freeze rationale as `PHASE_TONE` — closed-sum
  *  boundary must hold for arbitrary backend wire strings. */
@@ -139,18 +112,8 @@ export const PHASE_LABEL_KO: Readonly<Record<KeeperPhaseToken, string>> =
   )
 
 /** One-sentence operator explanation per token — the tooltip / secondary
- *  line that sits under the label.
- *
- *  Lifted verbatim from `PHASE_LABELS` in `lib/monitoring-runtime.ts`,
- *  which owned the only such table. It moved here so the label, the tone
- *  and the explanation share one keyspace; `monitoring-runtime` now reads
- *  from this map instead of holding a parallel copy.
- *
- *  One collapse during the move: `Stopped` and the lowercase `stopped`
- *  entry carried different sentences ('정상 정지된 런타임입니다.' vs
- *  '이전에 실행되었지만 현재는 정지 상태입니다.') for the same token. The
- *  PascalCase one wins because it is the FSM phase; the lowercase entry
- *  was the status-field alias for the same condition. */
+ *  line that sits under the label. Keyed on the same tokens as `PHASE_TONE`
+ *  so the label, the tone and the explanation share one keyspace. */
 export const PHASE_DESCRIPTION_KO: Readonly<Record<KeeperPhaseToken, string>> =
   Object.freeze(
     Object.assign(Object.create(null), {

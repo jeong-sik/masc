@@ -18,10 +18,10 @@ export const MISSING_DATA_DASH = '--'
  * the textual counterpart to `MISSING_DATA_DASH` for sites that need a
  * readable phrase instead of a glyph.
  *
- * Seven production sites previously inlined this literal (`format-time`
- * duration guards, `status-label` unknown-status branch, `monitoring-runtime`
- * + `unified-status` default phase label, `operator-actions` preview
- * fallback). Captured here so an accessibility or localisation change
+ * Shared by the `format-time` duration guards, the `status-label`
+ * unknown-status branch, the `unified-status` default phase label and the
+ * `operator-actions` preview fallback. Captured here so an accessibility or
+ * localisation change
  * (e.g. switching to `'알 수 없음'`, adding a screen-reader prefix)
  * propagates without sweeping every callsite again.
  */

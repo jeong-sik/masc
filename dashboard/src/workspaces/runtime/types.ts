@@ -223,7 +223,7 @@ export interface RuntimeAssignment {
   readonly keeper: string
   readonly assignment_source: 'explicit' | 'default'
   readonly resolved:
-    | { readonly kind: 'lane' | 'single_runtime' | 'missing'; readonly id: string | null }
+    | { readonly kind: 'lane' | 'missing'; readonly id: string | null }
     | {
         readonly kind: 'unavailable'
         readonly id: string

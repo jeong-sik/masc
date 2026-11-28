@@ -121,7 +121,7 @@ const RuntimeLaneSchema = object({
 
 const ResolvedAssignmentTargetSchema = union([
   object({
-    kind: union([literal('lane'), literal('single_runtime'), literal('missing')]),
+    kind: union([literal('lane'), literal('missing')]),
     id: nullable(string()),
   }),
   object({
@@ -203,7 +203,6 @@ export type MaxContextSource = InferOutput<typeof MaxContextSourceSchema>
 export type RuntimeCapabilities = InferOutput<typeof RuntimeCapabilitiesSchema>
 export type RuntimeMediaOverrides = InferOutput<typeof RuntimeMediaOverridesSchema>
 export type RuntimeResolution = InferOutput<typeof RuntimeResolutionSchema>
-export type RuntimeQuotaRest = InferOutput<typeof RuntimeQuotaRestSchema>
 export type RuntimeAttemptFailure = InferOutput<typeof RuntimeAttemptFailureSchema>
 export type RuntimeFailedAttempt = InferOutput<typeof RuntimeFailedAttemptSchema>
 export type RuntimeLaneSnapshot = InferOutput<typeof RuntimeLaneSchema>

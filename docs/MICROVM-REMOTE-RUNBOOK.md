@@ -204,7 +204,7 @@ shim(0.73.1 이하 릴리즈, 이 변경 전 checkout 빌드)은 값이 없다.
 거절은 멈추거나 지울 게스트가 있는 백엔드(Apple `container`, nerdctl·Kata,
 microsandbox) 모두에서 그 게스트를 건드리기 전에 난다.
 릴리즈 서버는 같은 태그의 자산이 맞는다(`scripts/install.sh --version vX.Y.Z
---force`). checkout 으로 빌드한 서버는 어떤 릴리즈 자산과도 맞지 않으니, 같은
+--force --base-path <workspace>`). checkout 으로 빌드한 서버는 어떤 릴리즈 자산과도 맞지 않으니, 같은
 checkout 에서 shim 을 빌드한다. `install-local-build.sh --refresh-guest-shim` 도
 이 경우 릴리즈 shim 을 깔지 않고 멈춘다. 그 옵션 없이 돌린 `install-local-build.sh` 는
 작업 공간 shim 의 신원이 다르면 sidecar 가 있든 없든 아래 빌드를 대신 한다. 아키텍처는 옛 shim 의

@@ -211,7 +211,7 @@ describe('Pulse Workspace — Model & Formatters', () => {
     })
 
     const doneUnknown = makeKpis(null, 3).find((kpi) => kpi.id === 'tasks_24h')!
-    expect(formatObserved(doneUnknown.value)).toBe('없음')
+    expect(formatObserved(doneUnknown.value)).toBe('미보고')
     expect(doneUnknown.secondary).toBe('검증 대기 3')
     expect(doneUnknown.exactTooltip).toBe('검증 대기 3건')
 

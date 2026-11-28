@@ -285,7 +285,7 @@ export function buildPulseKpis(params: {
       tasksKpi = {
         id: 'tasks_24h',
         label: 'Tasks Done / Verify',
-        value: observedAbsent(),
+        value: observedUnreported(),
         exactTooltip: null,
         secondary: null,
         tone: 'default',
@@ -301,7 +301,7 @@ export function buildPulseKpis(params: {
       tasksKpi = {
         id: 'tasks_24h',
         label: 'Tasks Done/24h & Verify',
-        value: doneFmt !== null ? observedValue(doneFmt.short) : observedAbsent(),
+        value: doneFmt !== null ? observedValue(doneFmt.short) : observedUnreported(),
         exactTooltip: doneFmt !== null
           ? `24h 완료 ${doneFmt.exact}건${awaitFmt ? ` · 검증 대기 ${awaitFmt.exact}건` : ''}${rejected > 0 ? ` · 24h 거절 ${rejected}건` : ''}`
           : (awaitFmt !== null ? `검증 대기 ${awaitFmt.exact}건${rejected > 0 ? ` · 24h 거절 ${rejected}건` : ''}` : null),

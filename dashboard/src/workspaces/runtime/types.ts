@@ -60,19 +60,20 @@ export interface WorkspaceViewProps {
   onInspect: (payload: WorkspaceInspectPayload) => void
 }
 
-export type RuntimeSubroute = 'quotas' | 'efficiency' | 'lanes' | 'tools' | 'addons'
+export type RuntimeSubroute = 'quotas' | 'efficiency' | 'lanes' | 'tools' | 'prompts' | 'addons'
 
 export const RUNTIME_TABS: readonly { readonly id: RuntimeSubroute; readonly label: string }[] = [
   { id: 'quotas', label: 'Quotas & Rate Limits' },
   { id: 'efficiency', label: 'Efficiency & Cache' },
   { id: 'lanes', label: 'Lanes & Exact Output' },
   { id: 'tools', label: 'Tools, Skills & Plug-ins' },
+  { id: 'prompts', label: 'Prompts & Presets' },
   { id: 'addons', label: 'Lane-Addons & Browser' },
 ]
 
 export function normalizeRuntimeSubroute(raw: string): RuntimeSubroute {
   const cleaned = raw.trim().toLowerCase()
-  if (cleaned === 'efficiency' || cleaned === 'lanes' || cleaned === 'tools' || cleaned === 'addons') {
+  if (cleaned === 'efficiency' || cleaned === 'lanes' || cleaned === 'tools' || cleaned === 'prompts' || cleaned === 'addons') {
     return cleaned
   }
   return 'quotas'

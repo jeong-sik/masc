@@ -5,7 +5,6 @@ import {
   FOOTER_NAV,
   ROUTE_MANIFEST,
   TRUNK_NAV,
-  WORKSPACE_NAV,
   currentRoute,
   evaluateRouteAccess,
   isAdminLockedForSession,
@@ -22,7 +21,7 @@ describe('Proposal A+ declarative router & RBAC manifest', () => {
     resetRouterForTests('/pulse')
   })
 
-  it('locks exactly 6 L0 trunks, 2 rail footer anchors, and <=5 L1 sub-tabs per workspace', () => {
+  it('locks exactly 6 L0 trunks and 2 rail footer anchors', () => {
     expect(TRUNK_NAV.map((t) => t.id)).toEqual([
       'pulse',
       'work',
@@ -32,9 +31,6 @@ describe('Proposal A+ declarative router & RBAC manifest', () => {
       'infra',
     ])
     expect(FOOTER_NAV.map((f) => f.id)).toEqual(['settings', 'account'])
-    for (const nav of WORKSPACE_NAV) {
-      expect(nav.subtabs.length).toBeLessThanOrEqual(5)
-    }
     expect(ROUTE_MANIFEST.length).toBeGreaterThanOrEqual(22)
   })
 

@@ -29,14 +29,19 @@ let with_base body =
   with_path body
 
 let text role value = T.make_message ~role [T.Text value]
-let alpha = `Assoc ["command",`String (String.make 4000 'a')]
-let beta = `Assoc ["command",`String (String.make 4000 'b')]
+(* Arguments several times the blob store's preview. A reference carries that
+   preview, so an argument the preview holds whole is no smaller as a
+   reference and stays as the model wrote it. *)
+let large_argument_bytes = 4 * Tool_blob_store.preview_max
+let command fill = `Assoc ["command",`String (String.make large_argument_bytes fill)]
+let alpha = command 'a'
+let beta = command 'b'
 let exchange id input =
   [T.make_message ~role:T.Assistant [T.ToolUse {id;name="record";input}];
    T.make_message ~role:T.Tool ~tool_call_id:id
      [T.ToolResult {tool_use_id=id;content="done";outcome=T.Tool_succeeded;json=None;content_blocks=None}]]
 let raw_seed = text T.User "The Librarian read this." :: (exchange "alpha" alpha @ exchange "beta" beta)
-let current = `Assoc ["command",`String (String.make 4000 'c')]
+let current = command 'c'
 let raw_history = raw_seed @ [text T.User "Use the earlier commands."] @ exchange "current" current
 let completed_before = snd (Runtime_model_input_tail_window.annotate raw_seed)
 let turn_start = Keeper_carried_front.Turn_boundary {end_atom=completed_before}

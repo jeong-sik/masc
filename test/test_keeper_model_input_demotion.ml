@@ -2443,6 +2443,15 @@ let without_preamble messages =
   List.filter (fun message -> not (Window.is_synthetic_preamble message)) messages
 ;;
 
+(* An argument several times the blob store's preview. A reference carries
+   that preview, so an argument the preview holds whole is no smaller as a
+   reference and stays as the model wrote it. *)
+let large_argument_bytes = 4 * Tool_blob_store.preview_max
+
+let large_command fill =
+  `Assoc [ "command", `String (String.make large_argument_bytes fill) ]
+;;
+
 let call_with_input ~id input : Types.message =
   { origin = Llm_provider.Types.Conversation;  role = Types.Assistant
   ; content = [ Types.ToolUse { id; name = "read_file"; input } ]
@@ -2545,8 +2554,8 @@ let rec shared_prefix first second =
 (* An ended turn's arguments and results are recoverable without carrying
    their bodies into the next request. This turn's calls stay verbatim. *)
 let finished_turn_results_leave_as_markers () =
-  let big_input = `Assoc [ "command", `String (String.make 4_000 'h') ] in
-  let current_input = `Assoc [ "command", `String (String.make 4_000 'n') ] in
+  let big_input = large_command 'h' in
+  let current_input = large_command 'n' in
   let earlier_bodies = [ String.make 20_000 'e'; String.make 21_000 'f' ] in
   let earlier =
     List.concat
@@ -2833,7 +2842,7 @@ let a_window_that_stays_keeps_the_markers_it_sent () =
    sent go as references. *)
 let a_window_that_stays_keeps_its_arguments () =
   let cycle ~id fill body =
-    [ call_with_input ~id (`Assoc [ "command", `String (String.make 4_000 fill) ])
+    [ call_with_input ~id (large_command fill)
     ; tool_message ~id body
     ]
   in

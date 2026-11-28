@@ -2297,11 +2297,22 @@ let compose_from_the_oldest_atom ?completed_arguments ?finished_turn_results ?he
 
 let letter i = Char.chr (Char.code 'a' + i)
 
+(* A test run with no window to keep, then under a window that stays and
+   whose last request sent nothing as a marker. The turn boundary, or the
+   refusal, decides the same way in both. *)
+let with_and_without_a_window_that_stays
+      (test : ?held_window:Try_provider.held_window -> unit -> unit) () =
+  test ();
+  test
+    ~held_window:{ Try_provider.window_opened_at = 0; markers_before = 0; working_state = None }
+    ()
+;;
+
 (* A refused request goes again with every result it carried as a marker,
    earlier turns' included and the ones under the finished-turn floor too:
    the resend is the smallest this range can carry, whichever turn boundary
    the history reports. *)
-let a_refusal_demotes_every_result_it_carried () =
+let a_refusal_demotes_every_result_it_carried ?held_window () =
   let under_the_floor = String.make 1_000 'g' in
   Alcotest.(check bool) "one earlier body is under the finished-turn floor" true
     (String.length under_the_floor < Try_provider.For_testing.aged_result_min_bytes);
@@ -2315,7 +2326,7 @@ let a_refusal_demotes_every_result_it_carried () =
   in
   let base_path = Filename.temp_dir "demote" "" in
   let compose_with turn_boundary =
-    compose_from_the_oldest_atom ~base_path
+    compose_from_the_oldest_atom ?held_window ~base_path
       ~current_turn_results:(demoted_after_refusal messages) ~turn_boundary messages
   in
   let composed =
@@ -2557,7 +2568,7 @@ let rec shared_prefix first second =
 
 (* An ended turn's arguments and results are recoverable without carrying
    their bodies into the next request. This turn's calls stay verbatim. *)
-let finished_turn_results_leave_as_markers () =
+let finished_turn_results_leave_as_markers ?held_window () =
   let big_input = large_command 'h' in
   let current_input = large_command 'n' in
   let earlier_bodies = [ String.make 20_000 'e'; String.make 21_000 'f' ] in
@@ -2585,7 +2596,8 @@ let finished_turn_results_leave_as_markers () =
     bind_arguments ~completed_before:turn_start ~seed:messages messages
   in
   let composed =
-    compose_from_the_oldest_atom ~completed_arguments ~finished_turn_results:as_markers
+    compose_from_the_oldest_atom ?held_window ~completed_arguments
+      ~finished_turn_results:as_markers
       ~base_path ~current_turn_results:Try_provider.Current_turn_verbatim
       ~turn_boundary:(finished_turns_through turn_start) messages
   in
@@ -2652,7 +2664,8 @@ let finished_turn_results_leave_as_markers () =
        @ List.map (fun _ -> current_input) newest_bodies);
   let later_messages = messages @ [ assistant "later request in this turn" ] in
   let later =
-    compose_from_the_oldest_atom ~completed_arguments ~finished_turn_results:as_markers
+    compose_from_the_oldest_atom ?held_window ~completed_arguments
+      ~finished_turn_results:as_markers
       ~base_path ~current_turn_results:Try_provider.Current_turn_verbatim
       ~turn_boundary:(finished_turns_through turn_start) later_messages
     |> materialized ~base_path
@@ -2771,12 +2784,20 @@ let a_finished_turn_result_changes_once_and_its_marker_stays () =
     composed, without_preamble (materialized ~base_path composed)
   in
   let in_a, sent_in_a = request (old_turn @ turn_a) ~finished_prefix:old_turn in
-  let held_window = { Try_provider.window_opened_at = 0; working_state = None } in
+  (* The window stays where it opened and keeps the markers of the request
+     before, as the ledger's last request records them. *)
+  let held_after (last : Try_provider.composed) =
+    { Try_provider.window_opened_at = 0
+    ; markers_before = last.Try_provider.demote_before
+    ; working_state = None
+    }
+  in
   let in_b, sent_in_b =
-    request ~held_window (old_turn @ turn_a @ turn_b) ~finished_prefix:(old_turn @ turn_a)
+    request ~held_window:(held_after in_a) (old_turn @ turn_a @ turn_b)
+      ~finished_prefix:(old_turn @ turn_a)
   in
   let _, sent_later_in_b =
-    request ~held_window (old_turn @ turn_a @ turn_b @ later_in_b)
+    request ~held_window:(held_after in_b) (old_turn @ turn_a @ turn_b @ later_in_b)
       ~finished_prefix:(old_turn @ turn_a)
   in
   Alcotest.(check int) "turn A's request rewrites the old turn's two results" 2
@@ -2792,6 +2813,52 @@ let a_finished_turn_result_changes_once_and_its_marker_stays () =
     (shared_prefix sent_in_a sent_in_b);
   Alcotest.(check bool) "a later request of the same turn opens with the one before it" true
     (take (List.length sent_in_b) sent_later_in_b = sent_in_b)
+;;
+
+(* A window that stays never sends whole again what its last request sent as
+   a marker. Two dispatches find those markers past the turn boundary: one
+   that cannot name the turn boundary, and one after a size refusal moved
+   them into the open turn. With no window to keep, the turn boundary decides
+   alone. *)
+let a_window_that_stays_keeps_what_it_sent_as_markers () =
+  let old_turn = history_with_tool_bodies [ String.make 20_000 'e'; String.make 21_000 'f' ] in
+  let refused = current_batch ~id_prefix:"a" ~fill:letter [ 9_000; 11_000 ] in
+  let after_refusal = current_batch ~id_prefix:"b" ~fill:(fun _ -> 'n') [ 5_000 ] in
+  let messages = old_turn @ refused @ after_refusal in
+  let atom_after prefix =
+    Window.first_atom_at_or_after messages ~message_index:(List.length prefix)
+  in
+  let turn_start = atom_after old_turn in
+  let refused_end = atom_after (old_turn @ refused) in
+  Alcotest.(check bool) "the open turn has an atom before its newest one" true
+    (turn_start < refused_end);
+  let base_path = Filename.temp_dir "demote" "" in
+  let planned ?held_window turn_boundary =
+    let composed =
+      compose_from_the_oldest_atom ?held_window ~finished_turn_results:as_markers ~base_path
+        ~current_turn_results:Try_provider.Current_turn_verbatim ~turn_boundary messages
+    in
+    ( composed.Try_provider.demote_before
+    , List.length composed.Try_provider.planned.Demotion.pending )
+  in
+  let held ~markers_before =
+    { Try_provider.window_opened_at = 0; markers_before; working_state = None }
+  in
+  let unknown = Masc.Keeper_carried_front.Turn_boundary_unknown { reason = "unreadable" } in
+  Alcotest.(check (pair int int)) "an unknown boundary keeps the old turn's two markers"
+    (turn_start, 2)
+    (planned ~held_window:(held ~markers_before:turn_start) unknown);
+  Alcotest.(check (pair int int)) "with no window to keep, an unknown boundary names none"
+    (0, 0) (planned unknown);
+  Alcotest.(check (pair int int)) "markers a refusal moved into the open turn stay"
+    (refused_end, 4)
+    (planned ~held_window:(held ~markers_before:refused_end) (finished_turns_through turn_start));
+  Alcotest.(check (pair int int)) "with no window to keep, the turn boundary decides"
+    (turn_start, 2)
+    (planned (finished_turns_through turn_start));
+  Alcotest.(check (pair int int)) "a turn boundary past the last markers moves them forward"
+    (turn_start, 2)
+    (planned ~held_window:(held ~markers_before:0) (finished_turns_through turn_start))
 ;;
 
 (* Nothing is known about which turns ended, so nothing is demoted; a Keeper
@@ -3103,7 +3170,7 @@ let () =
         ; Alcotest.test_case
             "a refusal demotes every result it carried"
             `Quick
-            a_refusal_demotes_every_result_it_carried
+            (with_and_without_a_window_that_stays a_refusal_demotes_every_result_it_carried)
         ; Alcotest.test_case
             "a sent result stays as sent when the turn boundary moves"
             `Quick
@@ -3159,7 +3226,7 @@ let () =
       , [ Alcotest.test_case
             "results of ended turns leave as markers the store reads back"
             `Quick
-            finished_turn_results_leave_as_markers
+            (with_and_without_a_window_that_stays finished_turn_results_leave_as_markers)
         ; Alcotest.test_case
             "results below the floor stay in the prompt"
             `Quick
@@ -3168,6 +3235,10 @@ let () =
             "a result changes once and its marker stays"
             `Quick
             a_finished_turn_result_changes_once_and_its_marker_stays
+        ; Alcotest.test_case
+            "a window that stays keeps what it sent as markers"
+            `Quick
+            a_window_that_stays_keeps_what_it_sent_as_markers
         ; Alcotest.test_case
             "ended turns stay verbatim unless they can be read back"
             `Quick

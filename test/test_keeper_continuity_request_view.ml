@@ -394,7 +394,7 @@ let test_a_window_that_stays_keeps_its_working_state () =
       (wire (view ?held_window messages))
   in
   let held ~at working_state =
-    { Driver.window_opened_at = at; working_state }
+    { Driver.window_opened_at = at; markers_before = 0; working_state }
   in
   let opened_with = "[Librarian working state: the summary the window opened with]" in
   let current = [ [ T.Text (Driver.working_state_text working_state) ] ] in

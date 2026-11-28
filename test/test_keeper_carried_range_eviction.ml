@@ -802,7 +802,7 @@ let test_the_size_signal_moves_only_a_window_that_stays () =
 let test_a_window_that_stays_holds_behind_the_librarian_point () =
   let history = exchanges ~from:0 10 in
   let held at =
-    Some { Try_provider.window_opened_at = at; working_state = None }
+    Some { Try_provider.window_opened_at = at; markers_before = 0; working_state = None }
   in
   let start ~held_window ~point accepted =
     let { Try_provider.start; _ } =
@@ -848,7 +848,11 @@ let test_the_size_signal_moves_to_the_librarian_point () =
     let choice =
       Try_provider.choose_range_start ~past_max_context
         ~held_window:
-          (Some { Try_provider.window_opened_at = held_at; working_state = None })
+          (Some
+             { Try_provider.window_opened_at = held_at
+             ; markers_before = 0
+             ; working_state = None
+             })
         ~continuity:(Some (absorbed_at ~point)) ~front:None ~accepted:(Some accepted)
         ~history_digest_at:(Window.atom_opening_digest history) ~turn_boundary:boundary_8
         ~this_turn_start:None

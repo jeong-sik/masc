@@ -907,8 +907,8 @@ let aged_result_min_bytes = 2_048
 (* The atoms of turns that ended: the ones before the turn boundary, never
    the newest atom, which the request always carries as it is
    ([Keeper_carried_front.clamp]). An unknown boundary names no turn that
-   ended: every result goes as the range first sent it, and goes as its
-   marker again at the next dispatch that reads a boundary. *)
+   ended; what a window that stays already sent as markers still goes as
+   markers ([finished_boundary]). *)
 let finished_turn_atoms ~atom_count = function
   | Keeper_carried_front.Turn_boundary { end_atom } ->
     Keeper_carried_front.clamp ~atom_count end_atom
@@ -1407,6 +1407,7 @@ let past_max_context
 (* What a window that stays keeps where it last sent it. *)
 type held_window =
   { window_opened_at : int
+  ; markers_before : int
   ; working_state : string option
   }
 
@@ -1429,6 +1430,7 @@ let held_window ~opens_turn ~(input_limit : Llm_provider.Input_budget.t option) 
     then
       Some
         { window_opened_at = ledger.last.first_atom
+        ; markers_before = ledger.last.demote_before
         ; working_state = ledger.last.working_state
         }
     else None
@@ -1640,6 +1642,19 @@ let drop_atoms_from_projection
       { projection with messages }, Some bytes))
 ;;
 
+(* Where the results and arguments of turns that ended go as markers: below
+   the turn boundary. A window that stays never sends whole again what its
+   last request sent as a marker. That boundary lies past the turn boundary
+   in two cases: the dispatch cannot name the turn boundary, or a size
+   refusal earlier in the open turn moved it into the turn. *)
+let finished_boundary ~held_window ~start ~atom_count ~turn_boundary =
+  let finished = finished_turn_atoms ~atom_count turn_boundary in
+  match held_window with
+  | Some { window_opened_at; markers_before; _ } when stays_at ~opened_at:window_opened_at start ->
+    Int.max finished (Keeper_carried_front.clamp ~atom_count markers_before)
+  | Some _ | None -> finished
+;;
+
 let compose_carried_model_input_internal
       ?continuity
       ?compaction_anchor
@@ -1696,7 +1711,7 @@ let compose_carried_model_input_internal
      same markers. Any other request carries what the range already sent,
      unchanged (RFC-0363 §3.4.1), but for the results and arguments of turns
      that ended when the caller asks for them as markers: they change on the
-     first request after their turn ended ([finished_turn_atoms]). *)
+     first request after their turn ended ([finished_boundary]). *)
   let planned, demote_before =
     match in_turn_demotion with
     | Demote_closed_current_turn_tools { refused_atom_count }
@@ -1740,7 +1755,9 @@ let compose_carried_model_input_internal
          (match finished_turn_results with
           | Finished_turns_verbatim -> { Keeper_model_input_demotion.messages; pending = [] }, 0
           | Finished_turns_as_markers ->
-            let finished = finished_turn_atoms ~atom_count:history_atom_count turn_boundary in
+            let finished =
+              finished_boundary ~held_window ~start ~atom_count:history_atom_count ~turn_boundary
+            in
             ( demotion_plan ?completed_arguments ~min_result_bytes:aged_result_min_bytes ~measure_message_bytes
                 ~measure_wire_bytes
                 ~base_path ~demote_before:finished messages
@@ -2448,7 +2465,8 @@ let bounded_model_input_projection
       else None
     in
     (* Read before this request moves the ledger: where a window that stays
-       opened and what working state it carried. *)
+       opened, where it last sent its markers and what working state it
+       carried. *)
     let held_window =
       held_window ~opens_turn ~input_limit:(Lazy.force input_limit) ~history_digest_at
         !(state.ledger)

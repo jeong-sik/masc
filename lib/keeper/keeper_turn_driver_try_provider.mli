@@ -247,6 +247,10 @@ val past_max_context :
 type held_window =
   { window_opened_at : int
         (** Where the ledger's last request opened its range. *)
+  ; markers_before : int
+        (** The atom below which that request sent finished results as
+            markers. The next request never sends those whole again; it
+            sends more as markers when the turn boundary lies past it. *)
   ; working_state : string option
         (** The working state that request carried; [None] when it carried
             none. *)
@@ -1010,8 +1014,10 @@ module For_testing : sig
       [past_max_context] goes to {!choose_range_start}; omitted, no window
       moves for size. The turn driver passes it at a turn's first request.
       [held_window] keeps the working state of a window that stays as it
-      was last sent; omitted, the working state is the snapshot's. The
-      markers and arguments follow the turn boundary either way. *)
+      was last sent, and keeps as markers what its last request sent as
+      markers; omitted, the working state is the snapshot's and the markers
+      follow the turn boundary alone. The arguments follow the turn
+      boundary either way. *)
 
   type in_turn_overflow_demotion =
     | No_in_turn_demotion

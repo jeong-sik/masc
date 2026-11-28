@@ -738,6 +738,16 @@ let all =
        exported variable can name only one of them. The file of each base path
        names its own; the variable stays a per-launch override. *)
     setting
+      ~meaning:(fun text ->
+        (* Judged as the getter reads it: trimmed, trailing slashes gone. The
+           value is not echoed, since a refused URL can carry a password. *)
+        if Public_base_url.is_http_origin
+             (Env_config_core.strip_trailing_slashes (String.trim text))
+        then Ok ()
+        else
+          Error
+            "expected an http(s) origin with a host and no user, path, query or \
+             fragment, such as https://masc.example.com")
       ~effective:
         (Reader
            (fun () -> display_string_option (Env_config_core.masc_http_base_url_opt ())))

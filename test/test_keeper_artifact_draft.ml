@@ -186,6 +186,76 @@ let discovery_tests = [
     Alcotest.(check bool) "changed catalog invalidates cursor" true
       ((call "team" (Some cursor)).disposition = Tool_result.Failed Tool_result.Workflow_rejection)));
 ]
+(* Plain-text stand-in for the Yjs transformer, so this group runs without the
+   Node binary the runtime group needs. The state is the base64 source and a
+   selection is its two UTF-16 indices, one byte each. Like the real
+   transformer, it refuses an edit whose selected text has changed. *)
+let plain_runner input =
+  let json = Yojson.Safe.from_string input in
+  let field name = member name json in
+  let reply code fields = Ok (Unix.WEXITED code, Yojson.Safe.to_string (`Assoc fields)) in
+  let snapshot content = ["ok", `Bool true; "state", `String (Base64.encode_string content); "content", `String content] in
+  let positioned content anchor head = snapshot content @ [
+    "selection", `Assoc ["anchor", `List [`Int anchor]; "head", `List [`Int head]];
+    "range", `Assoc ["anchor", `Int anchor; "head", `Int head]] in
+  let source () = match Base64.decode (text (field "state")) with
+    | Ok source -> source | Error (`Msg message) -> failwith message in
+  let indices selection = match member "anchor" selection, member "head" selection with
+    | `List [`Int anchor], `List [`Int head] -> anchor, head
+    | _ -> failwith "plain runner takes one-byte positions" in
+  match field "kind" with
+  | `String "seed" -> reply 0 (snapshot (text (field "content")))
+  | `String "merge" when field "updates" = `List [] -> reply 0 (snapshot (source ()))
+  | `String "select" -> reply 0 (positioned (source ()) (Yojson.Safe.Util.to_int (field "anchor")) (Yojson.Safe.Util.to_int (field "head")))
+  | `String "resolve" -> let anchor, head = indices (field "selection") in reply 0 (positioned (source ()) anchor head)
+  | `String "edit" ->
+    let content = source () in
+    let anchor, head = indices (field "selection") in
+    let start, stop = min anchor head, max anchor head in
+    if String.sub content start (stop - start) <> text (field "expected") then
+      reply 2 ["ok", `Bool false; "code", `String "changed_selection"; "message", `String "selected text changed"]
+    else
+      let replacement = text (field "replacement") in
+      let next = String.sub content 0 start ^ replacement ^ String.sub content stop (String.length content - stop) in
+      reply 0 (positioned next start (start + String.length replacement))
+  | _ -> failwith "plain runner does not take this request"
+(* No turn gate stands in front of the tool, so a call that arrives after the
+   Keeper's turn is an ordinary call. What keeps it from corrupting the draft
+   is the store: the author comes from the caller's Keeper, and an edit or a
+   checkpoint built on an older observation is refused. *)
+let late_call_tests = [
+  "a late call writes as its Keeper and stale observations are refused", `Quick, (fun () -> with_base (fun base_path ->
+    let call input = Keeper_artifact_draft.handle ~runner:plain_runner ~base_path ~keeper:"keeper-editor" ~args:input () in
+    let human command = Store.execute ~runner:plain_runner ~base_path ~actor:"human" command |> stored in
+    let artifact = publish base_path "alpha beta" in
+    let read () = Store.read ~runner:plain_runner ~base_path ~artifact_id:artifact.id () |> stored in
+    let target = call (open_args artifact.id) |> success |> target_of in
+    let observed = call (select target 0 5) |> success in
+    let observed_sequence = member "sequence" observed in
+    let human_choice = human (Draft.Select { target; anchor = 0; head = 5 }) in
+    let human_selection = match human_choice.selection with Some (selection, _, _) -> selection | None -> Alcotest.fail "human selection absent" in
+    ignore (human (Draft.Edit { selection = human_selection; expected = "alpha"; replacement = "human" }));
+    let stale_edit = call (edit (member "selection" observed) "alpha" "keeper") in
+    Alcotest.(check bool) "stale text is a workflow refusal" true
+      (stale_edit.disposition = Tool_result.Failed Tool_result.Workflow_rejection);
+    let after_edit = read () in
+    Alcotest.(check string) "other writer's text kept" "human beta" after_edit.content;
+    Alcotest.(check string) "other writer stays the author" "human" after_edit.draft.updated_by;
+    let revision = `Assoc ["id", `String artifact.id; "expected_revision", `Int 1;
+      "title", `String "Keeper draft fixture"; "summary", `String "native";
+      "format", `String "markdown"; "content", `String after_edit.content] in
+    ignore (Keeper_artifact_publish.handle ~base_path ~author:"publisher" ~args:revision |> success);
+    let stale_checkpoint = call (`Assoc ["action", `String "checkpoint"; "target", Draft.target_to_json target;
+      "expected_sequence", observed_sequence; "revision", `Int 2]) in
+    Alcotest.(check bool) "stale sequence is a workflow refusal" true
+      (stale_checkpoint.disposition = Tool_result.Failed Tool_result.Workflow_rejection);
+    let after_checkpoint = read () in
+    Alcotest.(check int) "draft base stays at the first publication" 1 after_checkpoint.draft.base_revision;
+    let fresh = call (select target 6 10) |> success |> member "selection" in
+    let written = call (edit fresh "beta" "keeper") |> success in
+    Alcotest.(check string) "fresh late edit applies" "human keeper" (member "content" written |> text);
+    Alcotest.(check string) "late edit is recorded as its Keeper" "keeper-editor" (read ()).draft.updated_by));
+]
 let schema_tests = ["canonical tool", `Quick, (fun () ->
   let descriptor = match Keeper_tool_descriptor.find_id "keeper.artifact.draft" with Some descriptor -> descriptor | None -> Alcotest.fail "missing descriptor" in
   Alcotest.(check (list string)) "model schema" [] (Keeper_tool_descriptor.model_schema_errors descriptor);
@@ -195,4 +265,5 @@ let () = Eio_main.run (fun env ->
   let tests, argv = if Array.length Sys.argv = 3 && Sys.argv.(1) = "--transformer"
     then integration (Artifact_document_engine.default_runner ~executable:Sys.argv.(2)), [|Sys.argv.(0)|] else [], Sys.argv in
   Fun.protect ~finally:Process_eio.reset_for_testing (fun () ->
-    Alcotest.run ~argv "Keeper shared artifact draft" ["schema", schema_tests; "discovery", discovery_tests; "runtime", tests]))
+    Alcotest.run ~argv "Keeper shared artifact draft"
+      ["schema", schema_tests; "discovery", discovery_tests; "late call", late_call_tests; "runtime", tests]))

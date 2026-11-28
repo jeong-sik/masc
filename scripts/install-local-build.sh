@@ -42,7 +42,9 @@
 # masc restart, as the restarted server refused the old one before (#53164):
 # its readiness check reads the shim again for every guest it has not
 # verified. So restart right after installing. To go back before a restart,
-# rename masc-exec-shim.previous to masc-exec-shim.
+# rename masc-exec-shim.previous to masc-exec-shim. A sidecar removed with
+# the replaced shim does not come back that way, and the server runs the shim
+# without one.
 #
 # No release is asked for unless --refresh-guest-shim is given. That option
 # hands a release shim (masc-exec-shim with its sha256 sidecar) to the
@@ -600,9 +602,10 @@ checkout_guest_shim() (
   fi
   if installed_source=$(source_identity_of "$shim") && [ "$installed_source" = "$required_source" ]; then
     # The server also refuses a shim whose sidecar does not begin with the
-    # sha256 of its bytes (microvm_shim_hash_mismatch, _sidecar_invalid). A
-    # shim of this build beside such a sidecar was put over a release shim by
-    # hand, and the sidecar describes the release bytes that are gone.
+    # sha256 of its bytes (microvm_shim_hash_mismatch, _sidecar_invalid),
+    # whatever left the two together: a shim copied over a release shim by
+    # hand, or a swap that SIGKILL ended. The sidecar does not describe the
+    # bytes in place, so it goes.
     if [ -f "$sidecar" ]; then
       if ! shim_sha256=$(sha256_of "$shim"); then
         echo "install-local-build: the sha256 of $shim could not be computed; nothing installed" >&2
@@ -639,7 +642,7 @@ checkout_guest_shim() (
   fi
   by_hand+=$(printf ' && mv %q %q' "$shim.partial" "$shim")
   refuse() {
-    echo "install-local-build: guest exec shim $shim declares source identity $installed_source, but this build is $required_source and its server refuses that shim. $1; nothing installed. Build the shim by hand, then install again: $by_hand. A workspace that runs no microVM Keeper needs no shim: remove $shim and install again." >&2
+    echo "install-local-build: guest exec shim $shim declares source identity $installed_source, but this build is $required_source and its server refuses that shim. $1; nothing installed. A workspace that runs no microVM Keeper needs no shim: remove $shim and install again. Otherwise build the shim by hand, then install again: $by_hand" >&2
     exit 1
   }
   [ "$guest_arch_status" -eq 0 ] ||
@@ -653,9 +656,12 @@ checkout_guest_shim() (
   # errexit a failing last command here would turn a finished swap into a
   # failed install after the shim was already replaced.
   remove_staged() {
+    # A second signal does not cut the cleanup short.
+    trap '' HUP INT TERM
     # A sidecar still set aside when the step ends goes back beside the shim
     # it describes. That shim is gone once the staged one was renamed over
-    # it, which is when the staged file no longer exists.
+    # it, which is when the staged file no longer exists: no rename is under
+    # way while this runs (see the signal traps below).
     if [ -n "$set_aside" ] && [ -e "$set_aside" ]; then
       if [ -n "$staged" ] && [ -e "$staged" ]; then
         mv "$set_aside" "$sidecar" ||
@@ -670,7 +676,16 @@ checkout_guest_shim() (
       rm -f "$staged_previous" || echo "install-local-build: could not remove $staged_previous" >&2
     fi
   }
+  # Each signal trap exits itself (128+n), and that exit runs remove_staged.
+  # bash runs a signal trap when the command in the foreground has returned,
+  # so the cleanup never runs beside a rename that is still to happen. With
+  # the EXIT trap alone, bash 5 ran it the moment SIGTERM arrived and put the
+  # old sidecar back just before the new shim was renamed into place, and
+  # bash 3.2 ran no cleanup on SIGTERM and SIGHUP.
   trap remove_staged EXIT
+  trap 'exit 129' HUP
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
   # build-shim.sh takes --out relative to the top of the checkout it runs in.
   # Git ignores dist/, so the build directory does not change the source
   # identity the shim is built with.
@@ -704,20 +719,29 @@ checkout_guest_shim() (
   staged_previous=""
   # The sidecar is the sha256 of the shim being replaced, and the server
   # refuses a shim whose sidecar names other bytes. It is renamed aside before
-  # the swap, so there is no moment with the new shim beside the old sidecar,
-  # and remove_staged puts it back when the swap does not happen. The name is
-  # set before the rename: a step that ends between the two still finds it.
-  sidecar_note=""
+  # the swap and removed after it, and remove_staged puts it back when the
+  # swap did not happen. The name is set before the rename, so a step that a
+  # failure or a signal ends anywhere from here leaves the old shim with its
+  # sidecar or the new shim without one. SIGKILL runs no cleanup: between the
+  # two renames it leaves the old shim and the sidecar as $set_aside.
   if [ -f "$sidecar" ]; then
     set_aside="$sidecar.replaced.$$"
     mv "$sidecar" "$set_aside" || refuse "Its sha256 sidecar $sidecar could not be set aside"
-    sidecar_note=" $sidecar described the replaced shim and was removed."
   fi
   # A failure here leaves the shim in place and $previous holding a copy of it.
   if ! mv "$staged" "$shim"; then
     refuse "The built shim could not be renamed to $shim"
   fi
   staged=""
+  sidecar_note=""
+  if [ -n "$set_aside" ]; then
+    if rm -f "$set_aside"; then
+      sidecar_note=" $sidecar described the replaced shim and was removed."
+    else
+      sidecar_note=" $sidecar described the replaced shim and is now $set_aside, which could not be removed."
+    fi
+    set_aside=""
+  fi
   echo "installed the $guest_arch guest exec shim built from $repo into $shim_dir (source identity $required_source; the previous one is kept as $previous).$sidecar_note The running server refuses it until masc restart."
 )
 checkout_guest_shim

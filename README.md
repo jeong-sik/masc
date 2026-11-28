@@ -184,7 +184,8 @@ using the same workspace path. When the workspace's guest shim declares another
 source identity than the build, the source installer rebuilds it from this
 checkout before it replaces the server (`scripts/remote-ssh/build-shim.sh`,
 which needs Docker), whether or not a release placed that shim; a failed rebuild
-installs nothing. `--refresh-guest-shim` takes an existing release shim from the
+installs nothing. A workspace that runs no microVM Keeper needs no shim and can
+remove `masc-exec-shim` instead. `--refresh-guest-shim` takes an existing release shim from the
 release the build names instead (`docs/MICROVM-REMOTE-RUNBOOK.md`). When that release's shim declares another
 source identity than the build (always, for a checkout build), it installs
 nothing and names the source build (`scripts/remote-ssh/build-shim.sh`) to use

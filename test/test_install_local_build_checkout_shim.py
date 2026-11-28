@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""A local install rebuilds a source-built guest shim from its checkout (#53164)."""
+"""A local install rebuilds a guest shim of another source from its checkout (#53164)."""
 import os
 from pathlib import Path
 import shutil
@@ -110,9 +110,40 @@ exec {shutil.which("mv")} "$@"
     mv.chmod(0o755)
 
 
-def install(root, repo, build, base, *more):
+# An mv that sends [signal] to the shell that called it, the subshell of the
+# step, before each rename whose source and target match one of the shell
+# pattern pairs in [renames]. It then waits, so a shell that runs its cleanup
+# the moment the signal arrives runs it beside a rename that has not happened
+# yet. It is the real mv for every other rename.
+def signalling_mv(root, signal, renames):
+    hooks = root / "hooks"
+    hooks.mkdir(exist_ok=True)
+    mv = hooks / "mv"
+    arms = "\n".join(f'  {source}" -> "{target}) kill -{signal} "$PPID"; sleep 0.3 ;;'
+                     for source, target in renames)
+    mv.write_text(f'''#!/bin/sh
+for target; do :; done
+case "$1 -> $target" in
+{arms}
+esac
+exec {shutil.which("mv")} "$@"
+''')
+    mv.chmod(0o755)
+
+
+# The shells a host runs the script with: the bash first on PATH and, where
+# that is another program, /bin/bash (3.2 on macOS).
+def shells():
+    found = {}
+    for candidate in (shutil.which("bash"), "/bin/bash"):
+        if candidate and Path(candidate).exists():
+            found.setdefault(os.path.realpath(candidate), candidate)
+    return list(found.values())
+
+
+def install(root, repo, build, base, *more, shell="bash"):
     return subprocess.run(
-        ["bash", str(repo / "scripts" / local_build.SCRIPT.name), "--skip-build",
+        [shell, str(repo / "scripts" / local_build.SCRIPT.name), "--skip-build",
          "--build-dir", str(build), "--prefix", str(root / "prefix"),
          "--base-path", str(base), *more],
         env=no_release_env(root), cwd=root, capture_output=True, text=True)
@@ -239,6 +270,10 @@ class CheckoutGuestShim(unittest.TestCase):
             # printf %q escapes the space in the fixture's workspace path.
             quoted = str(shim).replace(" ", "\\ ")
             self.assertIn(f"&& mv {quoted}.partial {quoted}", result.stderr)
+            # The command ends the message: a period after it was copied into
+            # the shell as part of the shim's name.
+            self.assertTrue(result.stderr.rstrip("\n").endswith(f"&& mv {quoted}.partial {quoted}"),
+                            result.stderr)
 
     # The checkout changed after the server was built: its shim would be
     # refused like the old one.
@@ -255,8 +290,8 @@ class CheckoutGuestShim(unittest.TestCase):
                 self.assertIn(f"declares {declared} instead", result.stderr)
 
     # 2026-11-21: a release shim with its sidecar was put under a checkout
-    # server. The install left it alone and ended 0 each of the next fourteen
-    # times, every restarted server refused it, and three microVM Keepers ran
+    # server. The install left it alone and ended 0 at least fourteen times,
+    # every restarted server refused it, and three microVM Keepers ran
     # no guest command for 73 hours. The sidecar says where the bytes came
     # from; whether this build's server runs them is the identity they declare.
     def test_a_release_shim_of_another_source_is_rebuilt_and_loses_its_sidecar(self):
@@ -384,6 +419,48 @@ class CheckoutGuestShim(unittest.TestCase):
                 self.assertEqual(leftover_builds(repo), [])
                 self.assertFalse((root / "prefix").exists(),
                                  "the server was replaced beside a shim it refuses")
+
+    # A signal reaches the step while one of the two renames that touch the
+    # pair is under way. With only an EXIT trap, bash 5 ran the cleanup at once
+    # on SIGTERM, beside a rename still to happen, and left the new shim beside
+    # the old sidecar, the pair the server refuses; bash 3.2 ran no cleanup on
+    # SIGTERM and SIGHUP and left the sidecar under its set-aside name. The
+    # install ends with the signal's status and replaces no server. A second
+    # signal, sent while the cleanup puts the sidecar back, does not cut the
+    # cleanup short.
+    def test_a_signal_during_either_rename_leaves_a_pair_the_server_accepts(self):
+        set_aside = ("*/masc-exec-shim.sha256", "*")
+        put_back = ("*/masc-exec-shim.sha256.replaced.*", "*/masc-exec-shim.sha256")
+        swap = ("*/masc-exec-shim.partial.*", "*/masc-exec-shim")
+        cases = (
+            ("the sidecar is being set aside", [set_aside], False),
+            ("the built shim is being renamed", [swap], True),
+            ("the sidecar is being set aside, and again while it is put back", [set_aside, put_back], False))
+        for shell in shells():
+            for signal, status in (("HUP", 129), ("INT", 130), ("TERM", 143)):
+                for label, renames, swapped in cases:
+                    with self.subTest(shell=shell, signal=signal, during=label), \
+                            tempfile.TemporaryDirectory() as temporary:
+                        root = Path(temporary).resolve()
+                        repo = checkout(root)
+                        old = elf(EM_AARCH64, OTHER_SOURCE)
+                        recorded = guest_shim.sidecar_line(old)
+                        base, shim, sidecar = guest_shim.workspace_with_shim(
+                            root, content=old, sidecar=recorded)
+                        signalling_mv(root, signal, renames)
+                        result = install(root, repo, guest_shim.build_naming(root), base, shell=shell)
+                        self.assertEqual(result.returncode, status, result.stderr)
+                        if swapped:
+                            self.assertEqual(shim.read_bytes(), elf(EM_AARCH64, BUILD_SOURCE))
+                            self.assertEqual(guest_shim.shim_directory(shim), ["masc-exec-shim", PREVIOUS])
+                        else:
+                            self.assertEqual(shim.read_bytes(), old)
+                            self.assertEqual(guest_shim.shim_directory(shim),
+                                             sorted([*guest_shim.PAIR, PREVIOUS]))
+                            self.assertEqual(sidecar.read_text(), recorded)
+                        self.assertEqual(leftover_builds(repo), [])
+                        self.assertFalse((root / "prefix").exists(),
+                                         "the server was replaced by an install a signal ended")
 
     # No guess from this shell: an architecture the header does not name is
     # refused before anything is built.

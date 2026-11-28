@@ -151,7 +151,8 @@ microVM Keeper 를 돌리지 않는 workspace 는 shim 이 필요 없다. 다시
 checkout 에서 고친 서버·shim 을 microVM 에 배포할 때는 옵션 없이
 `scripts/install-local-build.sh` 를 돌린다. 위에 적은 대로 신원이 다른 shim 을 다시 빌드한다.
 `--refresh-guest-shim` 은 이미 있는 릴리즈 shim 을 그 릴리즈의 자산으로 맞춘다.
-빌드한 서버가 그 릴리즈와 같은 소스일 때만 끝까지 가고, checkout 빌드는 아래 표대로 멈춘다.
+빌드한 서버가 그 릴리즈와 같은 소스일 때만 shim 을 바꾼다. checkout 빌드는 릴리즈를 읽으면
+아래 표의 소스 신원 행에서 멈추고, 릴리즈를 못 읽으면 WARN 한 줄 뒤 shim 을 둔 채 설치를 계속한다.
 빌드가 끝났으면 `--skip-build` 도 붙인다. 새로 놓지는 않는다.
 이 옵션을 주고 workspace 에 바이너리와 sidecar 가 둘 다 있으면, 빌드한
 서버가 말하는 버전의 릴리즈에서 같은 자산을 받아 `SHA256SUMS` 와 맞춰 보고 두 파일을

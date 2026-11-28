@@ -1109,8 +1109,9 @@ let test_encoded_pixel_snapshot () =
          The guest enables text display and toggles R7 between palette colors 2
          and 3 once per key press. Row select/read follow the ocaml-msx keyboard
          contract — OUT (0xAA) (0x50|row), then IN A,(0xA9), active low, space =
-         row 8 bit 0 — scanning rows 0..9 with edge detection, so one Lane.press
-         deterministically changes actual pixels. The previous VBlank-poll design
+         row 8 bit 0 — scanning rows 0..9 with proper edge detection (C flag: one
+         toggle per press, re-armed only when all rows read idle), so one
+         Lane.press deterministically changes actual pixels. The previous VBlank-poll design
          was flaky under CI: in failing runs the guest never observed the flag,
          pixels stayed constant, and the retained/inline assertion inverted
          (runs 46077144207, 46082771264, 46084052839 — one constant revision
@@ -1138,25 +1139,25 @@ let test_encoded_pixel_snapshot () =
         0x10
         [ 0xf3 (* DI *)
         ; 0x06; 0x02 (* LD B,2 — palette color seed *)
-        ; 0x0e; 0x01 (* LD C,1 — armed *)
+        ; 0x0e; 0x00 (* LD C,0 — not yet toggled this press *)
         ; 0x3e; 0x50; 0xd3; 0x99 (* text mode, display enabled *)
         ; 0x3e; 0x81; 0xd3; 0x99 (* write VDP register 1 *)
         ; 0x16; 0x00 (* LD D,0 — row counter *)
         ; 0x3e; 0x50; 0xb2; 0xd3; 0xaa (* 401F loop: A=0x50|D; OUT(0xAA) select row D *)
         ; 0xdb; 0xa9 (* IN A,(0xA9) read row, active low *)
         ; 0xfe; 0xff (* CP 0xff — any key pressed? *)
-        ; 0x20; 0x0b (* JR NZ,4035 toggle *)
+        ; 0x20; 0x0b (* JR NZ,4035 key detected *)
         ; 0x14 (* INC D *)
         ; 0x7a; 0xfe; 0x0a (* LD A,D; CP 10 *)
         ; 0x20; 0xef (* JR NZ,401F *)
-        ; 0x0e; 0x01 (* re-arm: no key pressed *)
+        ; 0x0e; 0x00 (* all rows idle — re-arm C *)
         ; 0xc3; 0x1f; 0x40 (* JP 401F *)
-        ; 0x0d (* 4035: DEC C *)
-        ; 0x28; 0xe7 (* JR Z,401F — already toggled while held *)
-        ; 0x0e; 0x00 (* LD C,0 *)
+        ; 0x79; 0xb7 (* 4035: LD A,C; OR A — already toggled while held? *)
+        ; 0x20; 0x0c (* JR NZ,4045 skip *)
+        ; 0x0e; 0x01 (* LD C,1 *)
         ; 0x78; 0xee; 0x01; 0x47 (* toggle color 2 / 3 *)
         ; 0xd3; 0x99; 0x3e; 0x87; 0xd3; 0x99 (* write VDP register 7 *)
-        ; 0xc3; 0x1f; 0x40 (* JP 401F *)
+        ; 0xc3; 0x1f; 0x40 (* 4045: JP 401F *)
         ];
       let cart_path = Filename.concat base_path "pixel-toggle.rom" in
       Out_channel.with_open_bin cart_path (fun oc -> output_bytes oc cart);
@@ -1190,12 +1191,13 @@ let test_encoded_pixel_snapshot () =
             in
             assert_pixels_kind "retained" same_pixels;
             ignore
-              (Lane.press
-                 ~who:"unit-pixel"
-                 ~keys:[ Result.get_ok (Lane.key_of_string "space") ]
-                 ~hold_frames:1
-                 ~step_frames:1
-                 ~sequence:false);
+              (require
+                 (Lane.press
+                    ~who:"unit-pixel"
+                    ~keys:[ Result.get_ok (Lane.key_of_string "space") ]
+                    ~hold_frames:1
+                    ~step_frames:1
+                    ~sequence:false));
             let _, changed_pixels =
               Route.tick_response ~config ~body:(retained_request same_pixels)
             in

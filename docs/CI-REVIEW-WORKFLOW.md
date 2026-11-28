@@ -25,8 +25,8 @@ the pull request changes and rejects merge commits. `type-check` runs
 request. When a file under `dashboard/` changed, the `dashboard` job
 type-checks the dashboard and runs the tests that import a changed file; it is
 not required, and a native stack runs it once, at its top. `pr-python-bin-free.yml` also runs on every pull request, and
-`alphatex-native.yml`, `changelog-fragments.yml` and `review-script-tests.yml`
-run only when their own paths change. No workflow runs on a push to a branch
+`alphatex-native.yml`, `changelog-fragments.yml`, `pele-install.yml` and
+`review-script-tests.yml` run only when their own paths change. No workflow runs on a push to a branch
 other than main, or on a tag push.
 
 The operator-authorized `main-minimal-build.yml` runs on each push to main and

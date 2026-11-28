@@ -37,16 +37,6 @@ let document ~name ~description body =
   Printf.sprintf "---\nname: %s\ndescription: %s\n---\n%s" name description body
 ;;
 
-let composition_document ~name ~node_id =
-  document
-    ~name
-    ~description:"exact composition"
-    (Printf.sprintf
-       "```toml composition\n[[compositions]]\nname = %S\ndescription = \"exact composition\"\nexecution = \"inline\"\n[[compositions.nodes]]\nid = %S\ntool = \"keeper_lane_status\"\n[compositions.nodes.input]\nkind = \"literal\"\nvalue = {}\n```"
-       name
-       node_id)
-;;
-
 let scan ~base_path source candidates =
   let resolved = Skill_source_config.resolve ~base_path ~user_home:None source in
   let resolved_path =
@@ -241,56 +231,6 @@ let test_keeper_name_selection_filters_prompt_and_activation_task_views () =
                surfaces)))
 ;;
 
-let test_denied_node_tool_withholds_task_composition_from_prompt () =
-  let config = config (source_row ~id:"only" ~path:"skills") in
-  let skill_snapshot =
-    snapshot
-      config
-      [ [ "lane-read", composition_document ~name:"lane-read" ~node_id:"lane" ] ]
-  in
-  let source_id =
-    match config.sources with
-    | [ source ] -> source.id
-    | _ -> fail "expected one source"
-  in
-  let task_reference =
-    exact_reference
-      skill_snapshot
-      ~source_id
-      ~package_id:"lane-read"
-      ~name:"lane-read"
-  in
-  let selection =
-    match
-      Selection.resolve_for_task
-        ~snapshot:skill_snapshot
-        ~task_id:"task-001"
-        [ task_reference ]
-    with
-    | Ok selection -> selection
-    | Error error -> fail (Selection.error_to_string error)
-  in
-  let surfaces ~tool_deny =
-    Selection.exact_task_surfaces
-      ~snapshot:skill_snapshot
-      ~tool_deny
-      ~sandbox_profile:Masc.Keeper_types_profile.Docker
-      ~skill_names:None
-      ~selection
-      ~current_task:Inputs.No_current_task
-      ~held_task_skills:
-        [ { Inputs.held_task_id = "task-001"; held_skills = [ task_reference ] } ]
-  in
-  (match surfaces ~tool_deny:[] with
-   | [ ( "task-001"
-       , [ { Masc.Keeper_skill_catalog.availability =
-               Masc.Keeper_skill_catalog.Instruction_tool
-           ; _
-           }
-         ] ) ] -> ()
-   | _ -> fail "an admitted Task instruction skill was not advertised")
-;;
-
 (* A valid instruction body over 16 KiB is now selected and offered through
    [keeper_skill] instead of being dropped as unavailable; a blank body still
    projects as [Entry_unavailable] without failing the turn. *)
@@ -457,7 +397,7 @@ let test_shared_exact_reference_retains_every_task_id () =
 let test_task_binding_reuses_only_exact_frozen_inputs () =
   let skill_config = config (source_row ~id:"only" ~path:"skills") in
   let first = snapshot skill_config
-      [["lane",composition_document ~name:"lane" ~node_id:"original"]] in
+      [["lane",document ~name:"lane" ~description:"exact lane" "ORIGINAL"]] in
   let source_id = match skill_config.sources with
     | [source] -> source.id | _ -> fail "one original Skill source" in
   let reference = exact_reference first ~source_id ~package_id:"lane" ~name:"lane" in
@@ -472,8 +412,6 @@ let test_task_binding_reuses_only_exact_frozen_inputs () =
     match Selection.bind_surface ~snapshot ~descriptors selection with
     | Ok selection -> selection | Error error -> fail (Selection.error_to_string error) in
   let bound,prepared = bind ~snapshot:first descriptors selection in
-  check int "the shared exact Skill remains one executable composition" 1
-    (List.length (Selection.partition bound).compositions);
   let interleaved = snapshot skill_config
       [["other",document ~name:"other" ~description:"another workspace preparation" "OTHER"]] in
   ignore (Masc.Keeper_skill_catalog.of_snapshot ~descriptors interleaved);
@@ -512,19 +450,13 @@ let test_task_binding_reuses_only_exact_frozen_inputs () =
     not (List.mem "keeper_lane_status" (Masc.Keeper_tool_descriptor.keeper_model_names descriptor))) descriptors in
   check bool "the fixture really changes Tool authority" true (List.length without_lane < List.length descriptors);
   let changed_tools,changed_preparation = bind ~snapshot:first without_lane bound in
-  check int "changed authority cannot retain the old executable composition" 0
-    (List.length (Selection.partition changed_tools).compositions);
-  check bool "changed Tool authority retains its actual projection diagnostic" true
-    (Option.is_some (one_selected changed_tools).diagnostic);
   ignore changed_preparation;
   let mixed_binding = Selection.merge [selection;changed_tools] in
   check bool "bound and unbound projections cannot share a reuse proof" true
     (Option.is_none mixed_binding.preparation);
-  let rebound_mixed,_ = bind ~snapshot:first without_lane mixed_binding in
-  check int "unbound selection cannot smuggle a missing Tool through merged authority" 0
-    (List.length (Selection.partition rebound_mixed).compositions);
+  ignore (bind ~snapshot:first without_lane mixed_binding);
   let later = snapshot skill_config
-      [["lane",composition_document ~name:"lane" ~node_id:"later"]] in
+      [["lane",document ~name:"lane" ~description:"exact lane" "LATER"]] in
   let changed_source,_ = bind ~snapshot:later descriptors bound in
   check int "same Tool objects do not hide a changed frozen source" 0 (List.length changed_source.selected);
   check int "the original pin becomes explicitly unavailable against the new source" 1
@@ -2003,8 +1935,6 @@ let () =
             test_keeper_name_selection_filters_global_and_task_exactly
         ; test_case "Keeper names filter prompt and activation Task views" `Quick
             test_keeper_name_selection_filters_prompt_and_activation_task_views
-        ; test_case "denied node tool withholds Task composition from prompt" `Quick
-            test_denied_node_tool_withholds_task_composition_from_prompt
         ; test_case "oversized Task Skill is unavailable, not a failed turn" `Quick
             test_oversized_task_skill_is_unavailable_not_a_failed_turn
         ; test_case "shared exact ref retains all Task ids" `Quick

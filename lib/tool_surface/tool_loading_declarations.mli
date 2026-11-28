@@ -3,9 +3,6 @@
 
     The declaration lives in each tool's own [config/tools/<name>.toml], next
     to the description and parameters it governs, as [defer_loading = true].
-    A Skill composition declares it in its own composition block instead
-    ([Keeper_tool_composition_catalog.entry.loading]), where its description lives;
-    this module answers only for tool files.
     This module only reads them; it holds no list of its own. That is the
     difference from the per-Keeper tool groups PR #31728 removed: nobody has
     to keep a roster in sync, and a tool that changes its mind changes one
@@ -41,20 +38,14 @@
 
     There is deliberately no "which tools defer" listing here. Such a list
     reads as a roster the moment something takes it as input rather than as a
-    report, and a roster of tools loaded together is the group axis again.
-    Loading several tools as a unit is already a composition entry
-    ([keeper_compose_<name>]), which names its tools in [compositions.nodes]
-    along with their order and the data flowing between them -- and costs no
-    schema bytes at all, because the model calls the one composition rather
-    than the tools inside it. *)
+    report, and a roster of tools loaded together is the group axis again. *)
 
 (** [declared name] is what [config/tools/<name>.toml] declares, or [None]
     when there is no such file. *)
 val declared : string -> Tool_definition_toml.loading option
 
 (** [required name] is what [config/tools/<name>.toml] declares, for a name
-    that must have that file: a tool descriptor's internal name, or a tool the
-    composition surface builds from its own file.
+    that must have that file: a tool descriptor's internal name.
 
     @raise Failure naming the file when it is missing. Answering
     [Always_loaded] there would let a descriptor looked up under a name with

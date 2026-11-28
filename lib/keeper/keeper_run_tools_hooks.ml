@@ -206,48 +206,6 @@ let guard_repetition_before_turn_params repetition_execution hook event =
   | None -> hook event
 ;;
 
-(* The [Skills] block for one round. [deferred] is fixed when the run's tools
-   are built, but [keeper_tool_search] extends the running agent's tool set
-   and the loaded tool stays there for the rest of the run
-   ([Keeper_identity_tool_search.load_found]). A composition is therefore
-   still to be loaded only while it is deferred and absent from [on_the_wire];
-   splitting on [deferred] alone kept telling the model to search for a tool it
-   already held, every round after the load. *)
-let skill_compositions_block ~compositions ~deferred ~on_the_wire =
-  let to_load, on_turn =
-    List.partition
-      (fun name ->
-         List.exists (String.equal name) deferred
-         && not (List.exists (String.equal name) on_the_wire))
-      compositions
-  in
-  let on_turn_line =
-    match on_turn with
-    | [] -> []
-    | _ ->
-      [ Printf.sprintf
-          "[Skills] %d composition tools on this turn — each is one call whose \
-           reads run in parallel: %s"
-          (List.length on_turn)
-          (String.concat ", " on_turn)
-      ]
-  in
-  let to_load_line =
-    match to_load with
-    | [] -> []
-    | _ ->
-      [ Printf.sprintf
-          "[Skills] %d more composition tools load by name through \
-           keeper_tool_search: %s"
-          (List.length to_load)
-          (String.concat ", " to_load)
-      ]
-  in
-  match on_turn_line @ to_load_line with
-  | [] -> None
-  | lines -> Some (String.concat "\n" lines)
-;;
-
 (* The source prepared before tool selection may contain an unavailable-reader
    placeholder. Measure the request's projection only after its offered tools
    are known. Defer publication until the caller finishes assembling the hook:
@@ -695,21 +653,7 @@ let assemble_hooks
                 record_block
                   Prompt_block_id.Temporal_summary
                   (Masc_context_injector.render_temporal_summary shared_context);
-                (* Name this turn's composition Skills once. Nothing else did:
-                   the keeper prompt reached Skills only through
-                   [current_task.skills] / [held_task.skills], and both render
-                   only when a task names one — 0 of 292 recorded tasks ever
-                   did. A model that never reads a tool
-                   description therefore had no sentence telling it these
-                   exist, and 2026-09 measured 250 Skill reads across 108,185
-                   tool calls with the busiest runtime at 0 in 24,041.
-
-                   Selected through the catalog's own
-                   [skill_source_of_tool_name] rather than by matching a name
-                   prefix: that function answers [None] for a name that is not
-                   a composition tool, so the choice is a declared fact rather
-                   than a guess about spelling. *)
-                (* Deferred compositions follow the current execution owner.
+                (* Deferred tool names follow the current execution owner.
                    A prior Agent Core cell can survive official-client
                    failover; it cannot describe that client's tools or loader. *)
                 let built_tools, _all_tool_names, deferred_tool_names =

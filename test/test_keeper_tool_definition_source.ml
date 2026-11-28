@@ -1,7 +1,6 @@
-(* Which file defines a tool has two shipped answers and one honest silence.
-   The resolver exists because both readers that want the answer — the
-   post-tool log line and the tool-call inspector — used to try the two
-   lookups in their own order, and an order copied is an order that drifts. *)
+(* Which file defines a tool has one shipped answer and one honest silence.
+   Both readers that want the answer, the post-tool log line and the
+   tool-call inspector, ask the resolver. *)
 
 module Source = Masc.Keeper_tool_definition_source
 
@@ -13,16 +12,6 @@ let test_shipped_tool_names_its_toml () =
       "tools/keeper_broadcast.toml"
       rel
   | None -> Alcotest.fail "a shipped tool must name the TOML it was read from"
-;;
-
-let test_composition_tool_names_its_skill () =
-  match Source.resolve "keeper_compose_work-intake" with
-  | Some rel ->
-    Alcotest.(check string)
-      "composition definition path"
-      "skills/work-intake/SKILL.md"
-      rel
-  | None -> Alcotest.fail "a composition tool must name the SKILL.md that made it"
 ;;
 
 (* A bare builtin ships a same-named TOML since #50516 (8a772f82d34): the five
@@ -99,8 +88,6 @@ let () =
     [ ( "resolve"
       , [ Alcotest.test_case "shipped tool names its toml" `Quick
             test_shipped_tool_names_its_toml
-        ; Alcotest.test_case "composition tool names its skill" `Quick
-            test_composition_tool_names_its_skill
         ; Alcotest.test_case "builtin names its toml" `Quick test_builtin_names_its_toml
         ; Alcotest.test_case "unknown name names no file" `Quick
             test_unknown_name_names_no_file

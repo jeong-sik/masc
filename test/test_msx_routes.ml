@@ -1190,17 +1190,34 @@ let test_encoded_pixel_snapshot () =
               Route.tick_response ~config ~body:(retained_request ~frames:2 first_tick)
             in
             assert_pixels_kind "retained" same_pixels;
-            ignore
-              (require
-                 (Lane.press
-                    ~who:"unit-pixel"
-                    ~keys:[ Result.get_ok (Lane.key_of_string "space") ]
-                    ~hold_frames:1
-                    ~step_frames:1
-                    ~sequence:false));
+            (match
+               Lane.press
+                 ~who:"unit-pixel"
+                 ~keys:[ Result.get_ok (Lane.key_of_string "space") ]
+                 ~hold_frames:1
+                 ~step_frames:1
+                 ~sequence:false
+             with
+             | Ok _ ->
+               Printf.printf "DEBUG press-ok frame=%d\\n" (current_frame_number ());
+               (match Lane.frame () with
+                | Some f ->
+                  Printf.printf "DEBUG lane frame=%d mode=%s rgb_sha=%s\\n" f.number f.mode
+                    (Agent_core_sha256.to_hex (Agent_core_sha256.digest_string f.rgb))
+                | None -> Printf.printf "DEBUG no-frame\\n");
+               print_newline ()
+             | Error e -> fail (Lane.error_to_string e));
             let _, changed_pixels =
               Route.tick_response ~config ~body:(retained_request same_pixels)
             in
+            Printf.printf "DEBUG changed kind=%s rev=%s\\n"
+              (match List.assoc_opt "kind" (pixels_object changed_pixels) with
+               | Some (`String s) -> s
+               | _ -> "?")
+              (match List.assoc_opt "revision" (pixels_object changed_pixels) with
+               | Some (`String s) -> s
+               | _ -> "?");
+            print_newline ();
             assert_pixels_kind "inline" changed_pixels;
             let pixel_fields = pixels_object changed_pixels in
             let rgb =

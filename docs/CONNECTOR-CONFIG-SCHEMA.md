@@ -89,6 +89,15 @@ inline and plays audio in place; MIDI, PDF and other files appear as
 downloads. The per-file size limit depends on the server's boost tier, so
 Discord decides it: an oversized file comes back as a send failure.
 
+With `as_voice_message = true` and one audio id, such as the `attachment_id`
+`keeper_voice_speak` returns, the post becomes a Discord voice message: a
+playable waveform. Discord allows no text on a voice message, so the text goes
+first as its own message. After approval MASC transcodes the audio with
+`ffmpeg` (which must be on the server's `PATH`) to mono 48 kHz Opus in Ogg, as
+Discord's clients send, and computes the waveform from it. MP3, WAV, Ogg, M4A
+and WebM are accepted; MIDI holds notes, not sound, so it is refused before
+approval and goes out as a file instead.
+
 ### iMessage (in-process gateway)
 
 The iMessage connector runs **inside the server process**. Modules:

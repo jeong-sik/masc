@@ -63,19 +63,33 @@ val thread_ts_of_args :
     rejected. The value is passed to Slack verbatim — a foreign or expired
     timestamp fails at the connector, not silently as a root post. *)
 
-val attachment_ids_of_json : Yojson.Safe.t -> (string list, string) result
-(** Decode a non-empty array of canonical attachment ids
-    (["att_<64hex>"], {!Attachment_store.parse_id}) in the given order.
-    [Error] for an empty array, more than
-    {!Discord_rest_client.max_files_per_message} ids, a non-string, a
-    malformed id or a repeat. *)
+type discord_files =
+  | Text_only
+  | Files of string * string list
+      (** Canonical attachment ids uploaded with the text, in order. *)
+  | Voice_message of string
+      (** One audio attachment sent as a Discord voice message after the
+          text, which Discord does not allow on the voice message itself. *)
 
-val attachment_ids_of_args :
-  surface:string -> Yojson.Safe.t -> (string list, string) result
-(** Decode the optional [attachment_ids] tool argument: files to upload with a
-    Discord post, in order. Absent is [Ok []]. Discord-only; otherwise as
-    {!attachment_ids_of_json}. Whether each id is in the attachment store is
-    checked by the caller that reads the store. *)
+val discord_files_of_fields :
+  (string * Yojson.Safe.t) list -> (discord_files, string) result
+(** Read [attachment_ids] and [as_voice_message] from an object's fields:
+    neither is [Text_only]; ids alone, or with [as_voice_message = false],
+    are [Files]; one id with [as_voice_message = true] is [Voice_message].
+    [Error] for a repeated key, a non-boolean flag, the flag without ids,
+    a voice message naming more than one id, an empty list, more than
+    {!Discord_rest_client.max_files_per_message} ids, a non-string, a
+    malformed ({!Attachment_store.parse_id}) or repeated id. Whether an id is in the attachment
+    store, and is audio, is checked by the caller that reads the store. *)
+
+val discord_files_of_args :
+  surface:string -> Yojson.Safe.t -> (discord_files, string) result
+(** The tool arguments' {!discord_files}. Discord-only: either key on another
+    surface is an [Error]. *)
+
+val discord_files_to_fields : discord_files -> (string * Yojson.Safe.t) list
+(** The approved-input fields that {!discord_files_of_fields} reads back;
+    none for [Text_only]. *)
 
 val blocks_of_args :
   surface:string -> Yojson.Safe.t -> (rich_block list option, string) result

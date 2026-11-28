@@ -64,3 +64,15 @@ val handle_voice_tool_with_outcome :
   args:Yojson.Safe.t ->
   unit ->
   Keeper_tool_execution.t
+
+module For_testing : sig
+  val with_clip_attachment :
+    base_dir:string ->
+    keeper:string ->
+    audio_file:string ->
+    (string * Yojson.Safe.t) list ->
+    Yojson.Safe.t
+  (** A spoken result's fields with ["attachment_id"] of the clip stored as
+      [keeper]'s ephemeral attachment, or ["attachment_error"] when the clip
+      cannot be read or stored. *)
+end

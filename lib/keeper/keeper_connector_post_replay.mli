@@ -6,9 +6,7 @@ type connector_post_replay =
       ; channel_id : string
       ; content : string
       ; mention_user_ids : string list
-      ; attachment_ids : string list
-        (** Canonical attachment ids uploaded with the post, in order;
-            [[]] for a text-only post. *)
+      ; files : Keeper_surface_post.discord_files
       }
   | Replay_slack_post of
       { input : Yojson.Safe.t
@@ -22,10 +20,11 @@ type connector_post_replay =
 val connector_post_gate_input :
   connector:string -> channel_id:string -> content:string ->
   mention_user_ids:string list -> ?thread_ts:string ->
-  ?blocks:Yojson.Safe.t list -> ?attachment_ids:string list -> unit ->
-  Yojson.Safe.t
-(** The approved input of one connector post. [attachment_ids] appear only
-    when non-empty. *)
+  ?blocks:Yojson.Safe.t list -> ?discord_files:Keeper_surface_post.discord_files ->
+  unit -> Yojson.Safe.t
+(** The approved input of one connector post. [discord_files] add the fields
+    {!Keeper_surface_post.discord_files_to_fields} names; a text-only post
+    has none. *)
 val connector_post_replay_of_gate_input :
   Yojson.Safe.t -> (connector_post_replay, string) result
 val connector_post_replay_target :

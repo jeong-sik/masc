@@ -10,7 +10,8 @@ rendered natively by Discord and by Slack's Block Kit markdown block. To \
 create a real highlighted user mention, pass stable participant-roster ids \
 in mention_user_ids; never guess ids from display names. A Slack post may \
 reply inside an existing thread (thread_ts) or carry Block Kit blocks, and \
-a Discord post may carry files (attachment_ids); see those parameters. Posting to an unbound surface is an error. These endpoints \
+a Discord post may carry files (attachment_ids) or one voice message \
+(as_voice_message); see those parameters. Posting to an unbound surface is an error. These endpoints \
 are read by a person, so an unchanged status reposted every cycle crowds \
 their view and says nothing the previous one did not; when there is nothing \
 new, the turn ends without a post. This is a terminal-contract tool: when it \
@@ -100,3 +101,14 @@ Files to upload with this post, in order: canonical attachment ids \
 only. Discord shows images inline and plays audio in place; other files, \
 such as MIDI or PDF, appear as downloads. content is the text above them. \
 Each id must be in the attachment store."""
+
+[[params]]
+name = "as_voice_message"
+type = "boolean"
+description = """
+Send the one audio file in attachment_ids as a Discord voice message (a \
+playable waveform bubble), such as the attachment_id keeper_voice_speak \
+returned. Discord surface only; exactly one attachment, and it must be \
+audio (MP3, WAV, Ogg, M4A or WebM; MIDI is notes, not sound, so attach it \
+as a file instead). Discord allows no text on a voice message, so content \
+is posted first as its own message and the voice message follows."""

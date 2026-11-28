@@ -510,15 +510,6 @@ let message_chunks_with_mentions ~limit ~content ~mention_user_ids =
       @ (text_chunks ~limit content
          |> List.map (fun content -> { content; allowed_user_mentions = [] }))
 
-module For_testing = struct
-  type nonrec outbound_message = outbound_message =
-    { content : string
-    ; allowed_user_mentions : string list
-    }
-
-  let message_chunks_with_mentions = message_chunks_with_mentions
-end
-
 let send_message ~channel_id ~content ?reply_to_message_id
     ?(mention_user_ids = []) () =
   match bot_token_opt () with
@@ -590,6 +581,73 @@ let send_files ~channel_id ~content ?reply_to_message_id
          | Error e -> Error (Rest_error e))
     in
     send true (message_chunks_with_mentions ~limit ~content ~mention_user_ids)
+
+type post_error =
+  | Send_failed of send_error
+  | Voice_failed_after_text of
+      { text_message_id : string
+      ; error : send_error
+      }
+
+let pp_post_error fmt = function
+  | Send_failed error -> pp_send_error fmt error
+  | Voice_failed_after_text { text_message_id; error } ->
+    Format.fprintf fmt
+      "the text was posted as message %s, but the voice message failed: %a"
+      text_message_id pp_send_error error
+
+(* The text chunks in order, then the voice message. Discord returns a
+   message's id only once the message exists, so the last text id proves the
+   text is in the channel when the voice message fails after it. *)
+let post_text_then_voice ~send_text ~send_voice chunks =
+  let rec post_text ~first last_text_id = function
+    | [] -> Ok last_text_id
+    | message :: rest ->
+      (match send_text ~first message with
+       | Ok text_message_id -> post_text ~first:false (Some text_message_id) rest
+       | Error error -> Error (Send_failed error))
+  in
+  match post_text ~first:true None chunks with
+  | Error error -> Error error
+  | Ok last_text_id ->
+    (match send_voice (), last_text_id with
+     | Ok voice_message_id, (Some _ | None) -> Ok voice_message_id
+     | Error error, None -> Error (Send_failed error)
+     | Error error, Some text_message_id ->
+       Error (Voice_failed_after_text { text_message_id; error }))
+
+let send_voice_message ~channel_id ~content ?reply_to_message_id
+    ?(mention_user_ids = []) ~clip () =
+  match bot_token_opt () with
+  | None -> Error (Send_failed Missing_token)
+  | Some token ->
+    let send_text ~first (message : outbound_message) =
+      Discord_rest_client.send_message ~token ~channel_id ~content:message.content
+        ?reply_to_message_id:(if first then reply_to_message_id else None)
+        ~allowed_user_mentions:message.allowed_user_mentions ()
+      |> Result.map_error (fun e -> Rest_error e)
+    in
+    let send_voice () =
+      Discord_rest_client.send_voice_message ~token ~channel_id ~clip ()
+      |> Result.map_error (fun e -> Rest_error e)
+    in
+    post_text_then_voice ~send_text ~send_voice
+      (message_chunks_with_mentions ~limit:Discord_rest_client.message_content_limit
+         ~content ~mention_user_ids)
+
+module For_testing = struct
+  type nonrec outbound_message = outbound_message =
+    { content : string
+    ; allowed_user_mentions : string list
+    }
+
+  let message_chunks_with_mentions = message_chunks_with_mentions
+  let post_text_then_voice = post_text_then_voice
+end
+
+type post_attachments =
+  | Uploads of Discord_rest_client.upload * Discord_rest_client.upload list
+  | Voice of Discord_rest_client.voice_clip
 
 let edit_message ~channel_id ~message_id ~content () =
   match bot_token_opt () with

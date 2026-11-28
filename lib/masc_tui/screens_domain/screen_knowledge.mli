@@ -12,3 +12,8 @@ val render :
   rect:Masc_tui_core.Rect.t ->
   Masc_tui_term.Cell_grid.t ->
   unit
+
+val board_attachment_chip :
+  lang:Masc_tui_core.Say.lang -> Masc_tui_protocol.Wire_attachment.t -> string
+(** Board attachment line. Audio (MIDI included) carries a note that the Board
+    cannot play it; other kinds are {!Masc_tui_protocol.Wire_attachment.format_chip}. *)

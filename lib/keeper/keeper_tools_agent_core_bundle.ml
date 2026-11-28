@@ -782,11 +782,11 @@ let make_tool_bundle_for_descriptors_with_policy
 
      Two sources, one answer. An attached tool is held back by default: a
      Keeper is handed its services' entire lists, 145 tools and 142,257 bytes
-     on the Keeper the RFC measured. A built-in is held back when it declares
-     [defer_loading = true] in its own [config/tools/<name>.toml], as a
-     descriptor or the Skill reader does -- of 89 built-ins on one Keeper, 33
-     went a whole day uncalled, 21,601 bytes charged to every request of
-     every turn.
+     on the Keeper the RFC measured. A built-in is held back when its own
+     [config/tools/<name>.toml] declares [defer_loading = true] -- of 89
+     built-ins on one Keeper, 33 went a whole day uncalled, 21,601 bytes
+     charged to every request of every turn. A Lane Add-on export has no tool
+     file and is held back like an attached tool.
 
      The listing does not record which source a tool came from, and the model
      is not told. Holding a tool back is a property of the tool. *)
@@ -796,8 +796,9 @@ let make_tool_bundle_for_descriptors_with_policy
   in
   let deferred_builtin_tools, always_loaded_builtin_tools =
     (* Both families, each paired with its declaration where it was built: a
-       descriptor's from [config/tools/<internal name>.toml], and the Skill
-       reader's from its own tool file. Splitting only the descriptors would
+       descriptor's from [config/tools/<internal name>.toml] (a Lane Add-on
+       export has no file and is deferrable), and the Skill reader's from its
+       own tool file. Splitting only the descriptors would
        leave a [defer_loading = true] that nothing honours and nothing
        reports -- a declaration is either read wherever it can be written or
        it is a trap. *)
@@ -936,7 +937,8 @@ let make_tool_bundle_for_descriptors_with_policy
       (* The bound each result is held to on an official-client lane, read
          off the projection applied there (see [model_projection_for_call]):
          a descriptor's own, which every model name it answers to crosses,
-         and the Skill reader's. Attached-service
+         and for the Skill reader the wire ceiling stated where its tool is
+         built above. Attached-service
          text is externalized, but native image bytes are not bounded by that
          text threshold, so those tools truthfully leave the result unbounded. *)
       List.concat_map

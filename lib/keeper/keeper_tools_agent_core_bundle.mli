@@ -32,16 +32,11 @@ val make_tool_bundle_for_capability_surface
   -> unit
   -> (Keeper_tools_agent_core.tool_bundle, Tool_bridge.schema_error) result
 (** Build a bundle from the immutable Tool and Skill authority frozen by the
-    turn caller. Named compositions receive its exact descriptor list, so they
-    cannot widen the configured Tool Group surface.
+    turn caller.
 
-    Exact executable compositions selected by the current Task, and their
-    ordinary node Tools, carry schemas on the first request even when their
-    declaration permits deferred loading. Selection comes from the frozen activation frame and must match
-    the executable surface's full Skill identity and content revision. This
-    records no activation; other deferrable tools retain the normal loader.
-    The public recipe run control is also ready for a selected composition, so
-    an upstream input DAG needs no preliminary schema-loader exchange.
+    A tool whose declaration permits deferred loading is named in the
+    [keeper_tool_search] listing instead of carrying its schema on the first
+    request. A turn with no callable loader carries every admitted schema.
 
     [checkpoint_owner] is asked on each tool call, not when the bundle is
     built: the turn resolves its runtime afterwards, and a heterogeneous lane

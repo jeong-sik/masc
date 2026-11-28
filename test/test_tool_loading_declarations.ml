@@ -166,22 +166,25 @@ defer_loading = true
        ~contents)
 ;;
 
-(* The way out of a listing. A deferred tool is named but not described, and
-   the model reaches it by asking [keeper_tool_search], which carries the
-   listing, or [keeper_capability_search]. Deferring one of them would leave
-   its own name in the listing that only it can read: the tools below it
-   become unreachable, and nothing reports it, because a name in a listing is
-   a live tool as far as every other check can tell.
+(* Three tools a model reads before it knows which tool it needs. A deferred
+   tool is named but not described.
+
+   [keeper_tool_search] carries the listing of deferred tools and loads them.
+   Deferred, its own name would sit in a listing only it can read: the tools
+   below it become unreachable, and nothing reports it, because a name in a
+   listing is a live tool as far as every other check can tell.
+
+   [keeper_capability_search] describes tools and loads none. Deferred, the
+   first search would cost a [keeper_tool_search] call before it.
+
+   [keeper_skill] reads a Skill body, so it looks like an ordinary tool to
+   defer. But the list of Skills it can read is appended to its description
+   ([Keeper_instruction_skill.instruction_skill_description]), so deferring it
+   hides the catalogue.
 
    [keeper_tools_list] is not one of them. #54350 deferred it, and it is
    reached through the listing like any other deferred tool. *)
-(* [keeper_skill] is here for the same reason, arrived at from the other side.
-   It reads a Skill body, so it looks like an ordinary tool to defer. But the
-   list of Skills it can read lives in its description (tool_schemas_skill.mli:
-   "the list of instruction skills it can read is whatever the catalog found"),
-   and a deferred tool is named but not described. Deferring it hides the
-   catalogue, which is the cost the comment above says bytes do not capture. *)
-let test_the_tools_that_load_deferred_tools_are_never_deferred () =
+let test_the_lookup_tools_and_the_skill_reader_are_never_deferred () =
   List.iter
     (fun name ->
        check
@@ -193,15 +196,6 @@ let test_the_tools_that_load_deferred_tools_are_never_deferred () =
     ; "keeper_capability_search"
     ; "keeper_skill"
     ]
-;;
-
-(* The tool bundle reads the Skill reader's declaration from its own file by
-   this name. If the file went missing, [Tool_loading_declarations.required]
-   would raise when the bundle is built. *)
-let test_the_skill_reader_declaration_is_readable () =
-  check loading "keeper_skill declaration is readable"
-    Tool_definition_toml.Always_loaded
-    (Tool_loading_declarations.required Keeper_instruction_skill.skill_tool_name)
 ;;
 
 let () =
@@ -219,10 +213,8 @@ let () =
             test_a_malformed_file_raises_rather_than_reading_as_absent
         ; test_case "a well-formed file reads through the same door" `Quick
             test_a_well_formed_file_reads_through_the_same_door
-        ; test_case "the tools that load deferred tools are never deferred" `Quick
-            test_the_tools_that_load_deferred_tools_are_never_deferred
-        ; test_case "the Skill reader declaration is readable" `Quick
-            test_the_skill_reader_declaration_is_readable
+        ; test_case "the lookup tools and the Skill reader are never deferred" `Quick
+            test_the_lookup_tools_and_the_skill_reader_are_never_deferred
         ] )
     ]
 ;;

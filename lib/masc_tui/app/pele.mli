@@ -1,7 +1,7 @@
-(** Offline Pele ([masc-pele]) diagram rasterizer over [masc-pele-protocol:1].
+(** Offline Pele ([masc-pele]) diagram rasterizer over [masc-pele-protocol:2].
 
     Sends a JSON scene request on stdin and accepts PNG bytes on stdout only
-    when the helper confirms [masc-pele-protocol:1\n]. Owns and removes all
+    when the helper confirms [masc-pele-protocol:2\n]. Owns and removes all
     temporary files via [Fun.protect]; enforces bounded execution timeout and
     propagates Eio cancellation after reaping any spawned child process. Never
     reads or writes the terminal. *)
@@ -42,11 +42,13 @@ type ending =
 type runner = input:string -> output:string -> errors:string -> ending
 
 val protocol_version : int
-(** Supported helper protocol version ([1]). *)
+(** Supported helper protocol version ([2]). Version 2 is the first one whose
+    helper renders [Chart]. A helper that knows only version 1 rejects the
+    request without a receipt, so {!render} answers with the reinstall hint. *)
 
 val protocol_receipt : string
 (** Exact confirmation line prefix expected from [masc-pele]:
-    ["masc-pele-protocol:1"]. *)
+    ["masc-pele-protocol:2"]. *)
 
 val default_timeout_s : float
 (** Default bounded subprocess execution timeout ([10.0] seconds). *)
@@ -111,7 +113,7 @@ val render :
   (string, string) result
 (** Encode [scene] (and optional [raster] geometry) to JSON, execute [masc-pele]
     via [runner] (default {!process_runner}), verify the
-    [masc-pele-protocol:1\n] handshake, and return PNG bytes or an explicit,
+    [masc-pele-protocol:2\n] handshake, and return PNG bytes or an explicit,
     bounded, control-stripped failure diagnostic. Always removes temporary files
     before returning. Callers inside Eio must pass [?clock] or run on a worker
     domain / systhread. *)

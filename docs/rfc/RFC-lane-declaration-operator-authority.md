@@ -100,24 +100,25 @@ reconcile 은 그 선언을 다르게 다룬다. Shared 선언은 운영자 권�
 
 - 선언에 선택 키 `operator_authority` 를 더한다. `true` 면 `Operator_marked`, 없거나 `false` 면 `Unmarked` 다(`Lane_addon_config.authority`). 다른 타입이면 그 선언의 issue 다.
 - 저장 경로는 Keeper 와 인증 없는 호출자가 보낸 `operator_authority = true` 를 `Invalid_request` 로 거절한다. 운영자는 파일을 직접 고치거나 운영자 저장으로 쓴다.
-- `masc browser-lane-setup` 은 `host_process` 패키지의 선언에 이 줄을 같이 쓴다.
+- `masc browser-lane-setup` 은 새 `host_process` 선언에 이 줄을 쓴다. 기존 선언에는 파일을 수정하지 않고 필요한 줄과 경로를 알린다.
 - 표시는 revision 밖이다. revision 은 「무엇을 돌리나」이고, 표시는 「무엇을 해도 되나」다. 돌던 worker 의 권한은 §3.3 이 따로 비교한다.
 
 ### 3.2 권한 표
 
-표시와 visibility 로 실행 권한과 읽기 권한을 정한다(`declared_authority`). 다섯 짝을 모두 적는다.
+표시와 visibility 로 실행 권한과 읽기 권한을 정한다(`declared_authority`). Keeper 전용 visibility 의 출처도 함께 검사한다.
 
 | 표시 | visibility | 실행 권한 | 읽기 권한 |
 |---|---|---|---|
 | 있음 | Keeper_only k | 운영자 | Keeper k |
 | 있음 | Shared, Operator_only | 운영자 | 운영자 |
-| 없음 | Keeper_only k | Keeper k | Keeper k |
+| 없음 | Keeper_only k, 선언에 k 소유 Fusion 소스가 있음 | Keeper k | Keeper k |
+| 없음 | Keeper_only k, 위층에서만 상속 | 거절 | 거절 |
 | 없음 | Shared | 인증 없음 | 인증 없음 |
 | 없음 | Operator_only | 거절 | 거절 |
 
 - 표시 없는 파일은 그 visibility 를 저장할 수 있는 누구나 썼을 수 있다.
 - Shared 는 인증 없는 호출자도 저장할 수 있다. 그래서 그 권한을 준다. Shared 바인딩에는 인증 없는 호출자가 못 읽는 소스가 없다. Fusion 소스가 있으면 Keeper_only 가 되기 때문이다(`lane_addon_runtime.ml:3407-3408`).
-- Keeper_only k 는 k 와 운영자만 저장할 수 있다. 그래서 k 의 권한을 준다. 지금 reconcile 과 Attach 도 이 경우 k 로 읽는다.
+- 표시 없는 선언의 Keeper 권한은 그 선언이 직접 가리키는 Fusion 소스의 확인된 소유자에게만 준다. `Lane_output` 에서 물려받은 visibility 는 읽기 범위를 제한할 수 있지만 그 Keeper 의 실행 권한을 주지 않는다. 확인 시험은 직접 소스와 상속만 있는 소스를 각각 조립해 전자는 유지되고 후자는 표시 없이는 거절됨을 본다.
 - Operator_only 는 운영자만 저장할 수 있다. 표시가 없으면 운영자가 썼다는 근거가 없으니 붙이지 않는다.
 - 표시 있는 Keeper_only 는 실행만 운영자 권한이다. 읽기를 운영자 권한으로 하면 k 가 읽는 출력에 운영자 데이터가 섞인다.
 

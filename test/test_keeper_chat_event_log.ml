@@ -904,10 +904,10 @@ let test_subscribe_published_returns_seq_and_publish_ts () =
 
 let test_event_to_sse_frame_carries_journal_seq () =
   let event =
-    Ag_ui.make_event
+    Ag_ui.run_finished
       ~timestamp:13.0
       ~thread_id:"keeper:fixture"
-      Ag_ui.Run_finished
+      ~run_id:"keeper-operation-run-fixture" ()
   in
   let frame = Ag_ui.event_to_sse ~id:3 event in
   Alcotest.(check bool)

@@ -1,0 +1,19 @@
+; Swift and Kotlin types for native clients, from an ATD file
+; (RFC-native-keeper-chat-clients D2). The drift rules that compare the
+; committed output with this tool live next to that output under apps/.
+
+(library
+ (name atd_native)
+ (modules native_ir naming swift_gen kotlin_gen)
+ (libraries atd))
+
+(executable
+ (name atd_native_gen)
+ (modules atd_native_gen)
+ (libraries atd atd_native))
+
+(test
+ (name test_atd_native)
+ (modules test_atd_native)
+ (deps %{workspace_root}/lib/keeper_chat_wire/keeper_chat_wire.atd)
+ (libraries atd atd_native alcotest))

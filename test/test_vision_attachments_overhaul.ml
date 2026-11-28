@@ -1,6 +1,15 @@
 open Alcotest
 open Masc
 
+(* The value of a KEEPER_ATTACHMENT frame; any other frame fails the test
+   with [description]. *)
+let attachment_payload description (event : Ag_ui.event) =
+  match (event :> Keeper_chat_wire.Keeper_chat_wire_t.frame) with
+  | Custom { name = Keeper_attachment; value; _ } -> value
+  | Custom _ | Run_started _ | Run_finished _ | Run_error _ | Text_message_start _
+  | Text_message_content _ | Text_message_end _ | Tool_call_start _ | Tool_call_args _
+  | Tool_call_end _ -> fail description
+
 let sample_png =
   (* Minimal valid 2x1 PNG header + trailer (real magic bytes & IHDR dims). *)
   String.concat ""
@@ -701,9 +710,7 @@ let test_upload_first_ingress_agui_and_history_attachments () =
   in
   (match projected_delta with
    | Some ev ->
-     check (option string) "Agent_core_media_delta projects to KEEPER_ATTACHMENT"
-       (Some "KEEPER_ATTACHMENT") ev.custom_name;
-     let payload = Option.get ev.custom_value in
+     let payload = attachment_payload "Agent_core_media_delta projects to KEEPER_ATTACHMENT" ev in
      check string "KEEPER_ATTACHMENT attachment_id" uploaded.id (json_string "attachment_id" payload);
      check string "KEEPER_ATTACHMENT url" url (json_string "url" payload);
      check string "KEEPER_ATTACHMENT kind" "image" (json_string "kind" payload);
@@ -723,9 +730,7 @@ let test_upload_first_ingress_agui_and_history_attachments () =
   in
   (match projected_img with
    | Some ev ->
-     check (option string) "Image_block no longer dropped; projects to KEEPER_ATTACHMENT"
-       (Some "KEEPER_ATTACHMENT") ev.custom_name;
-     let payload = Option.get ev.custom_value in
+     let payload = attachment_payload "Image_block no longer dropped; projects to KEEPER_ATTACHMENT" ev in
      check string "Image_block attachment_id" uploaded.id (json_string "attachment_id" payload)
    | None -> fail "Image_block must not be dropped by AG-UI projection");
 
@@ -768,9 +773,7 @@ let test_upload_first_ingress_agui_and_history_attachments () =
   in
   (match projected_user_att with
    | Some ev ->
-     check (option string) "user Attachment_emitted projects to KEEPER_ATTACHMENT"
-       (Some "KEEPER_ATTACHMENT") ev.custom_name;
-     let payload = Option.get ev.custom_value in
+     let payload = attachment_payload "user Attachment_emitted projects to KEEPER_ATTACHMENT" ev in
      check string "user attachment_id" uploaded.id (json_string "attachment_id" payload);
      check string "user role" "user" (json_string "role" payload);
      check string "user origin" "user_upload" (json_string "origin" payload);
@@ -783,9 +786,7 @@ let test_upload_first_ingress_agui_and_history_attachments () =
   in
   (match projected_tool_att with
    | Some ev ->
-     check (option string) "tool Attachment_emitted projects to KEEPER_ATTACHMENT"
-       (Some "KEEPER_ATTACHMENT") ev.custom_name;
-     let payload = Option.get ev.custom_value in
+     let payload = attachment_payload "tool Attachment_emitted projects to KEEPER_ATTACHMENT" ev in
      check string "tool attachment_id" generated.id (json_string "attachment_id" payload);
      check string "tool role" "tool" (json_string "role" payload);
      check string "tool origin" "model_generated" (json_string "origin" payload);

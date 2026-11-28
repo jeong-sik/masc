@@ -18,11 +18,10 @@ let fields_without_ts_unix json =
 
 let test_operation_event_has_singular_identity () =
   let event =
-    Ag_ui.make_event
+    Ag_ui.text_message_content
       ~timestamp:13.0
       ~thread_id:"keeper:fixture-keeper"
-      ~delta:(Some "live")
-      Ag_ui.Text_message_content
+      ~delta:"live" ()
   in
   let fields =
     B.operation_event_to_json
@@ -159,11 +158,10 @@ let test_tool_result_ready_projection_has_exact_identity () =
 
 let test_operation_event_carries_seq_when_given () =
   let event =
-    Ag_ui.make_event
+    Ag_ui.text_message_content
       ~timestamp:13.0
       ~thread_id:"keeper:fixture-keeper"
-      ~delta:(Some "live")
-      Ag_ui.Text_message_content
+      ~delta:"live" ()
   in
   let fields =
     B.operation_event_to_json

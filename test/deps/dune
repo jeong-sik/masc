@@ -147,6 +147,7 @@
   (re_export masc.model_inference_metrics)
   ;; Declarative runtime TOML parser sub-library.
   (re_export masc.ag_ui)
+  (re_export masc.keeper_chat_wire)
   (re_export masc.config)
   (re_export masc.fs_compat)
   (re_export masc.gate)

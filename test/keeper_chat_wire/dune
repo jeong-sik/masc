@@ -1,0 +1,20 @@
+(library
+ (name agui_frame_cases)
+ (modules agui_frame_cases)
+ (libraries masc.ag_ui keeper_chat_wire yojson))
+
+(test
+ (name test_keeper_chat_wire_ag_ui)
+ (modules test_keeper_chat_wire_ag_ui)
+ (libraries
+  agui_frame_cases
+  keeper_chat_wire
+  masc.ag_ui
+  atdgen-runtime
+  alcotest
+  yojson))
+
+(executable
+ (name emit_agui_fixtures)
+ (modules emit_agui_fixtures)
+ (libraries agui_frame_cases masc.ag_ui masc.sse_wire yojson))

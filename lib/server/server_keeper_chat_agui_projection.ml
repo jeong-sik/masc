@@ -1,38 +1,10 @@
+module Keeper_chat_wire_t = Keeper_chat_wire.Keeper_chat_wire_t
+
 type t =
   { thread_id : string
   ; run_id : string option
   ; message_id : string option
   }
-
-type custom_event_name =
-  | Connected
-  | Runtime_attempt_started
-  | Provider_retry
-  | Stream_message_start
-  | Stream_message_delta
-  | Stream_message_stop
-  | Stream_ping
-  | Content_block_start
-  | Content_block_stop
-  | Model_content_activity
-  | Thinking_delta
-  | Thinking_snapshot
-  | Thinking_signature_delta
-  | Media_delta
-  | Attachment
-  | Stream_protocol_error
-  | Batch_bound
-  | Continuation_checkpoint
-  | External_effect_completed
-  | Reply_details
-  | Tool_approval_requested
-  | Tool_approval_settled
-  | Tool_call_admitted
-  | Tool_result_ready
-  | Tool_transcript_committed
-  | Native_tool_start
-  | Native_tool_end
-  | Native_tool_progress
 
 let initial =
   { thread_id = Ag_ui.default_thread_id
@@ -50,40 +22,8 @@ let ag_role (role : Keeper_chat_events.role) =
   | Keeper_chat_events.User -> Ag_ui.User
   | Keeper_chat_events.Assistant -> Ag_ui.Assistant
 
-let custom_event_name_to_string = function
-  | Connected -> "KEEPER_CONNECTED"
-  | Runtime_attempt_started -> "KEEPER_RUNTIME_ATTEMPT_STARTED"
-  | Provider_retry -> "KEEPER_PROVIDER_RETRY"
-  | Stream_message_start -> "KEEPER_STREAM_MESSAGE_START"
-  | Stream_message_delta -> "KEEPER_STREAM_MESSAGE_DELTA"
-  | Stream_message_stop -> "KEEPER_STREAM_MESSAGE_STOP"
-  | Stream_ping -> "KEEPER_STREAM_PING"
-  | Content_block_start -> "KEEPER_CONTENT_BLOCK_START"
-  | Content_block_stop -> "KEEPER_CONTENT_BLOCK_STOP"
-  | Model_content_activity -> "KEEPER_MODEL_CONTENT_ACTIVITY"
-  | Thinking_delta -> "KEEPER_THINKING_DELTA"
-  | Thinking_snapshot -> "KEEPER_THINKING_SNAPSHOT"
-  | Thinking_signature_delta -> "KEEPER_THINKING_SIGNATURE_DELTA"
-  | Media_delta -> "KEEPER_MEDIA_DELTA"
-  | Attachment -> "KEEPER_ATTACHMENT"
-  | Stream_protocol_error -> "KEEPER_STREAM_PROTOCOL_ERROR"
-  | Batch_bound -> "KEEPER_CHAT_BATCH_BOUND"
-  | Continuation_checkpoint -> "KEEPER_CONTINUATION_CHECKPOINT"
-  | External_effect_completed -> "KEEPER_EXTERNAL_EFFECT_COMPLETED"
-  | Reply_details -> "KEEPER_REPLY_DETAILS"
-  | Tool_approval_requested -> "KEEPER_TOOL_APPROVAL_REQUESTED"
-  | Tool_approval_settled -> "KEEPER_TOOL_APPROVAL_SETTLED"
-  | Tool_call_admitted -> "KEEPER_TOOL_CALL_ADMITTED"
-  | Tool_result_ready -> "KEEPER_TOOL_RESULT_READY"
-  | Tool_transcript_committed -> "KEEPER_TOOL_TRANSCRIPT_COMMITTED"
-  | Native_tool_start -> "KEEPER_NATIVE_TOOL_START"
-  | Native_tool_end -> "KEEPER_NATIVE_TOOL_END"
-  | Native_tool_progress -> "KEEPER_NATIVE_TOOL_PROGRESS"
-
 let custom ~timestamp state name value =
-  Ag_ui.make_event ~timestamp ~thread_id:state.thread_id ~run_id:state.run_id
-    ~custom_name:(Some (custom_event_name_to_string name))
-    ~custom_value:(Some value) Ag_ui.Custom
+  Ag_ui.custom ~timestamp ~thread_id:state.thread_id ?run_id:state.run_id ~name value
 
 let reply_details_to_json
     (event : Keeper_chat_events.reply_details) =
@@ -200,36 +140,33 @@ let project ?base_path ~timestamp ~redact_text state event =
       let state = { state with thread_id; run_id = Some run_id } in
       ( state
       , Some
-          (Ag_ui.make_event ~timestamp ~thread_id ~run_id:(Some run_id)
-             Ag_ui.Run_started) )
+          (Ag_ui.run_started ~timestamp ~thread_id ~run_id ()) )
   | Text_message_start { message_id; role } ->
       let state = { state with message_id = Some message_id } in
       ( state
       , Some
-          (Ag_ui.make_event ~timestamp ~thread_id:state.thread_id
-             ~run_id:state.run_id ~message_id:(Some message_id)
-             ~role:(Some (ag_role role)) Ag_ui.Text_message_start) )
+          (Ag_ui.text_message_start ~timestamp ~thread_id:state.thread_id
+             ?run_id:state.run_id ~message_id ~role:(ag_role role) ()) )
   | Text_delta {text; response} ->
       ( state
       , Some
-          (Ag_ui.make_event ~timestamp ~thread_id:state.thread_id
-             ~run_id:state.run_id ~message_id:state.message_id
-             ~delta:(Some text) ~text_response:response Ag_ui.Text_message_content) )
+          (Ag_ui.text_message_content ~timestamp ~thread_id:state.thread_id
+             ?run_id:state.run_id ?message_id:state.message_id
+             ~text_response:response ~delta:text ()) )
   | Text_message_end ->
       ( state
       , Some
-          (Ag_ui.make_event ~timestamp ~thread_id:state.thread_id
-             ~run_id:state.run_id ~message_id:state.message_id
-             Ag_ui.Text_message_end) )
+          (Ag_ui.text_message_end ~timestamp ~thread_id:state.thread_id
+             ?run_id:state.run_id ?message_id:state.message_id ()) )
   | External_effect_completed { target } ->
       (* A typed target names the real destination so the dashboard stops
          assuming an external connector (#28374). *)
       let value =
         `Assoc [ "target", Keeper_surface_post.delivery_target_to_yojson target ]
       in
-      state, Some (custom ~timestamp state External_effect_completed value)
+      state, Some (custom ~timestamp state Keeper_chat_wire_t.Keeper_external_effect_completed value)
   | Agent_core_stream_connected ->
-      state, Some (custom ~timestamp state Connected `Null)
+      state, Some (custom ~timestamp state Keeper_chat_wire_t.Keeper_connected `Null)
   | Agent_core_runtime_attempt_started { runtime_id; attempt_index } ->
       let value =
         match runtime_id with
@@ -241,9 +178,9 @@ let project ?base_path ~timestamp ~redact_text state event =
                @ json_opt "attempt_index"
                    (Option.map (fun i -> `Int i) attempt_index))
       in
-      state, Some (custom ~timestamp state Runtime_attempt_started value)
+      state, Some (custom ~timestamp state Keeper_chat_wire_t.Keeper_runtime_attempt_started value)
   | Provider_retry_observed { attempt; retry } ->
-      state, Some (custom ~timestamp state Provider_retry
+      state, Some (custom ~timestamp state Keeper_chat_wire_t.Keeper_provider_retry
         (`Assoc ["attempt", Runtime_native_tasks.attempt_to_json attempt;
                  "retry", Runtime_claude_api_retry.to_json retry]))
   | Agent_core_stream_message_start { content_generation; stream_scope; provider_message_id; model; usage } ->
@@ -255,7 +192,7 @@ let project ?base_path ~timestamp ~redact_text state event =
            @ json_opt "content_generation" (Option.map (fun value -> `Int value) content_generation)
        @ json_opt "usage" (Option.map api_usage_to_json usage))
       in
-      state, Some (custom ~timestamp state Stream_message_start value)
+      state, Some (custom ~timestamp state Keeper_chat_wire_t.Keeper_stream_message_start value)
   | Agent_core_stream_message_delta { content_generation; stream_scope; stop_reason; usage } ->
       let value =
         `Assoc
@@ -268,12 +205,12 @@ let project ?base_path ~timestamp ~redact_text state event =
                 stop_reason)
            @ json_opt "usage" (Option.map delta_usage_to_json usage))
       in
-      state, Some (custom ~timestamp state Stream_message_delta value)
+      state, Some (custom ~timestamp state Keeper_chat_wire_t.Keeper_stream_message_delta value)
   | Agent_core_stream_message_stop owner ->
-      state, Some (custom ~timestamp state Stream_message_stop
+      state, Some (custom ~timestamp state Keeper_chat_wire_t.Keeper_stream_message_stop
         (match owner with None -> `Null | Some owner -> response_identity_to_json owner))
   | Agent_core_stream_ping ->
-      state, Some (custom ~timestamp state Stream_ping `Null)
+      state, Some (custom ~timestamp state Keeper_chat_wire_t.Keeper_stream_ping `Null)
   | Agent_core_content_block_start
       { index; content_type; tool_call_id; tool_call_name } ->
       let value =
@@ -286,23 +223,23 @@ let project ?base_path ~timestamp ~redact_text state event =
            @ json_opt "tool_call_name"
                (Option.map (fun value -> `String value) tool_call_name))
       in
-      state, Some (custom ~timestamp state Content_block_start value)
+      state, Some (custom ~timestamp state Keeper_chat_wire_t.Keeper_content_block_start value)
   | Model_content_activity activity ->
-      state, Some (custom ~timestamp state Model_content_activity
+      state, Some (custom ~timestamp state Keeper_chat_wire_t.Keeper_model_content_activity
                      (model_content_activity_to_json activity))
   | Agent_core_content_block_stop { index } ->
-      state, Some (custom ~timestamp state Content_block_stop
+      state, Some (custom ~timestamp state Keeper_chat_wire_t.Keeper_content_block_stop
                      (`Assoc [ "index", `Int index ]))
   | Agent_core_thinking_snapshot {index;snapshot;response} ->
-      state,Some(custom ~timestamp state Thinking_snapshot
+      state,Some(custom ~timestamp state Keeper_chat_wire_t.Keeper_thinking_snapshot
         (`Assoc(["index",`Int index;"snapshot",`String snapshot
            ;"response",response_identity_to_json response])))
   | Agent_core_thinking_delta { index; delta; response } ->
-      state, Some (custom ~timestamp state Thinking_delta
+      state, Some (custom ~timestamp state Keeper_chat_wire_t.Keeper_thinking_delta
                      (`Assoc ([ "index", `Int index; "delta", `String delta ]
                        @ json_opt "response" (Option.map response_identity_to_json response))))
   | Agent_core_thinking_signature_delta { index; signature_bytes } ->
-      state, Some (custom ~timestamp state Thinking_signature_delta
+      state, Some (custom ~timestamp state Keeper_chat_wire_t.Keeper_thinking_signature_delta
                      (`Assoc
                         [ "index", `Int index
                         ; "signature_bytes", `Int signature_bytes
@@ -321,42 +258,37 @@ let project ?base_path ~timestamp ~redact_text state event =
              ~url:media.media_ref
              ()
          in
-         state, Some (custom ~timestamp state Attachment value)
+         state, Some (custom ~timestamp state Keeper_chat_wire_t.Keeper_attachment value)
        | None ->
-         state, Some (custom ~timestamp state Media_delta (generated_media_to_json media)))
+         state, Some (custom ~timestamp state Keeper_chat_wire_t.Keeper_media_delta (generated_media_to_json media)))
   | Agent_core_stream_protocol_error error ->
-      state, Some (custom ~timestamp state Stream_protocol_error
+      state, Some (custom ~timestamp state Keeper_chat_wire_t.Keeper_stream_protocol_error
                      (stream_protocol_error_to_json error))
   | Reply_details event ->
-      state, Some (custom ~timestamp state Reply_details
+      state, Some (custom ~timestamp state Keeper_chat_wire_t.Keeper_reply_details
                      (reply_details_to_json event))
   | Batch_bound {operation_id; execution_id} ->
-      state, Some (custom ~timestamp state Batch_bound
+      state, Some (custom ~timestamp state Keeper_chat_wire_t.Keeper_chat_batch_bound
         (`Assoc ["operation_id", `String (Keeper_chat_operation.Operation_id.to_string operation_id);
           "execution_id", `String (Keeper_chat_operation.Operation_id.to_string execution_id)]))
   | Continuation_checkpoint event ->
-      state, Some (custom ~timestamp state Continuation_checkpoint
+      state, Some (custom ~timestamp state Keeper_chat_wire_t.Keeper_continuation_checkpoint
                      (continuation_checkpoint_to_json event))
   | Native_tool_start tool ->
-      state, Some (custom ~timestamp state Native_tool_start (native_tool_to_json tool))
+      state, Some (custom ~timestamp state Keeper_chat_wire_t.Keeper_native_tool_start (native_tool_to_json tool))
   | Native_tool_progress (tool, progress) ->
-      state, Some (custom ~timestamp state Native_tool_progress
+      state, Some (custom ~timestamp state Keeper_chat_wire_t.Keeper_native_tool_progress
         (native_tool_to_json ~progress tool))
   | Native_tool_end (tool, completion) ->
       let value = native_tool_to_json ~completion tool in
-      state, Some (custom ~timestamp state Native_tool_end value)
+      state, Some (custom ~timestamp state Keeper_chat_wire_t.Keeper_native_tool_end value)
   | Tool_call_start { occurrence; tool_call_id; tool_call_name } ->
       ( state
       , Some
-          (Ag_ui.make_event ~timestamp ~thread_id:state.thread_id
-             ~run_id:state.run_id ~tool_call_id
-             ~tool_call_name:(Some tool_call_name)
-             ~tool_stream_scope:(Some occurrence.stream_scope)
-             ~provider_message_id:occurrence.provider_message_id
-             ~tool_call_block_index:(Some occurrence.block_index)
-             Ag_ui.Tool_call_start) )
+          (Ag_ui.tool_call_start ~timestamp ~thread_id:state.thread_id
+             ?run_id:state.run_id ?tool_call_id ~tool_call_name occurrence) )
   | Tool_call_admitted { occurrence; tool_call_id; provider_tool_name; tool_call_name } ->
-      state, Some (custom ~timestamp state Tool_call_admitted
+      state, Some (custom ~timestamp state Keeper_chat_wire_t.Keeper_tool_call_admitted
         (`Assoc ([ "toolStreamScope", `Int occurrence.stream_scope
                  ; "toolCallBlockIndex", `Int occurrence.block_index
                  ; "providerToolName", `String provider_tool_name
@@ -366,34 +298,22 @@ let project ?base_path ~timestamp ~redact_text state event =
   | Tool_call_args { occurrence; tool_call_id; delta } ->
       ( state
       , Some
-          (Ag_ui.make_event ~timestamp ~thread_id:state.thread_id
-             ~run_id:state.run_id ~tool_call_id
-             ~tool_stream_scope:(Some occurrence.stream_scope)
-             ~provider_message_id:occurrence.provider_message_id
-             ~tool_call_block_index:(Some occurrence.block_index)
-             ~delta:(Some delta) Ag_ui.Tool_call_args) )
+          (Ag_ui.tool_call_args ~timestamp ~thread_id:state.thread_id
+             ?run_id:state.run_id ?tool_call_id occurrence (Ag_ui.Arguments_delta delta)) )
   | Tool_call_args_snapshot { occurrence; tool_call_id; snapshot } ->
       ( state
       , Some
-          (Ag_ui.make_event ~timestamp ~thread_id:state.thread_id
-             ~run_id:state.run_id ~tool_call_id
-             ~tool_stream_scope:(Some occurrence.stream_scope)
-             ~provider_message_id:occurrence.provider_message_id
-             ~tool_call_block_index:(Some occurrence.block_index)
-             ~snapshot:(Some (`String snapshot)) Ag_ui.Tool_call_args) )
+          (Ag_ui.tool_call_args ~timestamp ~thread_id:state.thread_id
+             ?run_id:state.run_id ?tool_call_id occurrence (Ag_ui.Arguments_snapshot snapshot)) )
   | Tool_call_end { occurrence; tool_call_id } ->
       ( state
       , Some
-          (Ag_ui.make_event ~timestamp ~thread_id:state.thread_id
-             ~run_id:state.run_id ~tool_call_id
-             ~tool_stream_scope:(Some occurrence.stream_scope)
-             ~provider_message_id:occurrence.provider_message_id
-             ~tool_call_block_index:(Some occurrence.block_index)
-             Ag_ui.Tool_call_end) )
+          (Ag_ui.tool_call_end ~timestamp ~thread_id:state.thread_id
+             ?run_id:state.run_id ?tool_call_id occurrence) )
   | Tool_approval_requested { tool_call_id; approval_id; tool_call_name; args; question; because } ->
       ( state
       , Some
-          (custom ~timestamp state Tool_approval_requested
+          (custom ~timestamp state Keeper_chat_wire_t.Keeper_tool_approval_requested
              (`Assoc
                 [ ("tool_call_id", `String tool_call_id)
                 ; ("approval_id", `String approval_id)
@@ -405,7 +325,7 @@ let project ?base_path ~timestamp ~redact_text state event =
   | Tool_approval_settled { tool_call_id; approval_id; outcome } ->
       ( state
       , Some
-          (custom ~timestamp state Tool_approval_settled
+          (custom ~timestamp state Keeper_chat_wire_t.Keeper_tool_approval_settled
              (`Assoc
                 [ "tool_call_id", `String tool_call_id
                 ; "approval_id", `String approval_id
@@ -414,7 +334,7 @@ let project ?base_path ~timestamp ~redact_text state event =
   | Tool_result_ready { occurrence; tool_call_id; execution_id; is_error } ->
       ( state
       , Some
-          (custom ~timestamp state Tool_result_ready
+          (custom ~timestamp state Keeper_chat_wire_t.Keeper_tool_result_ready
              (`Assoc
                 ([ "toolStreamScope", `Int occurrence.stream_scope
                  ; "toolCallBlockIndex", `Int occurrence.block_index
@@ -427,7 +347,7 @@ let project ?base_path ~timestamp ~redact_text state event =
                  @ json_opt "isError"
                      (Option.map (fun value -> `Bool value) is_error)))) )
   | Tool_transcript_committed { delivery_key; execution_id; ordinal } ->
-      (state, Some (custom ~timestamp state Tool_transcript_committed
+      (state, Some (custom ~timestamp state Keeper_chat_wire_t.Keeper_tool_transcript_committed
         (`Assoc [ "deliveryKey", Keeper_chat_delivery_identity.delivery_key_to_yojson delivery_key
                 ; "executionId", `String (Ids.Execution_id.to_string execution_id)
                 ; "ordinal", `Int ordinal ])))
@@ -448,7 +368,7 @@ let project ?base_path ~timestamp ~redact_text state event =
           ~url:(Attachment_store.url_of_id attachment_id)
           ()
       in
-      state, Some (custom ~timestamp state Attachment value)
+      state, Some (custom ~timestamp state Keeper_chat_wire_t.Keeper_attachment value)
   | Image_block { url; caption } ->
       let value =
         attachment_event_json
@@ -460,7 +380,7 @@ let project ?base_path ~timestamp ~redact_text state event =
           ~url
           ()
       in
-      state, Some (custom ~timestamp state Attachment value)
+      state, Some (custom ~timestamp state Keeper_chat_wire_t.Keeper_attachment value)
   | Link_block _
   | Status_block _
   | Audio_block _
@@ -468,13 +388,10 @@ let project ?base_path ~timestamp ~redact_text state event =
   | Event_error { message } ->
       ( state
       , Some
-          (Ag_ui.make_event ~timestamp ~thread_id:state.thread_id
-             ~run_id:state.run_id ~message:(Some message)
-             ~code:(Some public_error_code)
-             Ag_ui.Run_error) )
+          (Ag_ui.run_error ~timestamp ~thread_id:state.thread_id
+             ?run_id:state.run_id ~message ~code:public_error_code ()) )
   | Run_finished { run_id } ->
       let state = { state with run_id = Some run_id } in
       ( state
       , Some
-          (Ag_ui.make_event ~timestamp ~thread_id:state.thread_id
-             ~run_id:(Some run_id) Ag_ui.Run_finished) )
+          (Ag_ui.run_finished ~timestamp ~thread_id:state.thread_id ~run_id ()) )

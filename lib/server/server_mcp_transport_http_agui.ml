@@ -9,7 +9,7 @@ let sse_stream_headers = Server_mcp_transport_http_headers.sse_stream_headers
 let ag_ui_event_of_masc_event (delivery : Sse.delivery) =
   Ag_ui.of_custom
     ~timestamp:delivery.emitted_at
-    ~name:"MASC_EVENT"
+    ~name:Keeper_chat_wire.Keeper_chat_wire_t.Masc_event
     delivery.payload
   |> Ag_ui.event_to_sse ~id:delivery.event_id
 
@@ -121,7 +121,7 @@ let handle_ag_ui_events ~deps request reqd =
                   if Atomic.get disconnected then stop_sse_conn_if_current info;
                   let prime =
                     Ag_ui.(
-                      make_event ~thread_id:default_thread_id ~run_id:(Some session_id) Run_started
+                      run_started ~thread_id:default_thread_id ~run_id:session_id ()
                       |> event_to_sse)
                   in
                       let sw = runtime.sw in

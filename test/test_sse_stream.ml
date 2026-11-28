@@ -676,8 +676,7 @@ let test_runtime_observer_authority ~auth () =
     List.iter Sse.unsubscribe_external ["runtime-external-a";"runtime-external-b";"runtime-external-unscoped"];
     List.iter Sse.unregister ["runtime-observer-a";"runtime-observer-b"]) (fun () ->
     let publish base_path text =
-      let event = Ag_ui.make_event ~thread_id:"keeper:alpha" ~delta:(Some text)
-          Ag_ui.Text_message_content in
+      let event = Ag_ui.text_message_content ~thread_id:"keeper:alpha" ~delta:text () in
       Keeper_chat_broadcast.operation_event ~base_path ~keeper_name:"alpha"
         ~operation_id:"op-X" ~seq:(Some 1) ~event in
     publish base_a "ROOT_A_BODY";

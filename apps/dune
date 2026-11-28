@@ -1,0 +1,3 @@
+; Only the fixtures and the generated wire types here are dune source. The
+; app projects (Xcode, Gradle) keep their build output out of the dune scan.
+(dirs fixtures apple android)

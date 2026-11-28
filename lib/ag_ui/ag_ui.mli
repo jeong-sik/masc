@@ -15,100 +15,124 @@ type text_response =
   | Unobserved_scope of int option
   | Observed_response of response_identity
 
-type event_type =
-  | Run_started
-  | Run_finished
-  | Run_error
-  | Text_message_start
-  | Text_message_content
-  | Text_message_end
-  | Tool_call_start
-  | Tool_call_args
-  | Tool_call_end
-  | Custom
-[@@deriving show, eq]
+type role = Keeper_chat_wire.Keeper_chat_wire_t.role =
+  | User
+  | Assistant
+  | System
+  | Tool
 
-val event_type_to_string : event_type -> string
-(** Spec-compliant uppercase string (e.g. ["RUN_STARTED"]). *)
+type custom_name = Keeper_chat_wire.Keeper_chat_wire_t.custom_name
+(** What a [CUSTOM] frame's value holds. *)
 
-(** {1 Message Role} *)
+(** {1 Event} *)
 
-type role = User | Assistant | System | Tool
-[@@deriving show, eq]
+type event = private Keeper_chat_wire.Keeper_chat_wire_t.frame
+(** One AG-UI frame. Its type and JSON come from
+    lib/keeper_chat_wire/keeper_chat_wire.atd. Only the constructors below
+    build one; read it with [(event :> Keeper_chat_wire_t.frame)]. *)
 
-val role_to_string : role -> string
-(** Spec-compliant lowercase string (e.g. ["assistant"]). *)
+(** {1 Constructors}
 
-(** {1 Event Record} *)
+    One constructor per frame kind. Each takes only the fields that kind
+    carries on the wire (lib/keeper_chat_wire/keeper_chat_wire.atd), so a
+    frame without a required field cannot be built. [timestamp] defaults to
+    [Time_compat.now ()] at call time. *)
 
-type event = private {
-  event_type : event_type;
-  thread_id : string;
-  run_id : string option;
-  message_id : string option;
-  role : role option;
-  delta : string option;
-      (** Text chunk or tool args fragment. *)
-  tool_call_id : string option;
-  tool_call_name : string option;
-  text_response : text_response;
-      (** Complete observed response or explicitly unobserved scope; independent of tool occurrence scope. *)
-  tool_stream_scope : int option;
-  provider_message_id : string option;
-  tool_call_block_index : int option;
-  snapshot : Yojson.Safe.t option;
-      (** Accumulated tool-call arguments for [Tool_call_args]. *)
-  message : string option;
-      (** Required top-level error message for [Run_error]. *)
-  code : string option;
-      (** Optional top-level error code for [Run_error]. *)
-  custom_name : string option;
-  custom_value : Yojson.Safe.t option;
-  timestamp : float;
-}
+type tool_stream_occurrence =
+  { stream_scope : int
+  ; provider_message_id : string option
+  ; block_index : int
+  }
+(** The streamed tool call a [TOOL_CALL_*] frame names. *)
 
-val make_event :
-  ?timestamp:float ->
-  ?run_id:string option ->
-  ?message_id:string option ->
-  ?role:role option ->
-  ?delta:string option ->
-  ?tool_call_id:string option ->
-  ?tool_call_name:string option ->
-  ?text_response:text_response ->
-  ?tool_stream_scope:int option ->
-  ?provider_message_id:string option ->
-  ?tool_call_block_index:int option ->
-  ?snapshot:Yojson.Safe.t option ->
-  ?message:string option ->
-  ?code:string option ->
-  ?custom_name:string option ->
-  ?custom_value:Yojson.Safe.t option ->
-  thread_id:string ->
-  event_type ->
-  event
-(** Construct an [event] with sensible defaults. [timestamp] defaults to
-    [Time_compat.now ()] at call time.
+type tool_call_arguments =
+  | Arguments_delta of string
+  | Arguments_snapshot of string
+      (** The whole arguments text so far, sent as a JSON string. *)
 
-    [Run_error] requires a non-empty [message]. [message] and [code] are
-    rejected for every other event type so the Custom [value] envelope cannot
-    become a second RUN_ERROR wire contract. *)
+val run_started :
+  ?timestamp:float -> thread_id:string -> run_id:string -> unit -> event
+
+val run_finished :
+  ?timestamp:float -> thread_id:string -> run_id:string -> unit -> event
 
 val run_error :
+  ?timestamp:float ->
   thread_id:string ->
   ?run_id:string ->
   message:string ->
   ?code:string ->
   unit ->
   event
-(** Construct a spec-compliant [Run_error] event. This is the concise public
-    path for lifecycle failures; Custom [name]/[value] fields are unavailable
-    by construction. *)
+(** @raise Invalid_argument when [message] is blank. *)
+
+val text_message_start :
+  ?timestamp:float ->
+  thread_id:string ->
+  ?run_id:string ->
+  message_id:string ->
+  role:role ->
+  unit ->
+  event
+
+val text_message_content :
+  ?timestamp:float ->
+  thread_id:string ->
+  ?run_id:string ->
+  ?message_id:string ->
+  ?text_response:text_response ->
+  delta:string ->
+  unit ->
+  event
+(** [text_response] defaults to [Unobserved_scope None]. *)
+
+val text_message_end :
+  ?timestamp:float ->
+  thread_id:string ->
+  ?run_id:string ->
+  ?message_id:string ->
+  unit ->
+  event
+
+val tool_call_start :
+  ?timestamp:float ->
+  thread_id:string ->
+  ?run_id:string ->
+  ?tool_call_id:string ->
+  tool_call_name:string ->
+  tool_stream_occurrence ->
+  event
+
+val tool_call_args :
+  ?timestamp:float ->
+  thread_id:string ->
+  ?run_id:string ->
+  ?tool_call_id:string ->
+  tool_stream_occurrence ->
+  tool_call_arguments ->
+  event
+
+val tool_call_end :
+  ?timestamp:float ->
+  thread_id:string ->
+  ?run_id:string ->
+  ?tool_call_id:string ->
+  tool_stream_occurrence ->
+  event
+
+val custom :
+  ?timestamp:float ->
+  thread_id:string ->
+  ?run_id:string ->
+  name:custom_name ->
+  Yojson.Safe.t ->
+  event
+(** A [CUSTOM] frame. [name] says what the value holds. *)
 
 (** {1 Serialization} *)
 
 val event_to_json : event -> Yojson.Safe.t
-(** Spec-compliant JSON with camelCase field names. *)
+(** The frame's JSON, as the generated writer writes it. *)
 
 val event_to_sse : ?id:int -> event -> string
 (** Format an event as a single SSE [data:] line followed by [\n\n]. *)
@@ -118,8 +142,8 @@ val event_to_sse : ?id:int -> event -> string
 val default_thread_id : string
 (** Thread ID used by the single-namespace MASC bridge (["default"]). *)
 
-val of_custom : ?timestamp:float -> name:string -> Yojson.Safe.t -> event
-(** Wrap any MASC event in [Custom] with the given [name]/[value]. *)
+val of_custom : ?timestamp:float -> name:custom_name -> Yojson.Safe.t -> event
+(** {!custom} on {!default_thread_id} without a run. *)
 
 (** {1 Protocol Metadata} *)
 

@@ -1,0 +1,20 @@
+; MascWire/Generated is tools/atd-native-gen output. `dune build @check`
+; fails when it differs from what the generator writes for
+; lib/keeper_chat_wire/keeper_chat_wire.atd; `dune promote` takes the new
+; output (RFC-native-keeper-chat-clients D2).
+
+(dirs MascWire)
+
+(subdir
+ MascWire/Generated
+ (rule
+  (with-stdout-to
+   KeeperChatWire.swift.gen
+   (run
+    %{exe:../../../../tools/atd-native-gen/atd_native_gen.exe}
+    swift
+    %{dep:../../../../lib/keeper_chat_wire/keeper_chat_wire.atd})))
+ (rule
+  (alias check)
+  (action
+   (diff KeeperChatWire.swift KeeperChatWire.swift.gen))))

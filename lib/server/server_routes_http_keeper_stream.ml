@@ -42,11 +42,11 @@ let operation_wire_streams : (operation_stream_key, operation_wire_stream) Hasht
 let operation_wire_streams_mu = Stdlib.Mutex.create ()
 
 let ag_ui_terminal_event (event : Ag_ui.event) =
-  match event.Ag_ui.event_type with
-  | Ag_ui.Run_finished | Ag_ui.Run_error -> true
-  | Run_started | Text_message_start | Text_message_content
-  | Text_message_end | Tool_call_start | Tool_call_args | Tool_call_end
-  | Custom -> false
+  match (event :> Keeper_chat_wire.Keeper_chat_wire_t.frame) with
+  | Run_finished _ | Run_error _ -> true
+  | Run_started _ | Text_message_start _ | Text_message_content _
+  | Text_message_end _ | Tool_call_start _ | Tool_call_args _ | Tool_call_end _
+  | Custom _ -> false
 
 let note_operation_wire_opened key =
   Stdlib.Mutex.protect operation_wire_streams_mu (fun () ->
@@ -3431,12 +3431,11 @@ let synthesize_wire_terminal_on_settle ~base_path ~keeper_name ~operation_id ~ex
            Some seq, ts
          | Keeper_chat_event_log.Recorded_terminal_error { seq; ts } ->
            Some seq, ts in
-       let event = Ag_ui.make_event ~timestamp
+       let event = Ag_ui.run_error ~timestamp
          ~thread_id:("keeper:" ^ keeper_name)
-         ~run_id:(Some ("keeper-operation-run-" ^ operation_id))
-         ~message:(Some Keeper_chat_events.public_error_message)
-         ~code:(Some Keeper_chat_events.public_error_code)
-         Ag_ui.Run_error in
+         ~run_id:("keeper-operation-run-" ^ operation_id)
+         ~message:Keeper_chat_events.public_error_message
+         ~code:Keeper_chat_events.public_error_code () in
        (match wire with
         | Some Wire_started ->
           note_operation_wire_terminal_if_live ~base_path ~keeper_name ~operation_id
@@ -3545,7 +3544,7 @@ let operation_heartbeat_decision = function
 (* Everything a reconnect replays, or nothing. Reads the journal, projects it
    with the keeper's current redaction snapshot, and keeps every failure
    inside this function — missing, unreadable, corrupt, or a journaled event
-   the projection refuses (Ag_ui.make_event rejects an empty run_error
+   the projection refuses (Ag_ui.run_error rejects an empty run_error
    message) — because the caller runs on the server-lifetime switch, where an
    escaped exception would take the server down. A missing journal is a
    queued operation with nothing journaled yet, so it is silent; the rest
@@ -3597,11 +3596,11 @@ let operation_terminal_after_replay ~base_path ~keeper_name
         | Ok (Some (Existing_terminal_error {seq;_} | Recorded_terminal_error {seq;_})) -> Hashtbl.mem replayed seq
         | Ok None | Error _ -> false in
       if already_sent then None
-      else Some (Ag_ui.make_event ~timestamp:completed_at
+      else Some (Ag_ui.run_error ~timestamp:completed_at
         ~thread_id:("keeper:" ^ keeper_name)
-        ~run_id:(Some ("keeper-operation-run-" ^ operation_id))
-        ~message:(Some Keeper_chat_events.public_error_message)
-        ~code:(Some Keeper_chat_events.public_error_code) Ag_ui.Run_error)
+        ~run_id:("keeper-operation-run-" ^ operation_id)
+        ~message:Keeper_chat_events.public_error_message
+        ~code:Keeper_chat_events.public_error_code ())
   | Queued | Running _ | Succeeded _ | Cancelled _ -> None
 ;;
 
@@ -3769,7 +3768,7 @@ let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payloa
         in
         Ag_ui.event_to_sse
           (Ag_ui.of_custom
-            ~name:"KEEPER_CHAT_OPERATION_ACCEPTED"
+            ~name:Keeper_chat_wire.Keeper_chat_wire_t.Keeper_chat_operation_accepted
             (`Assoc
                ([ "operation_id", `String operation_id
                ; "state", `String state

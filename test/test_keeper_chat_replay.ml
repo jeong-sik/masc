@@ -318,12 +318,20 @@ let live_events () =
   in
   List.rev rev
 
-let live_event_of_type event_type =
-  match
-    List.find_opt (fun (_, (event : Ag_ui.event)) -> event.event_type = event_type) (live_events ())
-  with
+(* The two live frame kinds the replay tests pick out of the fixture. *)
+type live_kind = Live_delta | Live_finished
+
+let live_kind (event : Ag_ui.event) =
+  match (event :> Keeper_chat_wire.Keeper_chat_wire_t.frame) with
+  | Text_message_content _ -> Some Live_delta
+  | Run_finished _ -> Some Live_finished
+  | Run_started _ | Run_error _ | Text_message_start _ | Text_message_end _
+  | Tool_call_start _ | Tool_call_args _ | Tool_call_end _ | Custom _ -> None
+
+let live_event_of_kind kind =
+  match List.find_opt (fun (_, event) -> live_kind event = Some kind) (live_events ()) with
   | Some (_, event) -> event
-  | None -> Alcotest.fail "the live fixture lacks the event type"
+  | None -> Alcotest.fail "the live fixture lacks the event kind"
 
 (* The SSE frames in what one send carried, each with its blank-line
    terminator: the pump writes the frames already queued in one send. *)
@@ -419,8 +427,8 @@ let test_live_events_queued_during_the_replay_follow_it () =
     "the acceptance, the replay, then the live frames once each"
     (acceptance :: List.map snd (live_frames ())) written
 
-let delta () = live_event_of_type Ag_ui.Text_message_content
-let finished () = live_event_of_type Ag_ui.Run_finished
+let delta () = live_event_of_kind Live_delta
+let finished () = live_event_of_kind Live_finished
 
 let failure =
   Ag_ui.run_error ~thread_id:"keeper:replay" ~run_id:"keeper-operation-run-op"
@@ -549,7 +557,7 @@ let test_a_quiet_stream_follows_the_operation () =
 let test_the_step_drops_only_what_the_replay_wrote () =
   let replayed = Hashtbl.create 4 in
   Hashtbl.replace replayed 5 ();
-  let delta = live_event_of_type Ag_ui.Text_message_content in
+  let delta = live_event_of_kind Live_delta in
   let written, ending =
     serve_chat ~replayed
       Stream.For_testing.
@@ -569,8 +577,8 @@ let test_the_step_drops_only_what_the_replay_wrote () =
    same way, and [Settled] ends it without a frame. *)
 let test_terminals_and_settled_end_the_stream () =
   let replayed = Hashtbl.create 1 in
-  let delta = live_event_of_type Ag_ui.Text_message_content in
-  let finished = live_event_of_type Ag_ui.Run_finished in
+  let delta = live_event_of_kind Live_delta in
+  let finished = live_event_of_kind Live_finished in
   let failure =
     Ag_ui.run_error ~thread_id:"keeper:replay" ~run_id:"keeper-operation-run-op"
       ~message:"failed" ~code:"failed" ()

@@ -196,6 +196,10 @@
   ; dashboard/src/schemas/sse_event_generated.ts).  Build-time only;
   ; no runtime linkage.  CI invokes it via dashboard/scripts/gen-sse-types.sh.
   (atdts (and :build (>= 4.2.0)))
+  ; tools/atd-native-gen reads keeper_chat_wire.atd with the atd library
+  ; and writes the native clients' wire types under apps/ (Swift and Kotlin).
+  ; Build-time only; the drift rule runs in @check.
+  (atd (and :build (>= 4.2.0)))
   ; OpenTelemetry observability + OTLP exporter.  MASC consumes the
   ; [opentelemetry.client] findlib library exposed by 0.13; newer package
   ; families use a different public library layout.

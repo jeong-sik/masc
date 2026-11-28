@@ -1,0 +1,21 @@
+; src/main/kotlin/masc/wire/generated is tools/atd-native-gen output.
+; `dune build @check` fails when it differs from what the generator writes
+; for lib/keeper_chat_wire/keeper_chat_wire.atd; `dune promote` takes the
+; new output (RFC-native-keeper-chat-clients D2).
+
+(dirs src)
+
+(subdir
+ src/main/kotlin/masc/wire/generated
+ (rule
+  (with-stdout-to
+   KeeperChatWire.kt.gen
+   (run
+    %{exe:../../../../../../../../../tools/atd-native-gen/atd_native_gen.exe}
+    kotlin
+    masc.wire.generated
+    %{dep:../../../../../../../../../lib/keeper_chat_wire/keeper_chat_wire.atd})))
+ (rule
+  (alias check)
+  (action
+   (diff KeeperChatWire.kt KeeperChatWire.kt.gen))))

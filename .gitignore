@@ -216,3 +216,12 @@ memory/
 # the candidate's source identity (lib/build_commit/probe-commit.sh), which
 # the probe requires to be clean.
 /probe-driver/
+
+# SwiftPM build output of the native clients (apps/apple).
+/apps/apple/**/.build/
+/apps/apple/**/.swiftpm/
+
+# Gradle output of the native clients (apps/android).
+/apps/android/.gradle/
+/apps/android/**/build/
+/apps/android/**/.kotlin/

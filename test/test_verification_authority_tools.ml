@@ -329,12 +329,35 @@ let test_schemas_are_the_descriptor_schemas () =
               Alcotest.(check (list string))
                 "masc_fusion_status adds source continuation to exact lookup"
                 ("cursor" :: (descriptor.Descriptor.input_schema |> member "properties" |> keys))
-                (schema.input_schema |> member "properties" |> keys)
+                (schema.input_schema |> member "properties" |> keys);
+              Alcotest.(check (list string))
+                "a source without comment arguments carries no selection in its cursor"
+                [ "byte_offset"; "source_sha256" ]
+                (schema.input_schema |> member "properties" |> member "cursor"
+                 |> member "properties" |> keys |> List.sort String.compare)
             | "masc_board_post_get" ->
               let open Yojson.Safe.Util in
               Alcotest.(check (list string)) "Board adds source continuation"
                 ("cursor" :: (descriptor.Descriptor.input_schema |> member "properties" |> keys))
-                (schema.input_schema |> member "properties" |> keys)
+                (schema.input_schema |> member "properties" |> keys);
+              (* The page a cursor continues was selected by comment arguments,
+                 and the cursor carries them: a continuation needs no other
+                 argument than the source id. *)
+              Alcotest.(check (list string))
+                "Board cursor carries the selection of its page"
+                [ "byte_offset"; "select"; "source_sha256" ]
+                (schema.input_schema |> member "properties" |> member "cursor"
+                 |> member "properties" |> keys |> List.sort String.compare);
+              Alcotest.(check (list string))
+                "the carried selection is the descriptor's comment arguments"
+                [ "after_comment_id"; "comment_limit"; "comment_offset"; "comment_tail" ]
+                (schema.input_schema |> member "properties" |> member "cursor"
+                 |> member "select" |> member "properties" |> keys |> List.sort String.compare);
+              Alcotest.(check (list string))
+                "only the digest and the offset are required of a cursor"
+                [ "byte_offset"; "source_sha256" ]
+                (schema.input_schema |> member "properties" |> member "cursor"
+                 |> member "required" |> to_list |> List.map to_string |> List.sort String.compare)
             | "keeper_artifact_read" ->
               (* The stored-page members are the Keeper reader's own. A
                  submitted artifact's reference and the source cursor are the
@@ -347,6 +370,11 @@ let test_schemas_are_the_descriptor_schemas () =
                    ("cursor" :: "reference"
                     :: (descriptor.Descriptor.input_schema |> member "properties" |> keys)))
                 (schema.input_schema |> member "properties" |> keys |> List.sort String.compare);
+              Alcotest.(check (list string))
+                "a stored text carries no selection in its cursor"
+                [ "byte_offset"; "source_sha256" ]
+                (schema.input_schema |> member "properties" |> member "cursor"
+                 |> member "properties" |> keys |> List.sort String.compare);
               Alcotest.(check bool)
                 "artifact reader requires no member"
                 true

@@ -477,7 +477,7 @@ let test_large_sources_survive_actual_bridge () = with_fixture (fun config ->
       (String.length content <= Tool_bridge.default_externalize_threshold_bytes);
     (* A spilled blob marker cannot parse as the source-page JSON contract. *)
     Yojson.Safe.from_string content in
-  let reconstruct surface name args =
+  let reconstruct ?(follow=cursor_args) surface name args =
     let first = bridge surface name args in
     check string "large source advertises lossless continuation" "source_json_page"
       (first |> member "representation" |> to_string);
@@ -496,13 +496,25 @@ let test_large_sources_survive_actual_bridge () = with_fixture (fun config ->
         check string "reconstructed digest matches exact original" expected_digest
           Agent_core_sha256.(digest_string bytes |> to_hex);
         Yojson.Safe.from_string bytes, member "next_cursor" first
-      | cursor -> collect offset (bridge surface name (cursor_args args cursor)) (content :: parts) in
+      | cursor -> collect offset (bridge surface name (follow args cursor)) (content :: parts) in
     collect 0 first [] in
   List.iter (fun surface ->
     List.iter (fun (name, args, expected) ->
       let reconstructed, cursor = reconstruct surface name args in
       check bool "entire original source including escapes and Unicode survives" true
         (reconstructed = expected);
+      (match name with
+       | "masc_board_post_get" ->
+         (* The call named no comment arguments, and the cursor says so. *)
+         check bool "a Board cursor carries the selection of its page" true
+           (member "select" cursor = `Assoc [])
+       | _ ->
+         check bool "a source with no comment selection carries none" true
+           (member "select" cursor = `Null);
+         (match cursor with
+          | `Assoc fields ->
+            invalid_input surface name (cursor_args args (`Assoc (fields @ ["select", `Assoc []])))
+          | _ -> fail "large source lacks continuation"));
       let invalid_hash = match cursor with `Assoc fields ->
         `Assoc (("source_sha256", `String (String.make 64 '0')) :: List.remove_assoc "source_sha256" fields)
         | _ -> fail "large source lacks continuation" in
@@ -534,7 +546,41 @@ let test_large_sources_survive_actual_bridge () = with_fixture (fun config ->
     ~author:"producer" ~content:"New source revision" ~ttl_hours:0 () |> require "changed source");
   let continued = bridge task "masc_board_post_get" (cursor_args (post_args board) cursor) in
   check string "live edits cannot invalidate submission paging" "source_json_page"
-    (continued |> member "representation" |> to_string))
+    (continued |> member "representation" |> to_string);
+  (* A cursor carries the comment arguments that selected its page. A caller
+     that drops them continues the same page, one that repeats them continues
+     it too, and one that repeats a different selection is refused as an
+     invalid request: the source is the submitted bytes and did not change. *)
+  let threaded = post ~author:"producer" ~visibility:Board.Internal ~meta_json:metadata "Large threaded source" in
+  let threaded_id = Board.Post_id.to_string threaded.id in
+  List.iter (fun content ->
+    ignore (Board_dispatch.add_comment ~reader:Masc_board_handlers.Board_access.Operator ~post_id:threaded_id
+      ~author:"producer" ~content ~ttl_hours:0 () |> require "thread comment"))
+    ["First evidence"; "Second evidence"; "Third evidence"];
+  let threaded_surface = VAT.create ~config ~producer:"producer"
+    ~submitted_evidence:(capture config (Evidence.Task_producer "producer") [board_ref threaded])
+    |> require "threaded snapshot surface" in
+  let selected = `Assoc ["post_id", `String threaded_id; "comment_offset", `Int 0; "comment_limit", `Int 2] in
+  let bare _ cursor = `Assoc ["post_id", `String threaded_id; "cursor", cursor] in
+  let without_select = function
+    | `Assoc fields -> `Assoc (List.filter (fun (name, _) -> not (String.equal name "select")) fields)
+    | other -> other in
+  let first = bridge threaded_surface "masc_board_post_get" selected in
+  let cursor = member "next_cursor" first in
+  check (list string) "a Board cursor carries the selection of its page"
+    ["byte_offset"; "select"; "source_sha256"]
+    (cursor |> keys |> List.sort String.compare);
+  check (list string) "the carried selection is the call's comment arguments"
+    ["comment_limit"; "comment_offset"]
+    (cursor |> member "select" |> keys |> List.sort String.compare);
+  ignore (reconstruct ~follow:bare threaded_surface "masc_board_post_get" selected);
+  ignore (reconstruct threaded_surface "masc_board_post_get" selected);
+  (* A cursor from before selections were carried is continued by the call's
+     own arguments, as it always was. *)
+  ignore (reconstruct ~follow:(fun args cursor -> cursor_args args (without_select cursor))
+      threaded_surface "masc_board_post_get" selected);
+  invalid_input threaded_surface "masc_board_post_get"
+    (`Assoc ["post_id", `String threaded_id; "comment_offset", `Int 1; "cursor", cursor]))
 
 let artifact reference content =
   Store.Evidence_artifact { reference; content; bytes = String.length content }

@@ -49,35 +49,67 @@ let required_id args field =
   | Some value when value <> "" -> Ok value
   | Some _ | None -> Error (Invalid_request (field ^ " is required for an exact source lookup"))
 
+(* The comment arguments select one page of a submitted Board thread. *)
+let comment_argument_names = ["comment_offset"; "comment_limit"; "comment_tail"; "after_comment_id"]
+
+let comment_arguments = function
+  | `Assoc fields -> `Assoc (List.filter (fun (name, _) -> List.mem name comment_argument_names) fields)
+  | _ -> `Assoc []
+
+(* A cursor names the observation it continues: the digest of its source and
+   a UTF-8 byte offset. A page selected by comment arguments adds them as
+   [select], so the continuation depends on nothing the caller has to repeat. *)
+let cursor_member_names = ["source_sha256"; "byte_offset"; "select"]
+
+let cursor_of args =
+  match args with
+  | `Assoc fields -> Ok (List.assoc_opt "cursor" fields)
+  | _ -> Error (Invalid_request "source lookup arguments must be an object")
+
+let cursor_parts = function
+  | `Assoc fields
+    when List.for_all (fun (name, _) -> List.mem name cursor_member_names) fields
+         && (match List.assoc_opt "select" fields with
+             | None | Some (`Assoc _) -> true
+             | Some _ -> false) ->
+    (match List.assoc_opt "source_sha256" fields, List.assoc_opt "byte_offset" fields with
+     | Some (`String digest), Some (`Int offset) -> Ok (digest, offset, List.assoc_opt "select" fields)
+     | _ -> Error (Invalid_request "invalid source cursor"))
+  | _ -> Error (Invalid_request "invalid source cursor")
+
 (* The same wire budget used by the verifier's bridge. Pages carry exact
-   JSON text, not an excerpt; the digest pins every cursor to one observation. *)
-let page_source ~args source =
+   JSON text, not an excerpt; the digest pins every cursor to one observation.
+   [select] is the comment arguments that chose this page; the next cursor
+   carries them. A cursor carries a selection exactly when the page has one,
+   and it must be this page's. *)
+let page_source ~args ~select source =
   let bytes = Yojson.Safe.to_string source in
   let total = String.length bytes in
   let digest = Agent_core_sha256.(digest_string bytes |> to_hex) in
   let budget = Tool_bridge.default_externalize_threshold_bytes in
-  let* cursor = match args with
-    | `Assoc fields ->
-      (match List.assoc_opt "cursor" fields with
-       | None -> Ok None
-       | Some (`Assoc fields) when List.length fields = 2 ->
-         (match List.assoc_opt "source_sha256" fields, List.assoc_opt "byte_offset" fields with
-          | Some (`String expected), Some (`Int offset) ->
-            if not (String.equal expected digest) then
-              Error (Source_unavailable "source changed between pages; restart the exact source read")
-            else if offset > 0 && offset < total
-              && String_util.utf8_char_boundary bytes offset = offset then Ok (Some offset)
-            else Error (Invalid_request "invalid source cursor")
-          | _ -> Error (Invalid_request "invalid source cursor"))
-       | Some _ -> Error (Invalid_request "invalid source cursor"))
-    | _ -> Error (Invalid_request "source lookup arguments must be an object") in
+  let* cursor = cursor_of args in
+  let* cursor = match cursor with
+    | None -> Ok None
+    | Some cursor ->
+      let* expected, offset, carried = cursor_parts cursor in
+      if not (String.equal expected digest) then
+        Error (Source_unavailable "source changed between pages; restart the exact source read")
+      else if offset > 0 && offset < total
+        && String_util.utf8_char_boundary bytes offset = offset
+        && (match select, carried with
+            | None, None -> true
+            | Some select, Some carried -> Yojson.Safe.equal select carried
+            | None, Some _ | Some _, None -> false)
+      then Ok (Some offset)
+      else Error (Invalid_request "invalid source cursor") in
   match cursor with
   | None when total <= budget -> Ok source
   | None | Some _ ->
     let offset = match cursor with None -> 0 | Some offset -> offset in
     let page ending =
-      let next = if ending = total then `Null else `Assoc
-        ["source_sha256", `String digest; "byte_offset", `Int ending] in
+      let next = if ending = total then `Null else
+        `Assoc (("source_sha256", `String digest) :: ("byte_offset", `Int ending)
+                  :: (match select with None -> [] | Some select -> ["select", select])) in
       `Assoc ["representation", `String "source_json_page";
         "source_sha256", `String digest; "total_bytes", `Int total;
         "byte_offset", `Int offset; "content", `String (String.sub bytes offset (ending - offset));
@@ -213,9 +245,34 @@ let submitted_comment_id : Yojson.Safe.t -> string option = function
 
 let read_board ~submitted_evidence ~args = protect (fun () ->
   let* post_id = required_id args "post_id" in
-  let* request = Board.Comment_page.request_of_args args
-    |> Result.map_error (fun error ->
-      Invalid_request (Board.Comment_page.request_error_to_string error)) in
+  (* The page a cursor continues was selected by the comment arguments the
+     cursor carries. A caller may drop those arguments or repeat the same
+     selection. A different selection beside the cursor names another page: it
+     is refused here, not reported as a changed source. A cursor that carries
+     none is continued by the call's own arguments. *)
+  let* request, select =
+    let request arguments = Board.Comment_page.request_of_args arguments
+      |> Result.map_error (fun error ->
+        Invalid_request (Board.Comment_page.request_error_to_string error)) in
+    let* cursor = cursor_of args in
+    let* carried = match cursor with
+      | None -> Ok None
+      | Some cursor ->
+        let* _digest, _offset, carried = cursor_parts cursor in
+        Ok carried in
+    (match carried with
+     | None ->
+       let* request = request args in
+       Ok (request, comment_arguments args)
+     | Some select ->
+       let* selected = request select in
+       (match comment_arguments args with
+        | `Assoc [] -> Ok (selected, select)
+        | repeated ->
+          let* repeated = request repeated in
+          if repeated = selected then Ok (selected, select)
+          else Error (Invalid_request
+            "the cursor continues the comment page it names: drop the comment arguments or repeat the ones it carries"))) in
   let* source = submitted_source ~submitted_evidence ("board:" ^ post_id) in
   match source with
   | `Assoc ["source", `String "board"; "post", post; "comments", `List comments] ->
@@ -231,7 +288,7 @@ let read_board ~submitted_evidence ~args = protect (fun () ->
            "after_comment_id %s names no comment: the submitted thread has %d"
            (Board.Comment_id.to_string comment_id) total))
        | Board.Comment_page.Page page ->
-         page_source ~args (`Assoc ["source", `String "board"; "post", post;
+         page_source ~args ~select:(Some select) (`Assoc ["source", `String "board"; "post", post;
            "comments", `List page.Board.Comment_page.items;
            "pagination", Board.Comment_page.Position.(to_yojson (of_page page))]))
   | _ -> Error (Storage_failed "invalid submitted Board snapshot"))
@@ -241,7 +298,7 @@ let read_fusion ~submitted_evidence ~args = protect (fun () ->
   let* source = submitted_source ~submitted_evidence ("fusion:" ^ run_id) in
   match source with
   | `Assoc fields when List.assoc_opt "source" fields = Some (`String "fusion")
-      && List.assoc_opt "run_id" fields = Some (`String run_id) -> page_source ~args source
+      && List.assoc_opt "run_id" fields = Some (`String run_id) -> page_source ~args ~select:None source
   | _ -> Error (Storage_failed "invalid submitted Fusion snapshot"))
 
 let read_task ~submitted_evidence ~args = protect (fun () ->
@@ -259,7 +316,7 @@ let read_task ~submitted_evidence ~args = protect (fun () ->
        | Ok task when task.id = task_id -> Ok ()
        | Ok _ | Error _ -> Error (Storage_failed "submitted Task identity does not match reference"))
     | _ -> Error (Storage_failed "invalid submitted Task snapshot") in
-  page_source ~args source)
+  page_source ~args ~select:None source)
 
 (* A text artifact in this submission, read from the captured content. The
    producer's current file is not read: it may have changed since submission.
@@ -275,7 +332,7 @@ let read_artifact ~submitted_evidence ~args = protect (fun () ->
     | Store.Evidence_invalid_reference | Store.Evidence_note _ | Store.Evidence_artifact_unreadable _
     | Store.Evidence_artifact_binary _ | Store.Evidence_collaboration _ -> false) submitted_evidence with
   | Some (Store.Evidence_artifact { content; bytes }) ->
-    page_source ~args (`Assoc
+    page_source ~args ~select:None (`Assoc
       [ "source", `String "artifact"
       ; "reference", `String reference
       ; "bytes", `Int bytes

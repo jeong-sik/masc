@@ -630,6 +630,9 @@ let test_voice_message_request_shape () =
        check bool "no content" true (json |> member "content" = `Null);
        check string "reply reference" "42"
          (json |> member "message_reference" |> member "message_id" |> to_string);
+       check string "the reply pings nobody"
+         {|{"parse":[],"replied_user":false}|}
+         (json |> member "allowed_mentions" |> Yojson.Safe.to_string);
        (match json |> member "attachments" |> to_list with
         | [ attachment ] ->
           check int "attachment id is files[0]" 0
@@ -687,13 +690,20 @@ let test_voice_waveform_one_point_per_100ms () =
      check bool "half scale maps to 127" true
        (String.for_all (fun c -> Char.code c = 127) waveform)
    | None -> fail "two seconds of audio gave no waveform");
+  (* A silent minute whose last 100 ms is loud: the capped points still
+     cover the whole minute, so the last point carries the tail. *)
   (match
      Discord_voice_clip.waveform_of_pcm_s16le ~sample_rate:rate
-       (constant_pcm ~samples:(60 * rate) 1000)
+       (constant_pcm ~samples:((60 * rate) - (rate / 10)) 0
+        ^ constant_pcm ~samples:(rate / 10) 16384)
    with
    | Some (_, waveform) ->
-     check int "a minute is capped at the point limit"
-       R.voice_waveform_max_points (String.length waveform)
+     let points = R.voice_waveform_max_points in
+     check int "a minute is capped at the point limit" points (String.length waveform);
+     check int "the last point carries the loud tail" 127
+       (Char.code waveform.[points - 1]);
+     check bool "the points before it are silent" true
+       (String.for_all (fun c -> Char.code c = 0) (String.sub waveform 0 (points - 1)))
    | None -> fail "a minute of audio gave no waveform");
   (* Loud then silent: the waveform follows the signal in time. *)
   let rate = 100 in

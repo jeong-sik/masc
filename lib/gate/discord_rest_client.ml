@@ -901,7 +901,13 @@ let voice_message_payload_json ~reply_to_message_id clip =
   Yojson.Safe.to_string
     (`Assoc
        (add_message_reference reply_to_message_id
-          [ "flags", `Int voice_message_flag; "attachments", `List [ attachment ] ]))
+          [ "flags", `Int voice_message_flag
+          ; "attachments", `List [ attachment ]
+            (* No content, so no user to notify; a reply does not ping its
+               author either, as {!send_message}'s replies do not. *)
+          ; ( "allowed_mentions"
+            , allowed_mentions_json ~is_reply:(Option.is_some reply_to_message_id) [] )
+          ]))
 
 let build_voice_message_request ~token ~channel_id ~boundary
     ?reply_to_message_id ~clip () =

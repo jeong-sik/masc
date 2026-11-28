@@ -122,15 +122,19 @@ let remove_scratch dir =
 
 let of_audio format bytes =
   let open Result.Syntax in
-  let* dir =
-    try Ok (Filename.temp_dir "masc-discord-voice-" "") with
-    | Sys_error detail -> Error ("voice clip scratch directory failed: " ^ detail)
-  in
-  let transcoded =
-    Fun.protect ~finally:(fun () -> remove_scratch dir) (fun () ->
+  (* A release hook runs under [Eio.Cancel.protect], so the directory is
+     removed when the post's fiber is cancelled while ffmpeg runs, too. It is
+     made inside the switch: [Switch.run] raises at entry in a cancelled
+     fiber, which would leave a directory made before it. *)
+  let* ogg, pcm =
+    Eio.Switch.run (fun sw ->
+      let* dir =
+        try Ok (Filename.temp_dir "masc-discord-voice-" "") with
+        | Sys_error detail -> Error ("voice clip scratch directory failed: " ^ detail)
+      in
+      Eio.Switch.on_release sw (fun () -> remove_scratch dir);
       transcode ~dir format bytes)
   in
-  let* ogg, pcm = transcoded in
   match waveform_of_pcm_s16le ~sample_rate:waveform_sample_rate pcm with
   | None -> Error "the audio decodes to no samples"
   | Some (duration_secs, waveform) ->

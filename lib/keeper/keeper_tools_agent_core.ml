@@ -48,6 +48,7 @@ let descriptor_admitted ?(image_generation_admitted = true) admission (descripto
      | Image_input_unavailable -> true)
   | Keeper_tool_descriptor.Tool_generate_image ->
     image_generation_admitted
+  | Keeper_tool_descriptor.Tool_music_render
   | Keeper_tool_descriptor.Tool_lane_addon _
   | Keeper_tool_descriptor.Tool_execute
   | Keeper_tool_descriptor.Tool_search_files

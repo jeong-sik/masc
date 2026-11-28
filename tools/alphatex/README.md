@@ -103,8 +103,16 @@ To validate or export a file without a terminal:
 ```sh
 node viewer.mjs example.atex --check
 node viewer.mjs example.atex --render score.png --audio score.wav
+node viewer.mjs example.atex --export-midi score.mid
 pnpm test
 ```
+
+`--render` draws the whole score as one PNG. `--export-midi` writes a
+Standard MIDI File (format 0, one channel per instrument). `--audio` writes
+44.1 kHz stereo WAV. Each prints one JSON line: engine, version, title,
+tracks and bars. Source that does not parse exits 65 with alphaTab's
+diagnostics on stderr; any other failure exits 1. MASC's
+`keeper_music_render` tool runs these exports on the server host.
 
 Exports refuse to overwrite an existing file. Rendering and synthesis in the
 interactive view run on workers. Only the active generation may replace the

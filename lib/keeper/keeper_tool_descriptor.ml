@@ -152,6 +152,7 @@ type runtime_handler =
   | Tool_analyze_image
   | Tool_read_image
   | Tool_generate_image
+  | Tool_music_render
 
 type policy =
   { readonly_of_input : readonly_of_input
@@ -287,6 +288,7 @@ let runtime_handler_to_string = function
   | Tool_analyze_image -> "tool_analyze_image"
   | Tool_read_image -> "tool_read_image"
   | Tool_generate_image -> "tool_generate_image"
+  | Tool_music_render -> "tool_music_render"
 ;;
 
 let lane_addon_export = function
@@ -350,7 +352,8 @@ let lane_addon_export = function
   | Tool_masc_local_runtime_dispatch
   | Tool_analyze_image
   | Tool_read_image
-  | Tool_generate_image -> None
+  | Tool_generate_image
+  | Tool_music_render -> None
 ;;
 
 (* RFC open-tool-carries-cohort-and-reach D2/D3. Each arm names the function
@@ -376,6 +379,8 @@ let reach_of_handler : runtime_handler -> Keeper_tool_reach.t option = function
   | Tool_peer_artifact -> Some Keeper_tool_reach.Sandbox
   (* keeper_image_read.ml reads the sandbox file. *)
   | Tool_read_image -> Some Keeper_tool_reach.Sandbox
+  (* masc-alphatex, a Node process on the host. It opens no connection. *)
+  | Tool_music_render -> Some Keeper_tool_reach.Sandbox
   (* A language server bounded to the sandbox root (keeper_tool_code_query.ml). *)
   | Tool_keeper_code_query_dispatch -> Some Keeper_tool_reach.Sandbox
   (* Projections of what the process holds, and stores under the base path. *)
@@ -665,7 +670,8 @@ let descriptor
       | Tool_masc_file_dispatch
       | Tool_masc_wiki_dispatch
       | Tool_masc_local_runtime_dispatch
-      | Tool_analyze_image | Tool_read_image | Tool_generate_image ) -> Ordinary ordinary_execution_mode
+      | Tool_analyze_image | Tool_read_image | Tool_generate_image | Tool_music_render ) ->
+        Ordinary ordinary_execution_mode
   in
   (* Fail-closed admission rule for parallel tool use: a descriptor may opt
      into [Concurrent] batches only when its policy carries a static
@@ -2949,6 +2955,22 @@ let internal_descriptors : t list =
       ~ordinary_execution_mode:Serial
       ~policy:(write_in_process_policy ())
       ~handler:Tool_generate_image
+      ()
+    (* ── music rendering ───────────────────────────────────────── *)
+  ; in_process_descriptor_with_schema_source
+      ~capability_identity:Internal_name_identity
+      ~keeper_model_projection:Internal_name
+      ~input_schema_source:Canonical_registry
+      ~id:"keeper.music.render"
+      ~name:Keeper_runtime_schemas_toml.keeper_music_render.name
+      ~description:Keeper_runtime_schemas_toml.keeper_music_render.description
+      ~input_schema:Keeper_runtime_schemas_toml.keeper_music_render.input_schema
+      (* Serial + write policy: runs a host process and stores its files as
+         the Keeper's attachments. Nothing leaves MASC's stores, as with
+         keeper_generate_image's attachments. *)
+      ~ordinary_execution_mode:Serial
+      ~policy:(write_in_process_policy ())
+      ~handler:Tool_music_render
       ()
     (* ── voice cluster (3 tools) ──────────────────────────────── *)
   ; voice_descriptor

@@ -157,6 +157,7 @@ type runtime_handler =
   | Tool_analyze_image
   | Tool_read_image
   | Tool_generate_image
+  | Tool_music_render
 
 type policy =
   { readonly_of_input : readonly_of_input

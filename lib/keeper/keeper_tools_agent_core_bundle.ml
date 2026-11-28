@@ -78,7 +78,8 @@ let runtime_media_gate_of_descriptor (descriptor : Keeper_tool_descriptor.t) =
   | Keeper_tool_descriptor.Tool_masc_fusion_decision
   | Keeper_tool_descriptor.Tool_masc_file_dispatch
   | Keeper_tool_descriptor.Tool_masc_wiki_dispatch
-  | Keeper_tool_descriptor.Tool_masc_local_runtime_dispatch -> Always_admitted
+  | Keeper_tool_descriptor.Tool_masc_local_runtime_dispatch
+  | Keeper_tool_descriptor.Tool_music_render -> Always_admitted
 
 let terminal_externalization_failure
       state
@@ -225,7 +226,8 @@ let receipt_wait_on_completed
   | Keeper_tool_descriptor.Tool_masc_local_runtime_dispatch
   | Keeper_tool_descriptor.Tool_analyze_image
   | Keeper_tool_descriptor.Tool_read_image
-  | Keeper_tool_descriptor.Tool_generate_image -> None
+  | Keeper_tool_descriptor.Tool_generate_image
+  | Keeper_tool_descriptor.Tool_music_render -> None
 ;;
 
 let make_tool_bundle_for_descriptors_with_policy

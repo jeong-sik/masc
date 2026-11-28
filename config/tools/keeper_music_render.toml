@@ -1,0 +1,32 @@
+# One host process per call, rare next to text tools: the schema loads on demand.
+defer_loading = true
+name = "keeper_music_render"
+description = """
+Render a score written in alphaTex into files: a PNG of the notation \
+(standard staff and tab, as the score declares), a Standard MIDI File, and \
+WAV audio played with alphaTab's built-in soundfont. Each file is stored as \
+this Keeper's attachment and returned with its attachment_id and url, in \
+score, midi, audio order. Pass the ids to keeper_surface_post attachment_ids \
+to post them on Discord; one audio id with as_voice_message=true becomes a \
+playable voice message. Source that does not parse is refused with \
+alphaTab's diagnostics (line and column of each error)."""
+additional_properties = false
+
+[[params]]
+name = "source"
+type = "string"
+min_length = 1
+required = true
+description = """
+The score in alphaTex, at most 64 KiB. Example: \\title "Riff" . :4 3.6 5.6 \
+7.6 5.6 | 3.5 5.5 7.5 5.5"""
+
+[[params]]
+name = "outputs"
+type = "array"
+items = { type = "string", enum = ["score", "midi", "audio"] }
+min_items = 1
+unique_items = true
+description = """
+Which files to make. Defaults to ["score", "midi"]. audio is WAV at 44.1 kHz \
+stereo, about 10 MB per minute of music; one file over 20 MiB is refused."""

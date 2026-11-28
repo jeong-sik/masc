@@ -370,6 +370,7 @@
 
 (include stanzas/test_sse_queue_inventory.inc)
 (include stanzas/test_vision_attachments_overhaul.inc)
+(include stanzas/test_keeper_music_render.inc)
 
 (test
  (name test_server_standalone_lane_projection)

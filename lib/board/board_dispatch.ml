@@ -413,9 +413,9 @@ let started_backend () =
    the caller's operation. Every Dispatch operation takes the store here, some
    more than once, so no operation has to be listed as one that reads again; a
    call that finds nothing due looks at the store's fields and returns. The
-   flusher takes the store without it. It is called outside every Board lock:
-   nothing outside [lib/board] holds one, and no callback run under one calls
-   back into Dispatch. *)
+   flusher and [flush] take the store without it. It is called outside every
+   Board lock: nothing outside [lib/board] holds one, and no callback run
+   under one calls back into Dispatch. *)
 let backend () =
   let store = started_backend () in
   List.iter

@@ -73,8 +73,12 @@ val require_persisted_snapshot_readable :
     The stored detail includes the authoritative path and malformed row. *)
 
 val require_model_reload_allowed : store -> path:string -> (unit, string * exn) result
-(** Pure loader precondition under persistence or quiescent startup. A pending,
-    observed, refused or uncertain decision cannot be cleared by model reload. *)
+(** Pure loader precondition. A pending, observed, refused or uncertain
+    decision cannot be cleared by model reload. Under persistence or at
+    quiescent startup the answer holds for the read that follows.
+    [Board_store_load.reobserve] also asks without persistence, to skip the
+    lock when the answer is no; that answer can be stale, and the loader asks
+    again once persistence is held. *)
 
 val invalidate_post_caches : store -> unit
 val invalidate_comment_caches : store -> unit

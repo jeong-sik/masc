@@ -181,12 +181,22 @@ let load_reactions_under_persistence store =
 let load_persisted_reactions store =
   with_persist_lock store (fun () -> load_reactions_under_persistence store)
 
-(* A pending deletion forbids replacing a model; only a fresh store may. Read
-   from the store's fields, so an operation learns it without waiting for
-   persistence. *)
+(* A deletion that is pending forbids replacing a model. Under persistence
+   the answer holds for the read that follows. *)
 let model_reload_allowed store ~path =
   Board_core_persist.require_model_reload_allowed store ~path
   |> Result.map_error (fun ((_ : string), exn) -> Io_error (Printexc.to_string exn))
+
+(* The same question asked without persistence, so that a call does not wait
+   for the lock to be refused. The field can show a deletion another fiber is
+   finishing under persistence: the source then stays as it is for this call
+   and is asked again at the next. The answer says only what the field says. *)
+let no_deletion_pending store ~path =
+  match Board_core_persist.require_model_reload_allowed store ~path with
+  | Ok () -> Ok ()
+  | Error ((_ : string), (_ : exn)) ->
+    Error (Io_error (Printf.sprintf
+      "Board source %s is not read again while a Board deletion is pending." path))
 
 let unknown_posts_write ~path =
   Io_error (Printf.sprintf
@@ -204,15 +214,15 @@ let unknown_posts_write ~path =
    every Board operation asks, and one that only reads must not queue behind
    a write's file I/O to be told what a field already says. *)
 let reobserve_posts store =
-  let path = Board_paths.persist_path store in
   match store.posts_source with
   | Posts_unobserved | Posts_readable _ -> Ok ()
-  | Posts_unsettled _ -> Error (unknown_posts_write ~path)
+  | Posts_unsettled _ -> Error (unknown_posts_write ~path:(Board_paths.persist_path store))
   | Posts_refused _ ->
     if not (Board_posts_source.reobservation_due store)
     then Ok ()
     else
-      match model_reload_allowed store ~path with
+      let path = Board_paths.persist_path store in
+      match no_deletion_pending store ~path with
       | Error _ as refused -> refused
       | Ok () ->
         with_persist_lock store (fun () ->
@@ -262,7 +272,7 @@ let reobserve store =
     if not (due store)
     then Ok ()
     else
-      match model_reload_allowed store ~path:(Board_paths.store_file_path store file) with
+      match no_deletion_pending store ~path:(Board_paths.store_file_path store file) with
       | Error _ as refused -> refused
       | Ok () ->
         with_persist_lock store (fun () ->

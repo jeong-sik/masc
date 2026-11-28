@@ -14,7 +14,6 @@ type error = Keeper_task_skill_resolution_error.t =
 type selected =
   { reference : Skill_reference.t
   ; skill : Keeper_skill_catalog.skill
-  ; diagnostic : Keeper_skill_catalog.error option
   ; task_ids : string list
   }
 
@@ -206,7 +205,7 @@ let resolve_requests ?descriptors ~snapshot ~finish requests =
          (match Keeper_skill_catalog.project_prepared_entry projection entry with
           | Keeper_skill_catalog.Projected skill ->
             loop (Some projection)
-              ({ reference; skill; diagnostic = None; task_ids } :: resolved)
+              ({ reference; skill; task_ids } :: resolved)
               unprojectable
               rest
           | Keeper_skill_catalog.Entry_unavailable error ->
@@ -464,9 +463,9 @@ module Task_surface_map = Map.Make (String)
    advertised it. Callers pass the already-frozen [selection]; this function
    never re-resolves, so the turn-boundary freeze contract stays intact.
 
-   The projection comes from [Keeper_capability_surface.create], the call the
-   executable bundle makes, so a composition the surface withholds is
-   advertised as unavailable here too rather than as a callable tool. *)
+   The projection comes from [Keeper_capability_surface.create_with_descriptors],
+   over the Tool descriptors the selection is bound to, or every descriptor
+   for a selection bound to none. *)
 let exact_task_surfaces
       ~snapshot
       ~tool_deny

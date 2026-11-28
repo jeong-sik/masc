@@ -26,7 +26,6 @@ type error = Keeper_task_skill_resolution_error.t =
 type selected = private
   { reference : Skill_reference.t
   ; skill : Keeper_skill_catalog.skill
-  ; diagnostic : Keeper_skill_catalog.error option
   ; task_ids : string list
   }
 

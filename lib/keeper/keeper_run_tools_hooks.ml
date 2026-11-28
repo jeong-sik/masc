@@ -65,7 +65,6 @@ type agent_setup =
   ; spend_attempts : unit -> Keeper_turn_spend.attempt list
       (** What every dispatched attempt so far reported about its spend. *)
   ; acc : hook_accumulator
-  ; all_tool_names : string list
   ; skill_projection_diagnostics : Keeper_skill_catalog.projection_diagnostic list
   ; receipt_agent_core_turn_count_ref : int option ref
   ; receipt_model_used_ref : string option ref
@@ -80,7 +79,6 @@ type ctx =
   ; acc : hook_accumulator
   ; agent_cell : Agent_core.Agent.t option ref
   ; agent_name : string
-  ; all_tool_names : string list
   ; tool_reach : string -> Keeper_tool_reach.t option
         (** Where a call of this model-facing tool name reaches, from the
             descriptor the turn offers under that name. [None] for a name no
@@ -296,7 +294,6 @@ let assemble_hooks
      onto the wrong list. *)
   let built_tools = ctx.tools in
   let turn_agent_cell = ctx.agent_cell in
-  let all_tool_names = ctx.all_tool_names in
   let deferred_tool_names = ctx.deferred_tool_names in
   let initial_schema_filter, initial_turn_lane =
     compute_tool_surface
@@ -656,16 +653,14 @@ let assemble_hooks
                 (* Deferred tool names follow the current execution owner.
                    A prior Agent Core cell can survive official-client
                    failover; it cannot describe that client's tools or loader. *)
-                let built_tools, _all_tool_names, deferred_tool_names =
+                let built_tools, deferred_tool_names =
                   match ctx.current_model_surface () with
-                  | None -> built_tools, all_tool_names, deferred_tool_names
+                  | None -> built_tools, deferred_tool_names
                   | Some view ->
                     let deferred = match view.listing with
                       | Keeper_tools_agent_core.No_listing -> []
                       | Listing {deferred_builtin_names} -> deferred_builtin_names in
-                    view.tools,
-                    List.map (fun (tool : Agent_core.Tool.t) -> tool.schema.name) view.tools,
-                    deferred
+                    view.tools, deferred
                 in
                 let attempt_surface = Keeper_agent_tool_surface.for_attempt
                     ~checkpoint_owner:!active_checkpoint_owner
@@ -1126,7 +1121,6 @@ let assemble_hooks
       ; observe_official_client_usage_report
       ; spend_attempts = (fun () -> Keeper_turn_spend.attempts !spend)
       ; acc
-      ; all_tool_names
       ; skill_projection_diagnostics
       ; receipt_agent_core_turn_count_ref
       ; receipt_model_used_ref

@@ -377,18 +377,6 @@ let prepare_agent_setup
          (Keeper_skill_catalog.error_to_string diagnostic.error))
     preparation.diagnostics;
   List.iter
-    (fun (selected : Keeper_task_skill_turn.selected) ->
-       Option.iter
-         (fun diagnostic ->
-            Log.Keeper.warn
-              "Task Skill frozen as instruction for keeper=%s snapshot_revision=%s reference=%s error=%s"
-              meta.name
-              snapshot_rev
-              (Skill_reference.to_yojson selected.reference |> Yojson.Safe.to_string)
-              (Keeper_skill_catalog.error_to_string diagnostic))
-         selected.diagnostic)
-    task_skill_selection.selected;
-  List.iter
     (fun (row : Keeper_task_skill_turn.unprojectable) ->
        Log.Keeper.warn
          "Task Skill unavailable this turn for keeper=%s snapshot_revision=%s reference=%s task_ids=%s reason=%s error=%s"
@@ -893,7 +881,6 @@ let prepare_agent_setup
     ; acc
     ; agent_cell
     ; agent_name
-    ; all_tool_names
     ; tool_reach =
         (* The hook hears the model-facing name, which is the one name the
            bundle gave the descriptor (Keeper_tool_descriptor.keeper_model_names). *)

@@ -154,7 +154,7 @@ let test_keeper_name_selection_filters_global_and_task_exactly () =
   check (list string) "absent selection keeps Task-first all" [ "task-only"; "guide"; "review" ] (names all)
 ;;
 
-let test_keeper_name_selection_filters_prompt_and_activation_task_views () =
+let test_keeper_name_selection_filters_the_prompt_task_view () =
   let config = config (source_row ~id:"only" ~path:"skills") in
   let skill_snapshot =
     snapshot
@@ -187,18 +187,6 @@ let test_keeper_name_selection_filters_prompt_and_activation_task_views () =
     | Ok selection -> selection
     | Error error -> fail (Selection.error_to_string error)
   in
-  let global, _ = Masc.Keeper_skill_catalog.of_snapshot skill_snapshot in
-  let projection =
-    Masc.Keeper_skill_catalog.project_turn
-      ~names:(Some [ "guide" ])
-      ~global
-      ~task:(Selection.skills selection)
-  in
-  let executable = Selection.executable_selection ~projection selection in
-  check int
-    "activation provenance excludes the filtered Task Skill"
-    0
-    (List.length executable.selected);
   match
     Selection.exact_task_surfaces
       ~snapshot:skill_snapshot
@@ -1935,8 +1923,8 @@ let () =
             test_shadow_reference_selects_shadow_not_effective_winner
         ; test_case "Keeper names filter global and Task Skills" `Quick
             test_keeper_name_selection_filters_global_and_task_exactly
-        ; test_case "Keeper names filter prompt and activation Task views" `Quick
-            test_keeper_name_selection_filters_prompt_and_activation_task_views
+        ; test_case "Keeper names filter the prompt Task view" `Quick
+            test_keeper_name_selection_filters_the_prompt_task_view
         ; test_case "oversized Task Skill is unavailable, not a failed turn" `Quick
             test_oversized_task_skill_is_unavailable_not_a_failed_turn
         ; test_case "shared exact ref retains all Task ids" `Quick

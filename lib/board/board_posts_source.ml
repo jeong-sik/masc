@@ -361,12 +361,30 @@ let write store ~pre_write ~kind ~workspace_observation ~bytes ~diagnostics perf
     write_raised store ~pre_write ~kind ~bytes ~diagnostics
       exception_ (Printexc.get_raw_backtrace ())
 
+(* #55449: whether one more read of the same file can end a refusal. A cursor
+   or content mismatch is raised by a write alone and says the file is no
+   longer the one observed. A path that changed during the operation and a
+   contended lock end when the other writer does. The rest describe the file
+   as it is (a torn tail, a second hard link, not a regular file) or an
+   operation that failed: reading again meets the same thing, and a source
+   that kept asking would read the whole file at every operation. *)
+let rec fresh_read_can_clear = function
+  | Fs_compat.Cursor_mismatch _ | Transaction_content_changed _
+  | Transaction_path_binding_changed _ | Stable_lock_contended _ -> true
+  | Transaction_settlement_failed { primary = Transaction_failed error; _ } -> fresh_read_can_clear error
+  | Incomplete_transaction_tail _ | Ambiguous_transaction_file_identity _
+  | Unexpected_transaction_file_kind _ | Unexpected_stable_lock_permissions _
+  | Invalid_stable_lock_state _ | Invalid_transaction_suffix | Private_jsonl_operation_failed _
+  | Rewrite_stage_failed _ | Rewrite_published_durability_unknown _
+  | Transaction_settlement_failed { primary = Transaction_succeeded _; _ }
+  | Transaction_append_failed _ -> false
+
 (* A refusal caused by the file moving away from this store's observation
    (another writer appended, replaced or rewrote it) proves only that the old
    observation is stale. Every later write reuses that stale expectation, so
    without a fresh read the store refuses forever (task-4036). *)
 let stale_observation = function
-  | Posts_transaction_failed error -> contradicts_observation error
+  | Posts_transaction_failed error -> fresh_read_can_clear error
   | Posts_not_observed | Posts_rows_rejected _ | Posts_missing
   | Posts_source_binding_mismatch | Posts_policy_source_is_posts_source
   | Posts_snapshot_stale | Posts_workspace_binding_refused _ | Posts_raised _ -> false
@@ -384,6 +402,10 @@ let reobserve store = match store.posts_source with
   | Posts_refused { failure; _ } ->
     if stale_observation failure then Reobserved (read_source store) else Reobservation_not_due
   | Posts_unsettled _ -> Unsettled_write_pending
+
+let reobservation_due store = match store.posts_source with
+  | Posts_refused { failure; _ } -> stale_observation failure
+  | Posts_unobserved | Posts_readable _ | Posts_unsettled _ -> false
 
 let observe_guard_refusal store observation failure =
   match store.posts_source with

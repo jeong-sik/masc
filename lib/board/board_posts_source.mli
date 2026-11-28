@@ -58,6 +58,9 @@ val reobserve : store -> reobservation
     proves the store's observation stale, so a write refused because another
     writer appended does not refuse every later write. *)
 
+val reobservation_due : store -> bool
+(** Pure. Whether {!reobserve} would read the file. *)
+
 val failure_to_board_error : posts_source_failure -> board_error
 val finish_write : posts_write_outcome -> (unit, board_error) result
 val finish_read : posts_source_read -> unit
@@ -78,6 +81,13 @@ val reserved_transaction :
   Fs_compat.private_jsonl_transaction_error ->
   (exn * Printexc.raw_backtrace) option
 val definitely_not_written : Fs_compat.private_jsonl_transaction_error -> bool
+
+val fresh_read_can_clear : Fs_compat.private_jsonl_transaction_error -> bool
+(** Whether one more read of the same file can end a refusal with this cause:
+    a cursor or content mismatch, a path that changed during the operation, or
+    a contended lock. A torn tail, a second hard link, a file that is not
+    regular and a failed operation are met again by the next read. Every
+    Board source asks this before it reads again (#55449). *)
 val propagate_reserved : exn -> Printexc.raw_backtrace -> unit
 val defer_reserved :
   result:(unit, board_error) result -> exn -> Printexc.raw_backtrace -> unit

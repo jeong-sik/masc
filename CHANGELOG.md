@@ -543,12 +543,13 @@
   own shell, file, web, todo and skill tools are no longer offered (#55128).
 - A delivery evidence read of the reaction ledger now waits for its cache lock on the caller before it is submitted to the CPU pool, so the wait no longer holds a pool slot and checkpoint encoding no longer queues behind it (#55171).
 - The TUI Keeper detail now says how long a failing Keeper has been failing. Its failure line adds "실패 시작 <age> 전" after the last failure while the Keeper is running and failing, degraded or recovering; without the server's `failing_since` it adds nothing (#55226).
-- A server restart no longer outruns the start watchdog while it closes the
-  turns the previous process left open. Each Keeper's open turn now closes
-  from the checkpoint head and the open messages' objects alone, instead of
-  loading and saving the Keeper's whole history before the server is ready
-  (13-17 s per Keeper with 28-80 MB of history, one Keeper after another, on
-  the 11-27 restart that the 240 s watchdog ended) (#55235).
+- Closing the turns the previous process left open no longer loads and
+  saves each Keeper's whole history before the server is ready. Each
+  Keeper's open turn now closes from the checkpoint head and the open
+  messages' objects alone. On the 11-27 restart that the 240 s start
+  watchdog ended, the old step took 13-17 s per Keeper with 28-80 MB of
+  history, one Keeper after another; the new step has not been timed on
+  production data (#55235).
 - Enforce pending policy revocations in `Authz_decision.evaluate`, normalize trailing slashes in `Authz_presence`, reject `.`/`..` keeper names in `Playground_paths`, rewrite `Subst` inside delegated shell stages, cap Bash substitution nesting depth, apply `structural_refusal` in `lower_typed_pipeline`, and guard `Voice_pcm` short/truncated WAV reads (#55245)
 - Bound Unix-fallback stderr capture with `Exec_buffer`, make `Forked_map` signal/EINTR/cancellation-safe, track dispatch before revoking `Lane_addon_worker_protocol` / stopping `Lane_addon_native_worker`, propagate cancellation in `Lane_addon_declaration.replacement_result`, re-read canonical rows in `Lane_addon_asks` and catch `Sys_error` in `declarations`, and harden `Browser_upload_lease` cleanup and ENOENT anchor recovery (#55246)
 - Pre-stage Antigravity OAuth files before keychain clear and offload `import_signed_in` to a systhread, release failed keychain preparation claims in `Runtime_antigravity_home`, synchronize MCP HTTP tool reservations and drain turns atomically with real JSON-RPC error ids, require `Awaiting_initialized` on `notifications/initialized`, propagate operator interrupts and reserved exceptions in `Runtime_agent`, isolate sparse retraction watermarks in `Runtime_provider_usage_observations`, and report exact missing-slot errors in `Runtime_lane_edit.plan_replace_exact_slot` (#55247)

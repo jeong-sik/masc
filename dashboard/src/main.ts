@@ -8,6 +8,7 @@ import './styles/shell.css'
 import './styles/charts.css'
 import './styles/chat.css'
 import './styles/surfaces.css'
+import './styles/user-prefs.css'
 
 import { render } from 'preact'
 import { html } from 'htm/preact'
@@ -18,9 +19,11 @@ import {
   resolveInitialContrast,
   resolveInitialTheme,
 } from './lib/theme'
+import { initUserPrefs } from './lib/user-prefs'
 
 applyTheme(resolveInitialTheme())
 applyContrast(resolveInitialContrast())
+initUserPrefs()
 
 const root = document.getElementById('app')
 if (root) {

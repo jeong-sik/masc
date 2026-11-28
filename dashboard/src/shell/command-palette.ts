@@ -38,6 +38,14 @@ import {
 } from '../routes/router'
 import { ShellIcon } from './icons'
 import {
+  cycleDensityPref,
+  resolveEffectiveBaseTheme,
+  stepUiScale,
+  updateUserPrefs,
+  userPrefs,
+  type ThemePreset,
+} from '../lib/user-prefs'
+import {
   activeContrast,
   activeTheme,
   closeCommandPalette,
@@ -45,6 +53,7 @@ import {
   pushShellToast,
   recordIncident,
   refreshPendingHitl,
+  setThemeMode,
   toggleHighContrast,
   toggleIncidentsOverlay,
   toggleQueueContextOverlay,
@@ -248,9 +257,20 @@ export function buildPaletteCommands(session: AuthSession): readonly PaletteComm
     },
   )
 
-  // 5. Theme & High-Contrast Toggles
+  // 5. Theme, Appearance & Audio Preferences
   const currentTheme = activeTheme.peek()
   const currentContrast = activeContrast.peek()
+  const currentPrefs = userPrefs.peek()
+  const applyPresetFromPalette = (preset: ThemePreset, label: string) => {
+    const next = updateUserPrefs({ theme: preset })
+    const base = resolveEffectiveBaseTheme(next.theme)
+    if (activeTheme.peek() !== base) {
+      setThemeMode(base)
+      updateUserPrefs({ theme: preset })
+    }
+    pushShellToast(`테마 변경: ${label}`, 'info')
+  }
+
   cmds.push(
     {
       id: 'theme:toggle',
@@ -267,6 +287,60 @@ export function buildPaletteCommands(session: AuthSession): readonly PaletteComm
       },
     },
     {
+      id: 'theme:preset-system',
+      label: 'Theme: System Auto (OS Color Scheme)',
+      category: 'Theme',
+      keywords: ['theme', 'system', 'auto', 'os', '테마', '시스템'],
+      group: 'Theme',
+      subtitle: currentPrefs.theme === 'system' ? 'Active' : 'Follow OS light/dark preference',
+      run: () => applyPresetFromPalette('system', 'System Auto'),
+    },
+    {
+      id: 'theme:preset-dark',
+      label: 'Theme: Dark · Tempered Slate',
+      category: 'Theme',
+      keywords: ['theme', 'dark', 'slate', 'default', '다크'],
+      group: 'Theme',
+      subtitle: currentPrefs.theme === 'dark' ? 'Active' : 'Default OKLCH dark palette',
+      run: () => applyPresetFromPalette('dark', 'Dark · Tempered Slate'),
+    },
+    {
+      id: 'theme:preset-midnight',
+      label: 'Theme: Midnight · OLED',
+      category: 'Theme',
+      keywords: ['theme', 'midnight', 'oled', 'black', '미드나잇'],
+      group: 'Theme',
+      subtitle: currentPrefs.theme === 'midnight' ? 'Active' : 'Deep OLED black palette',
+      run: () => applyPresetFromPalette('midnight', 'Midnight · OLED'),
+    },
+    {
+      id: 'theme:preset-ash',
+      label: 'Theme: Ash · Cool Slate',
+      category: 'Theme',
+      keywords: ['theme', 'ash', 'cool', 'slate', '애쉬'],
+      group: 'Theme',
+      subtitle: currentPrefs.theme === 'ash' ? 'Active' : 'Soft cool slate palette',
+      run: () => applyPresetFromPalette('ash', 'Ash · Cool Slate'),
+    },
+    {
+      id: 'theme:preset-light',
+      label: 'Theme: Light · Warm Paper',
+      category: 'Theme',
+      keywords: ['theme', 'light', 'paper', 'archival', '라이트'],
+      group: 'Theme',
+      subtitle: currentPrefs.theme === 'light' ? 'Active' : 'Warm Archival Paper',
+      run: () => applyPresetFromPalette('light', 'Light · Warm Paper'),
+    },
+    {
+      id: 'theme:preset-paper-sepia',
+      label: 'Theme: Paper · Sepia Parchment',
+      category: 'Theme',
+      keywords: ['theme', 'sepia', 'parchment', 'warm', '세피아'],
+      group: 'Theme',
+      subtitle: currentPrefs.theme === 'paper-sepia' ? 'Active' : 'Warm sepia parchment',
+      run: () => applyPresetFromPalette('paper-sepia', 'Paper · Sepia'),
+    },
+    {
       id: 'theme:high-contrast',
       label: currentContrast === 'high'
         ? 'Theme: Disable High-Contrast Mode'
@@ -279,6 +353,77 @@ export function buildPaletteCommands(session: AuthSession): readonly PaletteComm
         const next = toggleHighContrast()
         pushShellToast(`고대비 모드: ${next === 'high' ? '켜짐 (Lc ≥ 90)' : '기본'}`, 'info')
       },
+    },
+    {
+      id: 'theme:cycle-density',
+      label: `Theme: Cycle UI Density (${currentPrefs.density})`,
+      category: 'Theme',
+      keywords: ['density', 'compact', 'normal', 'comfortable', 'spacing', '밀도'],
+      group: 'Theme',
+      subtitle: 'compact → normal → comfortable',
+      run: () => {
+        const next = cycleDensityPref()
+        pushShellToast(`UI 밀도 변경: ${next}`, 'info')
+      },
+    },
+    {
+      id: 'theme:zoom-in',
+      label: `Theme: Zoom UI Scale In (${Math.round(currentPrefs.uiScale * 100)}%)`,
+      category: 'Theme',
+      keywords: ['zoom', 'scale', 'font', 'bigger', '확대', '글꼴'],
+      group: 'Theme',
+      subtitle: '+5% UI scale (max 135%)',
+      run: () => {
+        const next = stepUiScale(0.05)
+        pushShellToast(`UI 배율: ${Math.round(next * 100)}%`, 'info')
+      },
+    },
+    {
+      id: 'theme:zoom-out',
+      label: `Theme: Zoom UI Scale Out (${Math.round(currentPrefs.uiScale * 100)}%)`,
+      category: 'Theme',
+      keywords: ['zoom', 'scale', 'font', 'smaller', '축소', '글꼴'],
+      group: 'Theme',
+      subtitle: '-5% UI scale (min 85%)',
+      run: () => {
+        const next = stepUiScale(-0.05)
+        pushShellToast(`UI 배율: ${Math.round(next * 100)}%`, 'info')
+      },
+    },
+    {
+      id: 'theme:zoom-reset',
+      label: 'Theme: Reset UI Scale to 100%',
+      category: 'Theme',
+      keywords: ['zoom', 'scale', 'reset', '100%', '초기화'],
+      group: 'Theme',
+      subtitle: `Current: ${Math.round(currentPrefs.uiScale * 100)}%`,
+      run: () => {
+        updateUserPrefs({ uiScale: 1 })
+        pushShellToast('UI 배율: 100%', 'info')
+      },
+    },
+    {
+      id: 'audio:toggle-mute',
+      label: currentPrefs.muted
+        ? 'Audio: Unmute Notification Sounds'
+        : 'Audio: Mute Notification Sounds',
+      category: 'Theme',
+      keywords: ['audio', 'sound', 'mute', 'unmute', 'volume', '음소거', '소리', '오디오'],
+      group: 'Theme',
+      subtitle: currentPrefs.muted ? 'Currently muted' : `Volume ${Math.round(currentPrefs.masterVolume * 100)}%`,
+      run: () => {
+        const next = updateUserPrefs({ muted: !userPrefs.peek().muted })
+        pushShellToast(next.muted ? '알림음 음소거됨' : '알림음 음소거 해제됨', 'info')
+      },
+    },
+    {
+      id: 'setting:appearance-audio-prefs',
+      label: 'Setting: Open Appearance & Audio Preferences',
+      category: 'Setting',
+      keywords: ['appearance', 'audio', 'theme', 'sound', 'font', 'density', '화면', '오디오', '설정'],
+      group: 'Setting',
+      subtitle: '/account/profile — Available to all roles',
+      run: () => navigate('/account/profile'),
     },
   )
 
@@ -457,8 +602,8 @@ export function CommandPalette(): VNode | null {
   const commands = useMemo(
     () => buildPaletteCommands(session),
     // Recompute on any AuthSession change (including single_user_local role,
-    // canTokenAdmin, canTokenRead) or theme/contrast changes.
-    [session, activeTheme.value, activeContrast.value],
+    // canTokenAdmin, canTokenRead) or theme/contrast/userPrefs changes.
+    [session, activeTheme.value, activeContrast.value, userPrefs.value],
   )
   const searcher = useMemo(() => createCommandSearcher(commands), [commands])
   const results = useMemo(() => searcher.search(query, 30), [searcher, query])

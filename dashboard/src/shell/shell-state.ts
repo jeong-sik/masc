@@ -36,6 +36,8 @@ import {
 import {
   applyContrast,
   applyTheme,
+  onContrastApplied,
+  onThemeApplied,
   persistContrast,
   persistTheme,
   resolveInitialContrast,
@@ -174,6 +176,18 @@ export function installViewportListener(): () => void {
 
 export const activeTheme = signal<ThemeId>(resolveInitialTheme())
 export const activeContrast = signal<ContrastId | null>(resolveInitialContrast())
+
+onThemeApplied((theme) => {
+  if (activeTheme.peek() !== theme) {
+    activeTheme.value = theme
+  }
+})
+
+onContrastApplied((contrast) => {
+  if (activeContrast.peek() !== contrast) {
+    activeContrast.value = contrast
+  }
+})
 
 export function setThemeMode(theme: ThemeId): void {
   activeTheme.value = theme

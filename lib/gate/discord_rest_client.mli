@@ -248,6 +248,55 @@ val send_embed_message :
 
 (** [edit_embed_message] patches a message with updated content/embeds. *)
 
+(** {1 File upload} *)
+
+type upload
+(** One file for a Create Message request: name, media type, optional alt
+    text and bytes, each already checked for the multipart wire. *)
+
+val upload :
+  filename:string ->
+  media_type:string ->
+  ?description:string ->
+  string ->
+  (upload, string) result
+(** [upload ~filename ~media_type ?description bytes] checks one file.
+    [Error] when [filename] is empty, not UTF-8, or holds a quote, backslash,
+    slash, CR, LF or NUL (it travels in a quoted Content-Disposition
+    parameter); when [media_type] is not an RFC 6838 [type/subtype]; or when
+    [description] (the alt text) is not UTF-8 or exceeds Discord's 1024
+    characters. [bytes] travel unchanged; an empty file is allowed. *)
+
+val upload_filename : upload -> string
+
+val send_files :
+  ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
+  ?timeout_sec:float ->
+  token:string ->
+  channel_id:string ->
+  ?content:string ->
+  ?reply_to_message_id:string ->
+  ?allowed_user_mentions:string list ->
+  ?nonce:nonce ->
+  files:upload * upload list ->
+  unit ->
+  (string, error) result
+(** [send_files ~token ~channel_id ~files ()] posts one message carrying
+    [files] as attachments: [POST /api/v10/channels/{channel_id}/messages]
+    as [multipart/form-data], a [payload_json] part and one [files[n]] part
+    per file in order (Discord "Uploading Files"). [content] is sent as given;
+    callers keep it within {!message_content_limit}. [allowed_user_mentions]
+    has the same meaning as for {!send_message}: the only user snowflakes
+    Discord may notify, all mentions suppressed when empty. A reply does not
+    ping the original author.
+
+    Discord enforces the per-file size limit, which depends on the server's
+    boost tier, and answers an oversized file with a typed {!error}; this
+    client does not guess the limit. The default [timeout_sec] is the shared
+    HTTP default, which a large file on a slow uplink can exceed.
+
+    Returns the created message id on [Ok]. *)
+
 (** {1 Internal — exposed for unit testing}
 
     These functions decompose [send_message] so request shape and
@@ -344,6 +393,34 @@ val build_embed_request :
   string * (string * string) list * string
 (** Embed variant of {!build_request}. Body contains [embeds] array
     when embeds are provided. Exposed for unit testing. *)
+
+type boundary
+(** A multipart boundary: 1 to 70 letters, digits and ["-"] (RFC 2046). *)
+
+val boundary_of_string : string -> (boundary, string) result
+
+type upload_build_error =
+  | Boundary_in_payload
+    (** The boundary's delimiter ["--" ^ boundary] occurs inside the JSON
+        payload or a file, where it would end the part early. *)
+
+val build_upload_request :
+  token:string ->
+  channel_id:snowflake ->
+  boundary:boundary ->
+  ?content:string ->
+  ?reply_to_message_id:snowflake ->
+  ?allowed_user_mentions:snowflake list ->
+  ?nonce:nonce ->
+  files:upload * upload list ->
+  unit ->
+  (string * (string * string) list * string, upload_build_error) result
+(** Multipart variant of {!build_request}: [(url, headers, body)] where
+    [Content-Type] names [boundary]. The [payload_json] part lists
+    [attachments] with [id] [n] matching [files[n]], the filename and the
+    alt text when given; it carries the same fail-closed [allowed_mentions],
+    reply reference and nonce fields as {!build_request}.
+    {!send_files} draws a fresh boundary on [Error]. *)
 
 val parse_response :
   ?request_id:string ->

@@ -31,8 +31,8 @@ type snapshot = {
   task_id : string option;
   task_count : int;
   lines : output_line list;
-      (** The newest {!snapshot_line_limit} rows the log retains, oldest
-          first. *)
+      (** At most the newest {!snapshot_line_limit} rows the log retains,
+          oldest first. *)
   lines_omitted : int;
       (** How many older rows the log still retains but [lines] leaves out
           for {!snapshot_line_limit}. *)

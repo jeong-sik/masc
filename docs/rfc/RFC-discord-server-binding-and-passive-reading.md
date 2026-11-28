@@ -27,7 +27,7 @@ This RFC adds a server binding (a guild id bound to a Keeper), resolved after
 channel and thread bindings, and gives each binding its own stance: which
 messages start a turn, and what happens to the messages that do not. The new
 stance `passive` records an unmentioned message as conversation the Keeper
-reads later, without putting it in the Keeper's queue.
+reads when a later Discord turn starts in that conversation, without putting it in the Keeper's queue.
 
 Operator decisions (2026-11-28): the default trigger is a mention; whether
 unmentioned messages are kept is an option; kept messages are read passively.
@@ -55,9 +55,7 @@ type binding_target =
   | Server of string    (* Discord guild snowflake *)
 ```
 
-A binding row becomes `{ target; keeper_name; stance }`. Telegram and iMessage
-only ever write `Channel`. Slack keeps `Channel` until a Slack workspace
-binding is designed; nothing here requires it.
+A Discord binding row is `{ target; keeper_name; stance }`. The target and stance are Discord types. Slack, Telegram and iMessage retain their current channel-only row, codec, and policies.
 
 Resolution for a message with `channel_id`, optional thread parent and
 optional `guild_id`, first match wins:
@@ -91,14 +89,11 @@ does today (`message_passes_policy`). `unmentioned` decides what happens to a
 message that does not start one. "Unmentioned" names the operator's mental
 model; precisely it means "did not pass this binding's trigger".
 
-Defaults for a new binding: `trigger = None` (the global policy, currently
-`mention_only` in the production `runtime.toml`) and `unmentioned = Passive`.
+Ingress resolves the binding once before classifying a Discord message. The gateway state machine decodes the event and provides its thread parent, guild and message facts. The binding resolver supplies the effective stance. Only then does ingress apply `message_passes_policy` to select the triggered, passive, wake or ignore path. All delivery and observation paths use this decision.
 
-`Passive` writes the same chat line and external-attention row as `Wake` and
-skips only `Server_connector_attention_delivery.deliver`. The attention row
-keeps the event as evidence; the absent queue entry means no Keeper owes a
-judgement. When the Keeper is next in that conversation (a mention, or its own
-cycle), the recorded lines are part of what it reads.
+Defaults for a new server or guild-channel binding are inherited trigger and `unmentioned = Passive`. A bound DM without an explicit trigger starts a turn on each ordinary human message. An explicit DM trigger uses the same binding policy as a guild channel. DMs never inherit a server binding.
+
+`Passive` writes the chat line and external-attention evidence and skips `Server_connector_attention_delivery.deliver`. The next triggered Discord turn reads earlier passive rows from the same guild/channel (or exact thread) and current binding owner up to the triggering event, in source order. The existing prompt context budget bounds the slice. Parent-channel and sibling-thread messages stay separate. The turn labels external authors and message bodies as quoted conversation data. It records the last included message identity for observation. A standalone Keeper cycle does not inject the rows automatically; it can read them through `keeper_surface_read` under the same binding checks.
 
 `handle_ambient` today states that no flag may suppress the stimulus. That
 sentence is rewritten, not worked around: the stance is the operator's
@@ -108,7 +103,7 @@ window, and it never consumes an entry that was enqueued.
 
 ### 2.3 Store and wire (hard cut)
 
-`bindings.json` rows become:
+The Discord `bindings.json` becomes an array of rows. A duplicate `(target.kind, target.id)` is a decode error. For example:
 
 ```json
 { "target": { "kind": "server", "id": "123" },
@@ -120,7 +115,7 @@ window, and it never consumes an entry that was enqueued.
 `trigger` is absent when it inherits. The decoder is strict: an unknown
 `kind` or `unmentioned` value, or the old `channel_id` row shape, is a decode
 error. No reader or converter for the old shape is written (`legacy_residue`):
-production has zero bindings (§1), and other installations re-bind.
+production has zero Discord bindings (§1), and other Discord installations re-bind. This cut applies to the Discord codec only. Other connectors keep their current files and reject Discord-only options at their HTTP boundary.
 
 ### 2.4 Surfaces
 
@@ -135,6 +130,8 @@ production has zero bindings (§1), and other installations re-bind.
   that channel resolves to it through §2.1. The channel's guild comes from the
   directory refresh (`get_guild_channels`), or from `get_channel` when the
   directory does not know it yet.
+- Persist `guild_id` and the thread parent with inbound Discord origins. Operator reply and inbound media must re-resolve the recorded origin against the current binding before acting. If guild identity is unknown, a server match needs a confirmed lookup; never infer it from a channel name.
+- Use the same resolver for `keeper_surface_read`, the tool binding projection, and the channel directory refresh. Store the channel-to-guild and thread-to-parent relations from Discord API responses so status and tool paths agree.
 - Presence (`Discord_presence_bridge`): a Keeper with any Discord binding,
   channel or server, counts as bound.
 
@@ -167,15 +164,10 @@ production has zero bindings (§1), and other installations re-bind.
 
 Each layer stays within the constitution's work unit.
 
-1. Store: `binding_target`, `stance`, strict codec, resolver with
-   `matched_by`; shared-store callers (Slack, Telegram, iMessage) write
-   `Channel`. Tests: decode refuses the old shape; resolution order
-   Exact > Parent > Server; DM never matches a server.
-2. Ingress: per-binding trigger and `unmentioned` in
-   `accept_message_create` / `handle_ambient`. Tests: `Passive` writes the chat
-   line and attention row and no queue entry; `Ignore` writes nothing.
-3. Surfaces: HTTP bind/unbind, status JSON, dashboard Quick Bind, TUI form.
-4. `keeper_surface_post` and presence for server bindings; connector docs.
+1. Discord codec and resolver. Check exact > parent > server, duplicate rejection, DM isolation, and unchanged Slack/Telegram/iMessage files.
+2. Ingress. Resolve before applying stance and carry guild/parent in origins. Check per-binding override, default DM wake, passive records without enqueue, and ignore with no records.
+3. HTTP, Dashboard, TUI, directory/status, tool reads/posts, presence, operator replies and inbound media. Verify a server-bound origin via its guild and reject it after the binding moves.
+4. Triggered-turn context. Check that an earlier passive message appears as quoted context for a later trigger in the same thread, without starting its own turn or mixing parent/sibling rows. Enable the passive default after this layer lands with the others.
 
 ## 6. Verification
 
@@ -183,6 +175,6 @@ Each layer stays within the constitution's work unit.
 - Live, after deployment: bind the test server with defaults, then post (a) an
   unmentioned message in an unbound channel of that server, (b) a mention.
   Expected: (a) a chat row and attention row, no `Connector_attention` queue
-  entry, no turn; (b) a turn and a reply. Evidence: the connector status JSON,
+  entry, no turn; (b) a turn whose quoted conversation includes (a), and a reply. Evidence: the connector status JSON,
   the Keeper chat store rows, and the Discord observability counters
   (`record_inbound_dispatch`, `record_ambient`), attached to the PR.

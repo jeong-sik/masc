@@ -3,7 +3,8 @@
 import { html } from 'htm/preact'
 import { render } from 'preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { authSession, resetAuthStateForTests, resourceCache } from '../../core'
+import { authSession, bumpSessionEpoch, resetAuthStateForTests, resourceCache } from '../../core'
+import { resetShellStateForTests, shellToasts } from '../../shell/shell-state'
 import { RuntimeWorkspace } from './index'
 import { listing, manifest, restored, show } from './presets-wire.test-fixture'
 
@@ -99,6 +100,8 @@ describe('Runtime → Prompts → 프리셋', () => {
 
   afterEach(() => {
     render(null, container)
+    bumpSessionEpoch()
+    resetShellStateForTests()
     container.remove()
     resourceCache.clearAll()
     globalThis.fetch = originalFetch
@@ -187,7 +190,7 @@ describe('Runtime → Prompts → 프리셋', () => {
     const listingReads = server.reads('/api/v1/presets')
     click('[data-testid="preset-save"]')
     await vi.waitFor(() => expect(server.reads('/api/v1/presets')).toBeGreaterThan(listingReads))
-    expect(container.querySelector('[data-testid="preset-save-refusal"]')).toBeNull()
+    expect(container.querySelector('[data-testid="preset-refusal"]')).toBeNull()
   })
 
   it('says the outcome is unknown and reads the lists again when no answer came back', async () => {
@@ -216,24 +219,51 @@ describe('Runtime → Prompts → 프리셋', () => {
     const report = container.querySelector('[data-testid="preset-restore-report"]')!.textContent!
     expect(report).toContain('keeper TOML not found')
     expect(report).toContain('capability catalog')
+    expect(report).toContain('일부만 복원했어요')
+    expect(shellToasts.value.at(-1)?.tone).toBe('warning')
     await vi.waitFor(() => expect(server.reads('/api/v1/prompts')).toBe(catalogReads + 1))
     await vi.waitFor(() => expect(server.reads(SHOW_DEFAULT)).toBeGreaterThan(showReads))
     await pick('night')
-    expect(container.querySelector('[data-testid="preset-restore-report"]')).toBeNull()
+    expect(container.querySelector('[data-testid="preset-restore-report"]')?.textContent).toContain('default')
+    click('[data-section="prompts"]')
+    await vi.waitFor(() => expect(container.querySelector('[data-testid="preset-restore-report"]')?.textContent).toContain('default'))
+    click('[data-testid="preset-restore-report"] button')
+    await vi.waitFor(() => expect(container.querySelector('[data-testid="preset-restore-report"]')).toBeNull())
   })
 
-  it('keeps a late restore report off the preset the operator moved to', async () => {
+  it('prevents another preset write after selection or view changes and shows runtime failure', async () => {
     let release: (r: Response) => void = () => {}
-    serve(() => new Promise<Response>(resolve => { release = resolve }))
+    const server = serve(() => new Promise<Response>(resolve => { release = resolve }))
     await open('default')
     click('[data-testid="preset-restore"]')
     await flushUi()
     click('[data-testid="preset-restore-go"]')
     await flushUi()
     await pick('night')
-    release(jsonResponse(restored('default')))
-    await flushUi(100)
-    expect(container.querySelector('[data-testid="preset-restore-report"]')).toBeNull()
+    await vi.waitFor(() => expect(container.querySelector<HTMLButtonElement>('[data-testid="preset-restore"]')?.disabled).toBe(true))
+    click('[data-testid="preset-restore"]')
+    expect(server.posts).toHaveLength(1)
+    click('[data-section="prompts"]')
+    await vi.waitFor(() => expect(container.querySelector('[data-testid="preset-write-pending"]')?.textContent).toContain('default'))
+    release(jsonResponse(restored('default', { status: 'failed', error: 'runtime write failed' })))
+    await vi.waitFor(() => expect(container.querySelector('[data-testid="preset-restore-report"]')?.textContent).toContain('runtime write failed'))
+    expect(shellToasts.value.at(-1)?.tone).toBe('error')
+    expect(container.querySelector('[data-testid="preset-write-pending"]')).toBeNull()
+  })
+
+  it('keeps a refused delete visible after leaving the Presets view', async () => {
+    let release: (r: Response) => void = () => {}
+    serve(() => new Promise<Response>(resolve => { release = resolve }))
+    await open('default')
+    click('[data-testid="preset-delete"]')
+    await flushUi()
+    click('[data-testid="preset-delete-go"]')
+    await flushUi()
+    click('[data-section="prompts"]')
+    await flushUi()
+    release(jsonResponse({ ok: false, error: 'preset default not found' }, 404))
+    await vi.waitFor(() => expect(container.querySelector('[data-testid="preset-refusal"]')?.textContent).toContain('preset default not found'))
+    expect(shellToasts.value.at(-1)?.tone).toBe('error')
   })
 
   it('deletes a readable-named unreadable preset once, and offers nothing for a name the server refuses', async () => {

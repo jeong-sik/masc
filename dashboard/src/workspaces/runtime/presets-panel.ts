@@ -20,6 +20,7 @@
  */
 
 import { html } from 'htm/preact'
+import { signal } from '@preact/signals'
 import { useEffect, useRef, useState } from 'preact/hooks'
 import { apiGet, apiMutate, resourceCache, sessionEpoch, type ApiError, type ApiErrorKind } from '../../core'
 import type { Result } from '../../lib/result'
@@ -28,7 +29,7 @@ import { RefreshButton } from '../../components/primitives'
 import { pushShellToast } from '../../shell/shell-state'
 import { Chip } from './prompt-chip'
 import { loadPresetShow, PresetDetail } from './preset-detail'
-import { RestoreReportView } from './preset-restore-report'
+import { restoreSummary, RestoreReportView } from './preset-restore-report'
 import {
   AUTOSAVE_PRESET,
   decodePresetDeleted,
@@ -85,6 +86,56 @@ function failureOutcome(kind: ApiErrorKind): 'applied' | 'refused' | 'unknown' {
   }
 }
 
+type PresetWrite = { readonly target: string; readonly action: '저장' | '복원' | '삭제' }
+
+type WriteFeedback = {
+  readonly epoch: number
+  readonly active: PresetWrite | null
+  readonly refusal: string | null
+  readonly report: RestoreReport | null
+}
+
+const writeFeedback = signal<WriteFeedback>({ epoch: sessionEpoch.peek(), active: null, refusal: null, report: null })
+sessionEpoch.subscribe(epoch => {
+  if (writeFeedback.peek().epoch !== epoch) {
+    writeFeedback.value = { epoch, active: null, refusal: null, report: null }
+  }
+})
+
+// One write may be in flight even when its originating form or the whole tab is gone.
+function beginWrite(epoch: number, active: PresetWrite): boolean {
+  const before = writeFeedback.peek()
+  if (epoch !== sessionEpoch.peek() || (before.epoch === epoch && before.active !== null)) return false
+  writeFeedback.value = { epoch, active, refusal: null, report: before.epoch === epoch ? before.report : null }
+  return true
+}
+
+function finishWrite(epoch: number, result: Partial<Pick<WriteFeedback, 'refusal' | 'report'>> = {}) {
+  if (epoch !== sessionEpoch.peek()) return
+  writeFeedback.value = { ...writeFeedback.peek(), ...result, active: null }
+}
+
+export function PresetFeedback() {
+  const state = writeFeedback.value
+  if (state.epoch !== sessionEpoch.value) return null
+  return html`
+    ${state.active !== null && html`
+      <div class="wka-card" role="status" data-testid="preset-write-pending">
+        ${state.active.target} 프리셋 ${state.active.action} 중…
+      </div>
+    `}
+    ${state.refusal !== null && html`
+      <div role="alert" class="ap-error" data-testid="preset-refusal">${state.refusal}</div>
+    `}
+    ${state.report !== null && html`
+      <${RestoreReportView} report=${state.report} onDismiss=${() => {
+        const current = writeFeedback.peek()
+        if (current.epoch === sessionEpoch.peek()) writeFeedback.value = { ...current, report: null }
+      }} />
+    `}
+  `
+}
+
 export interface PresetsPanelProps {
   readonly canEdit: boolean
   readonly catalog: PromptCatalog | null
@@ -106,12 +157,10 @@ export function PresetsPanel({ canEdit, catalog, onPromptsChanged }: PresetsPane
   const [selected, setSelected] = useState<string | null>(null)
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
-  const [saving, setSaving] = useState(false)
   const [taken, setTaken] = useState<string | null>(null)
-  const [saveRefusal, setSaveRefusal] = useState<string | null>(null)
-  const [report, setReport] = useState<RestoreReport | null>(null)
   const [unreadableDelete, setUnreadableDelete] = useState<string | null>(null)
-  const [unreadableBusy, setUnreadableBusy] = useState(false)
+  const feedback = writeFeedback.value
+  const busy = feedback.epoch === epoch && feedback.active !== null
   // The selection when an answer arrives, not when the request left.
   const selectedRef = useRef<string | null>(selected)
   selectedRef.current = selected
@@ -150,21 +199,28 @@ export function PresetsPanel({ canEdit, catalog, onPromptsChanged }: PresetsPane
     }
   }
 
+  const refuse = (target: string, action: PresetWrite['action'], out: Extract<Settled<unknown>, { kind: 'refused' | 'unknown' }>) => {
+    const message = `${target} ${action}: ${out.why}`
+    finishWrite(epoch, { refusal: message })
+    pushShellToast(message, out.kind === 'refused' ? 'error' : 'warning')
+  }
+
   const save = async (replace: boolean) => {
-    setSaving(true)
-    setSaveRefusal(null)
+    if (!beginWrite(epoch, { target: trimmed, action: '저장' })) return
     const body = { name: trimmed, description }
     const res = await apiMutate<PresetSaved>('POST', replace ? '/api/v1/presets' : '/api/v1/presets/create', body, { decode: decodePresetSaved })
-    setSaving(false)
+    if (epoch !== sessionEpoch.peek()) return
     if (!res.ok && res.error.kind === 'conflict_cas') {
+      finishWrite(epoch)
       setTaken(trimmed)
       return
     }
     const out = settle(res, `${trimmed} 저장`, false)
     if (out.kind === 'refused' || out.kind === 'unknown') {
-      setSaveRefusal(out.why)
+      refuse(trimmed, '저장', out)
       return
     }
+    finishWrite(epoch)
     if (out.kind === 'done') pushShellToast(`${out.value.preset.name} 프리셋에 지금 상태를 ${replace ? '덮어썼어요' : '저장했어요'}.`, 'success')
     setTaken(null)
     setName('')
@@ -173,37 +229,36 @@ export function PresetsPanel({ canEdit, catalog, onPromptsChanged }: PresetsPane
     void loadPresetShow(trimmed, 'manual')
   }
 
-  const restore = async (target: string): Promise<string | null> => {
+  const restore = async (target: string) => {
+    if (!beginWrite(epoch, { target, action: '복원' })) return
     const res = await apiMutate<PresetRestored>('POST', '/api/v1/presets/restore', { name: target }, { decode: decodePresetRestored })
+    if (epoch !== sessionEpoch.peek()) return
     const out = settle(res, `${target} 복원`, true)
-    switch (out.kind) {
-      case 'refused':
-      case 'unknown':
-        return out.why
-      case 'unreadable':
-        return null
-      case 'done':
-        setReport(out.value.report)
-        pushShellToast(`${target} 을 복원했어요. 이전 상태는 ${out.value.report.autosave} 에 있어요.`, 'success')
-        return null
+    if (out.kind === 'refused' || out.kind === 'unknown') {
+      refuse(target, '복원', out)
+      return
     }
+    if (out.kind === 'done') {
+      const report = out.value.report
+      finishWrite(epoch, { report })
+      const summary = restoreSummary(report)
+      pushShellToast(`${report.restored}: ${summary.text}. 이전 상태는 ${report.autosave} 에 있어요.`, summary.tone)
+    } else finishWrite(epoch)
   }
 
-  const remove = async (target: string): Promise<string | null> => {
+  const remove = async (target: string) => {
+    if (!beginWrite(epoch, { target, action: '삭제' })) return
     const res = await apiMutate<PresetDeleted>('POST', '/api/v1/presets/delete', { name: target }, { decode: decodePresetDeleted })
+    if (epoch !== sessionEpoch.peek()) return
+    setUnreadableDelete(null)
     const out = settle(res, `${target} 삭제`, false)
-    if (out.kind === 'refused' || out.kind === 'unknown') return out.why
+    if (out.kind === 'refused' || out.kind === 'unknown') {
+      refuse(target, '삭제', out)
+      return
+    }
+    finishWrite(epoch)
     if (out.kind === 'done') pushShellToast(`${out.value.deleted} 프리셋을 지웠어요.`, 'success')
     setSelected(current => (current === target ? null : current))
-    return null
-  }
-
-  const removeUnreadable = async (target: string) => {
-    setUnreadableBusy(true)
-    const why = await remove(target)
-    setUnreadableBusy(false)
-    setUnreadableDelete(null)
-    if (why !== null) pushShellToast(`${target}: ${why}`, 'error')
   }
 
   const master = html`
@@ -222,25 +277,24 @@ export function PresetsPanel({ canEdit, catalog, onPromptsChanged }: PresetsPane
           onSubmit=${(e: Event) => { e.preventDefault(); if (nameOk) void save(false) }}
         >
           <div style=${{ display: 'flex', gap: 'var(--sp-1)', flexWrap: 'wrap' }}>
-            <input aria-label="새 프리셋 이름" placeholder="이름 (A-Z a-z 0-9 . _ -)" value=${name} disabled=${saving}
+            <input aria-label="새 프리셋 이름" placeholder="이름 (A-Z a-z 0-9 . _ -)" value=${name} disabled=${busy}
               onInput=${(e: Event) => { setName((e.currentTarget as HTMLInputElement).value); setTaken(null) }}
               style=${{ ...fieldStyle, flex: '1 1 8rem' }} />
-            <input aria-label="새 프리셋 설명" placeholder="설명 (선택)" value=${description} disabled=${saving}
+            <input aria-label="새 프리셋 설명" placeholder="설명 (선택)" value=${description} disabled=${busy}
               onInput=${(e: Event) => setDescription((e.currentTarget as HTMLInputElement).value)}
               style=${{ ...fieldStyle, flex: '2 1 12rem' }} />
-            <button type="submit" class="btn-primary" data-testid="preset-save" disabled=${saving || !nameOk}>지금 상태 저장</button>
+            <button type="submit" class="btn-primary" data-testid="preset-save" disabled=${busy || !nameOk}>지금 상태 저장</button>
           </div>
           ${trimmed !== '' && !nameOk && html`<div style=${{ fontSize: 'var(--fs-11)', color: 'var(--warn-fg)' }}>이름에는 영문, 숫자, 점, 밑줄, 하이픈만 쓸 수 있어요.</div>`}
           ${taken !== null && html`
             <div class="ap-inline-panel ap-inline-panel--err" role="alert" data-testid="preset-taken">
               <span style=${{ fontSize: 'var(--fs-12)', color: 'var(--err-fg)' }}><span class="mono">${taken}</span> 프리셋이 이미 있어요. 지금 상태로 덮어쓸까요?</span>
               <div style=${{ display: 'flex', gap: 'var(--sp-1)' }}>
-                <button type="button" class="btn-primary ap-danger-solid" data-testid="preset-replace" disabled=${saving} onClick=${() => void save(true)}>덮어쓰기</button>
-                <button type="button" class="btn-ghost" disabled=${saving} onClick=${() => setTaken(null)}>취소</button>
+                <button type="button" class="btn-primary ap-danger-solid" data-testid="preset-replace" disabled=${busy} onClick=${() => void save(true)}>덮어쓰기</button>
+                <button type="button" class="btn-ghost" disabled=${busy} onClick=${() => setTaken(null)}>취소</button>
               </div>
             </div>
           `}
-          ${saveRefusal !== null && html`<div role="alert" class="ap-error" data-testid="preset-save-refusal">${saveRefusal}</div>`}
         </form>
       `}
       ${obs.kind === 'failed' && html`<div role="alert" class="ap-error">프리셋 목록을 읽지 못했어요: ${obs.error.message}</div>`}
@@ -252,10 +306,10 @@ export function PresetsPanel({ canEdit, catalog, onPromptsChanged }: PresetsPane
               <span class="mono" style=${{ fontSize: 'var(--fs-11)', overflowWrap: 'anywhere' }}>${u.name}: ${u.reason}</span>
               ${canEdit && isValidPresetName(u.name) && (unreadableDelete === u.name
                 ? html`
-                  <button type="button" class="btn-primary btn-compact ap-danger-solid" data-testid="preset-unreadable-delete-go" disabled=${unreadableBusy} onClick=${() => void removeUnreadable(u.name)}>정말 삭제</button>
-                  <button type="button" class="btn-ghost btn-compact" disabled=${unreadableBusy} onClick=${() => setUnreadableDelete(null)}>취소</button>
+                  <button type="button" class="btn-primary btn-compact ap-danger-solid" data-testid="preset-unreadable-delete-go" disabled=${busy} onClick=${() => void remove(u.name)}>정말 삭제</button>
+                  <button type="button" class="btn-ghost btn-compact" disabled=${busy} onClick=${() => setUnreadableDelete(null)}>취소</button>
                 `
-                : html`<button type="button" class="btn-ghost btn-compact" data-testid="preset-unreadable-delete" disabled=${unreadableBusy} onClick=${() => setUnreadableDelete(u.name)}>삭제</button>`)}
+                : html`<button type="button" class="btn-ghost btn-compact" data-testid="preset-unreadable-delete" disabled=${busy} onClick=${() => setUnreadableDelete(u.name)}>삭제</button>`)}
             </div>
           `)}
         </div>
@@ -268,7 +322,7 @@ export function PresetsPanel({ canEdit, catalog, onPromptsChanged }: PresetsPane
             : listing.presets.map(p => html`
               <div key=${p.name} role="listitem">
                 <button type="button" class="btn-ghost" aria-current=${p.name === selected ? 'true' : undefined}
-                  onClick=${() => { setSelected(p.name); setReport(null) }}
+                  onClick=${() => setSelected(p.name)}
                   style=${{ display: 'flex', flexDirection: 'column', alignItems: 'stretch', gap: 'var(--sp-0)', width: '100%', textAlign: 'left', background: p.name === selected ? 'var(--bg-4)' : undefined }}>
                   <span style=${{ display: 'flex', gap: 'var(--sp-1)', alignItems: 'center', flexWrap: 'wrap' }}>
                     <span class="mono" style=${{ fontSize: 'var(--fs-12)', overflowWrap: 'anywhere' }}>${p.name}</span>
@@ -288,10 +342,7 @@ export function PresetsPanel({ canEdit, catalog, onPromptsChanged }: PresetsPane
   const detail = selected === null
     ? null
     : html`
-      <div style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-2)', minWidth: 0 }}>
-        ${report !== null && report.restored === selected && html`<${RestoreReportView} report=${report} onDismiss=${() => setReport(null)} />`}
-        <${PresetDetail} key=${selected} name=${selected} catalog=${catalog} canEdit=${canEdit} onRestore=${restore} onDelete=${remove} />
-      </div>
+      <${PresetDetail} key=${selected} name=${selected} catalog=${catalog} canEdit=${canEdit} busy=${busy} onRestore=${restore} onDelete=${remove} />
     `
 
   return html`

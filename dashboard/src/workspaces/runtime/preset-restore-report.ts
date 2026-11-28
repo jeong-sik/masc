@@ -69,15 +69,33 @@ export function DefaultPromptsLine({ defaults }: { defaults: DefaultPrompts }) {
   }
 }
 
+export function restoreSummary(report: RestoreReport) {
+  if (report.runtime.status === 'failed') {
+    return { tone: 'error', border: 'var(--err-border)', text: 'Runtime 반영에 실패했어요' } as const
+  }
+  const skipped = report.prompt_overrides.skipped.length + report.instructions.skipped.length
+    + report.skipped_assignments.length + report.skipped_lanes.length
+  const runtime = report.runtime
+  if (skipped > 0) {
+    return { tone: 'warning', border: 'var(--warn-border)', text: '일부만 복원했어요' } as const
+  }
+  if (runtime.status === 'committed' && (runtime.commit.durability === 'unconfirmed'
+    || runtime.commit.warnings.length > 0 || runtime.exact_output_registry.status !== 'applied')) {
+    return { tone: 'warning', border: 'var(--warn-border)', text: '복원 결과를 확인해 주세요' } as const
+  }
+  return { tone: 'success', border: 'var(--ok-border)', text: '복원했어요' } as const
+}
+
 export function RestoreReportView({ report, onDismiss }: { report: RestoreReport; onDismiss: () => void }) {
+  const summary = restoreSummary(report)
   const lanes = [
     ...report.skipped_assignments.map(r => ({ key: `배정 ${r.keeper}`, reason: r.reason })),
     ...report.skipped_lanes.map(r => ({ key: `lane ${r.lane}`, reason: r.reason })),
   ]
   return html`
-    <div class="wka-card" role="status" data-testid="preset-restore-report" style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-2)', borderColor: 'var(--ok-border)' }}>
+    <div class="wka-card" role="status" data-testid="preset-restore-report" style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-2)', borderColor: summary.border, flexShrink: 0, maxHeight: '40vh', overflowY: 'auto' }}>
       <div class="wka-h">
-        <h3><span class="mono">${report.restored}</span> 을 복원했어요</h3>
+        <h3><span class="mono">${report.restored}</span> · ${summary.text}</h3>
         <button type="button" class="btn-ghost btn-compact" onClick=${onDismiss}>닫기</button>
       </div>
       <div style=${noteStyle}>

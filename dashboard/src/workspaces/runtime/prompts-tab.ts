@@ -48,7 +48,7 @@ import {
   writeEndText,
   type PromptWriteEnd,
 } from './prompt-edits'
-import { PresetsPanel } from './presets-panel'
+import { PresetFeedback, PresetsPanel } from './presets-panel'
 import {
   decodeOverrideApplied,
   decodePromptCatalog,
@@ -303,6 +303,7 @@ export function PromptsTab(_props: WorkspaceViewProps) {
           프롬프트와 프리셋은 읽을 수만 있어요. override 저장·지우기와 프리셋 저장·복원·삭제는 관리자 세션에서 할 수 있어요.
         </div>
       `}
+      <${PresetFeedback} />
       <div style=${{ flex: '1 1 0%', minHeight: 0 }}>
         ${section === 'presets'
           ? html`<${PresetsPanel}

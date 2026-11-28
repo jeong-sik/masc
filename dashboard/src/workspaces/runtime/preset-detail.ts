@@ -42,9 +42,9 @@ export interface PresetDetailProps {
   readonly name: string
   readonly catalog: PromptCatalog | null
   readonly canEdit: boolean
-  /** Resolves to `null` when the server did it, or to why it did not. */
-  readonly onRestore: (name: string) => Promise<string | null>
-  readonly onDelete: (name: string) => Promise<string | null>
+  readonly busy: boolean
+  readonly onRestore: (name: string) => Promise<void>
+  readonly onDelete: (name: string) => Promise<void>
 }
 
 type Pending = 'restore' | 'delete'
@@ -162,27 +162,19 @@ function savedSettingsChip(show: PresetShow) {
   }
 }
 
-export function PresetDetail({ name, catalog, canEdit, onRestore, onDelete }: PresetDetailProps) {
+export function PresetDetail({ name, catalog, canEdit, busy, onRestore, onDelete }: PresetDetailProps) {
   const epoch = sessionEpoch.value
   const obs = resourceCache.observe<PresetShow>(presetShowCacheKey(name)).value
   const [pending, setPending] = useState<Pending | null>(null)
-  const [busy, setBusy] = useState(false)
-  const [refusal, setRefusal] = useState<string | null>(null)
 
   useEffect(() => {
     void loadPresetShow(name, 'mount')
   }, [name, epoch])
 
-  const run = async (action: Pending) => {
-    setBusy(true)
-    setRefusal(null)
-    const why = await (action === 'restore' ? onRestore(name) : onDelete(name))
-    setBusy(false)
-    if (why !== null) {
-      setRefusal(why)
-      return
-    }
+  const run = (action: Pending) => {
+    if (busy) return
     setPending(null)
+    void (action === 'restore' ? onRestore(name) : onDelete(name))
   }
 
   const show = obs.kind === 'value' ? obs.data : null
@@ -206,10 +198,10 @@ export function PresetDetail({ name, catalog, canEdit, onRestore, onDelete }: Pr
         ${obs.kind === 'unreported' && html`<div role="alert" class="ap-error">서버가 이 프리셋을 알려 주지 않았어요${obs.reason === undefined ? '.' : `: ${obs.reason}`}</div>`}
         ${canEdit && html`
           <div style=${{ display: 'flex', gap: 'var(--sp-1)', flexWrap: 'wrap' }}>
-            <button type="button" class="btn-primary" data-testid="preset-restore" disabled=${busy || show === null} onClick=${() => { setRefusal(null); setPending('restore') }}>
+            <button type="button" class="btn-primary" data-testid="preset-restore" disabled=${busy || show === null} onClick=${() => setPending('restore')}>
               이 프리셋으로 복원
             </button>
-            <button type="button" class="btn-ghost ap-danger-btn" data-testid="preset-delete" disabled=${busy} onClick=${() => { setRefusal(null); setPending('delete') }}>
+            <button type="button" class="btn-ghost ap-danger-btn" data-testid="preset-delete" disabled=${busy} onClick=${() => setPending('delete')}>
               삭제
             </button>
           </div>
@@ -236,7 +228,6 @@ export function PresetDetail({ name, catalog, canEdit, onRestore, onDelete }: Pr
             </div>
           </div>
         `}
-        ${refusal !== null && html`<div role="alert" class="ap-error" data-testid="preset-refusal">${refusal}</div>`}
       </div>
       ${show !== null && html`<${Body} show=${show} catalog=${catalog} />`}
     </div>

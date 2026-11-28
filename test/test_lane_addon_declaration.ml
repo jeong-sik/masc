@@ -777,6 +777,32 @@ sources=[{kind="fusion_run",source_id="a",run_id="authority-run-a"},{kind="fusio
     ignore (reconcile config directory);
     check string "the marked binding reads as the operator" "operator_configuration" (reads_as config))
 
+let test_inherited_visibility_does_not_grant_keeper_authority () =
+  with_fixture (fun _clock config directory _root _started ->
+    Fusion_run_registry.register_running (Fusion_run_registry.global ())
+      ~run_id:"direct-authority-run" ~keeper:"keeper-a" ~preset:"default"
+      ~roster:Fusion_types.preset_roster ~topology:Fusion_types.Simple ~started_at:1.;
+    write (Filename.concat directory "a-direct.toml") {|id="a-direct"
+run_id="editor-world"
+manifest_path="../../package.toml"
+[binding]
+sources=[{kind="fusion_run",source_id="a",run_id="direct-authority-run"}]
+|};
+    let inherited = Filename.concat directory "b-inherited.toml" in
+    write inherited {|id="b-inherited"
+run_id="editor-world"
+manifest_path="../../package.toml"
+[binding]
+sources=[{kind="lane_output",source_id="upstream",installation_id="a-direct",selection="latest_completed"}]
+|};
+    let result = reconcile config directory in
+    check bool "inheritance does not supply Keeper authority" true
+      (List.mem "a binding that only inherits Keeper visibility requires operator_authority = true"
+        (issue_for result inherited));
+    check bool "the direct Fusion source still reads as its owner" true
+      (member "source_access" (one_live config) =
+       Lane_addon_sources.access_to_json (Lane_addon_sources.Keeper "keeper-a")))
+
 let () = run "Lane declaration editing" ["shared TOML owner",[
   test_case "Keeper declaration cannot reach host_process after its save" `Quick
       test_keeper_declaration_cannot_reach_host_process_after_save;
@@ -786,6 +812,8 @@ let () = run "Lane declaration editing" ["shared TOML owner",[
       test_operator_line_runs_host_process_and_its_removal_stops_it;
   test_case "only the operator saves operator_authority" `Quick test_only_the_operator_saves_operator_authority;
   test_case "unmarked operator-only binding is refused" `Quick test_unmarked_operator_only_binding_is_refused;
+  test_case "inherited visibility does not grant Keeper authority" `Quick
+    test_inherited_visibility_does_not_grant_keeper_authority;
   test_case "non-operator cannot run host_process or read outside snapshot_file" `Quick
       test_non_operator_cannot_run_host_process_or_read_outside_snapshot;
   test_case "Keeper manifest outside the workspace is refused unopened" `Quick

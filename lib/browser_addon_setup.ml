@@ -2,7 +2,8 @@ open Result.Syntax
 
 type declaration =
   | Created of { path : string }
-  | Present of { path : string; manifest_path : string; this_build : bool; enabled : bool }
+  | Present of { path : string; manifest_path : string; this_build : bool; enabled : bool
+               ; needs_operator_authority : bool }
 
 type installed =
   { backend : Browser_lane.Backend.t
@@ -326,6 +327,10 @@ let apply_package plan (backend, files) =
            ; manifest_path = declared.manifest_path
            ; this_build = same_file declared.manifest_path manifest_path
            ; enabled = declared.enabled
+           ; needs_operator_authority =
+               (match declared.package.execution, declared.authority with
+                | Lane_addon_types.Host_process _, Lane_addon_config.Unmarked -> true
+                | Host_process _, Operator_marked | Container _, (Unmarked | Operator_marked) -> false)
            })
     | None ->
       let own = Filename.concat plan.lane_directory (declaration_file_name backend) in

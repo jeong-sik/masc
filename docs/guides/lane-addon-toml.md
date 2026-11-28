@@ -109,7 +109,9 @@ Apple에서는 정수 vCPU와 정확한 MiB 단위 메모리를 사용하고 `pi
 
 `world.state.mode = "persistent"`인 기존 설치의 runtime을 바꿀 때는 새 설치 ID를 사용한다. 서로 다른 실행기의 같은 이름 volume은 동일한 데이터가 아니다. 기존 설치의 runtime 전환을 거절하여 빈 상태로 교체되는 일을 막고, 과거 worker 정리는 저장된 원래 runtime으로 수행한다.
 
-`runtime = "host_process"`는 설치한 MCP stdio 실행 파일을 호스트에서 실행한다.
+`runtime = "host_process"`는 설치한 MCP stdio 실행 파일을 호스트에서 실행한다. 운영자만 설치 선언의 최상위에 `operator_authority = true`를 추가할 수 있으며, 이 표시가 있어야 host process가 붙는다.
+기록 grant나 작업 공간 밖 스냅샷에 운영자 읽기 권한이 필요한 선언도 표시가 필요하다. Keeper 전용 선언의 읽기 권한은 표시가 있어도 해당 Keeper로 유지된다.
+기존 browser 선언은 setup이 수정하지 않는다. setup 출력에 표시된 파일을 검토한 뒤 운영자가 필요한 표시를 추가한다.
 `command`는 패키지 디렉터리에서 실행하며 `image`를 쓰지 않는다. `[resources]`에는
 `max_reply_bytes`만 선언한다. 컨테이너 격리나 CPU·메모리·PID 한도를 제공하지 않는다.
 `masc-native-addon-launcher`가 MASC 실행 파일 옆이나 PATH에 설치돼 있어야 한다.

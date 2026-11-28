@@ -3589,23 +3589,30 @@ let operator_sources_need_marker =
 
 type declared_authority = { executes_as : Lane_addon_sources.access; reads_as : Lane_addon_sources.access }
 
-(* HIGH-RISK-UNREVIEWED: RFC lane-declaration-operator-authority 3.2. A
-   declaration file carries operator authority only when it says so, and the
-   save path refuses that line from anyone else. An unmarked file may have been
-   saved by anyone allowed to save its visibility, so its worker gets the least
-   of those authorities. A Shared binding reads nothing an unauthenticated
-   caller cannot read, so that is its authority. A Keeper_only binding reads
-   its owner's sources. Nobody but the operator may save an operator-only
-   binding, so an unmarked one is refused. A marked Keeper_only binding still
-   reads as its owner, as an operator Attach does. *)
-let declared_authority (authority : Lane_addon_config.authority) visibility =
+(* Inherited visibility restricts who may read a declaration. It cannot
+   confer a Keeper principal on an unmarked declaration. *)
+let binding_names_fusion_owner ~binding keeper =
+  let* sources = Lane_addon_sources.parse binding in
+  List.fold_left (fun result source ->
+    let* found = result in
+    match source with
+    | Lane_addon_sources.Fusion_run {run_id;_} ->
+        let* owner = Lane_addon_sources.fusion_owner ~access:Lane_addon_sources.Operator_configuration ~run_id in
+        Ok (found || String.equal owner keeper)
+    | Lane_output _ | Snapshot_file _ | Msx_capture _ | Dos_capture _ | Browser_document _ -> Ok found)
+    (Ok false) sources
+
+let declared_authority ~binding (authority : Lane_addon_config.authority) visibility =
   match authority, visibility with
   | Lane_addon_config.Operator_marked, Keeper_only keeper ->
       Ok {executes_as=Lane_addon_sources.Operator_configuration; reads_as=Lane_addon_sources.Keeper keeper}
   | Operator_marked, (Shared | Operator_only) ->
       Ok {executes_as=Lane_addon_sources.Operator_configuration; reads_as=Lane_addon_sources.Operator_configuration}
   | Unmarked, Keeper_only keeper ->
-      Ok {executes_as=Lane_addon_sources.Keeper keeper; reads_as=Lane_addon_sources.Keeper keeper}
+      let* names_owner = binding_names_fusion_owner ~binding keeper in
+      if names_owner then
+        Ok {executes_as=Lane_addon_sources.Keeper keeper; reads_as=Lane_addon_sources.Keeper keeper}
+      else Error "a binding that only inherits Keeper visibility requires operator_authority = true"
   | Unmarked, Shared ->
       Ok {executes_as=Lane_addon_sources.Unauthenticated; reads_as=Lane_addon_sources.Unauthenticated}
   | Unmarked, Operator_only -> Error operator_sources_need_marker
@@ -4826,7 +4833,7 @@ let reconcile_configuration ~config ~directory = Eio_context.run_on_owner_domain
              Ok visibility in
            match admitted with
            | Error message -> add_issue ~id:d.id d.source_path message
-           | Ok visibility -> match declared_authority d.authority visibility with
+           | Ok visibility -> match declared_authority ~binding:d.binding d.authority visibility with
            | Error message ->
                (* HIGH-RISK-UNREVIEWED: a worker this declaration no longer
                   authorizes stops; it keeps no authority from an earlier pass. *)

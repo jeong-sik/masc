@@ -5,6 +5,7 @@
 # The quiz example shares this run_id, so a quiz may bind this installation's
 # scenes output (docs/guides/operator-quiz.md).
 id = "operator-lesson"
+operator_authority = true
 run_id = "operator-study"
 manifest_path = "../../../addons/operator-lesson/lane.toml"
 

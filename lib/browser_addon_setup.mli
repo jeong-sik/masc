@@ -20,10 +20,12 @@
 
 type declaration =
   | Created of { path : string }
-  | Present of { path : string; manifest_path : string; this_build : bool; enabled : bool }
+  | Present of { path : string; manifest_path : string; this_build : bool; enabled : bool
+               ; needs_operator_authority : bool }
       (** A declaration of the browser package already existed. [this_build]
           is whether its [manifest_path] is the package {!apply} wrote;
-          [enabled] is its desired activity. *)
+          [enabled] is its desired activity, and [needs_operator_authority]
+          reports an unmarked host process declaration. *)
 
 type installed =
   { backend : Browser_lane.Backend.t  (** The source this package serves. *)

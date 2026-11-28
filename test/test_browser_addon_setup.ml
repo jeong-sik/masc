@@ -316,9 +316,10 @@ let test_a_disabled_declaration_alone_keeps_the_addon_detached () =
     let disabled = Filename.concat (lane_directory base) "browser-work.toml" in
     write disabled (declaration_text ~enabled:false ~id:"browser-work" ~manifest_path ());
     (match (installed_one base B.Ego).declaration with
-     | S.Present { path; enabled; _ } ->
+     | S.Present { path; enabled; needs_operator_authority; _ } ->
        check string "the disabled declaration" disabled path;
-       check bool "still disabled" false enabled
+       check bool "still disabled" false enabled;
+       check bool "unmarked host process requires operator authority" true needs_operator_authority
      | S.Created _ -> fail "an enabled declaration was created beside the disabled one");
     check bool "no declaration of the ego package" false
       (Sys.file_exists (declaration_path base B.Ego)))

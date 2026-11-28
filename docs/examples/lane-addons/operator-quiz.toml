@@ -3,6 +3,7 @@
 # ([runtime.addon_exact_lanes.operator-quiz.author]), and the grade output
 # ([runtime.addon_exact_lanes.operator-quiz.grade]) so written answers are graded.
 id = "operator-quiz"
+operator_authority = true
 run_id = "operator-study"
 manifest_path = "../../../addons/operator-quiz/lane.toml"
 

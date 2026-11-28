@@ -100,7 +100,10 @@ approval and goes out as a file instead.
 
 A Keeper that writes music in alphaTex makes these files with
 `keeper_music_render`: a PNG of the score (staff and tab), a `.mid` and, on
-request, WAV audio, each returned as an `attachment_id`. The tool runs the
+request, WAV audio, each returned as an `attachment_id`. A render whose
+files pass the attachment store's limits (20 MiB a file, and 20 MiB of a
+Keeper's temporary attachments together) is refused with nothing stored,
+before the server reads the files. The tool runs the
 server host's `masc-alphatex`, so an operator installs or updates it with
 `scripts/install-alphatex.sh`; without it the tool reports a missing
 dependency.

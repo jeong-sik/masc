@@ -105,10 +105,12 @@ type summary =
   }
 
 (* Which step failed decides what the Keeper is told and whether anything
-   was stored: a render failure comes before the first file is stored. *)
+   was stored: every failure but [Store_failed] comes before the first file
+   is read or stored. *)
 type render_error =
   | Source_unreadable of string
   | Render_failed of string
+  | Too_large of string
   | Store_failed of string
 
 (* masc-alphatex prints one JSON line: {"engine","version","title","tracks","bars"}.
@@ -185,6 +187,46 @@ let render ~executable ~dir request =
         | Process_eio.Stopped signal ->
           Error (Render_failed (Printf.sprintf "%s was stopped by signal %d" executable_name signal))))
 
+let file_sizes ~dir outputs =
+  List.fold_left
+    (fun acc output ->
+       Result.bind acc (fun sized ->
+         match Unix.stat (Filename.concat dir (file_name output)) with
+         | exception Unix.Unix_error (error, _, _) ->
+           Error
+             (Render_failed
+                (Printf.sprintf "the %s file was not written: %s" (output_name output)
+                   (Unix.error_message error)))
+         | stats -> Ok ((output, stats.Unix.st_size) :: sized)))
+    (Ok []) outputs
+  |> Result.map List.rev
+
+(* The store refuses one file over [Attachment_store.max_bytes] only after
+   it holds the bytes, and keeps a Keeper's ephemeral files within
+   [default_ephemeral_max_bytes] by evicting the oldest. WAV grows with the
+   music, and a short source with repeats plays for minutes, so the sizes
+   on disk are checked before any file is read: a score too long to store
+   leaves nothing stored and the server never loads the file. *)
+let within_store_limits sized =
+  let one_max = Attachment_store.max_bytes () in
+  let total_max = Attachment_store.default_ephemeral_max_bytes in
+  match List.find_opt (fun (_, bytes) -> bytes > one_max) sized with
+  | Some (output, bytes) ->
+    Error
+      (Too_large
+         (Printf.sprintf
+            "the %s file is %d bytes and one attachment holds at most %d; nothing              was stored. Shorten the score or leave %s out"
+            (output_name output) bytes one_max (output_name output)))
+  | None ->
+    let total = List.fold_left (fun sum (_, bytes) -> sum + bytes) 0 sized in
+    if total > total_max then
+      Error
+        (Too_large
+           (Printf.sprintf
+              "the files total %d bytes and a Keeper's ephemeral attachments hold at                most %d; nothing was stored. Ask for fewer outputs or shorten the score"
+              total total_max))
+    else Ok ()
+
 let store_output store ~keeper_name ~dir output =
   let name = output_name output in
   match Fs_compat.load_file (Filename.concat dir (file_name output)) with
@@ -203,17 +245,17 @@ let store_output store ~keeper_name ~dir output =
          (Printf.sprintf "the %s file was not stored: %s" name
             (Attachment_store.put_error_to_string error)))
 
-(* The Keeper's ephemeral attachments share one byte budget, oldest evicted
-   first, so a long WAV stored after the PNG can push the PNG out within this
-   call. Every id is read back before it is returned. *)
+(* [within_store_limits] keeps this call's files inside the Keeper's
+   ephemeral budget, but the Keeper's other calls store into the same budget
+   while this one runs, so every id is read back before it is returned. *)
 let still_stored store (output, (meta : Attachment_store.meta)) =
   match Attachment_store.get_meta store ~id:meta.id with
   | Ok (Some _) -> Ok ()
   | Ok None ->
     Error
       (Printf.sprintf
-         "the %s file was evicted by the Keeper's later attachments in the same \
-          call; render audio on its own"
+         "the %s file was evicted by the Keeper's other attachments during this \
+          call; render again and post the files before the next render"
          (output_name output))
   | Error error ->
     Error
@@ -278,10 +320,13 @@ let run ~executable ~base_path ~keeper_name request =
       | exception Sys_error detail -> Error (Render_failed ("scratch directory failed: " ^ detail))
       | dir ->
         Eio.Switch.on_release sw (fun () -> remove_scratch dir);
-        Result.bind (render ~executable ~dir request) (fun summary ->
-          store_outputs ~base_path ~keeper_name ~dir request.outputs
-          |> Result.map (fun stored -> (summary, stored))
-          |> Result.map_error (fun detail -> Store_failed detail)))
+        let open Result.Syntax in
+        let* summary = render ~executable ~dir request in
+        let* sized = file_sizes ~dir request.outputs in
+        let* () = within_store_limits sized in
+        store_outputs ~base_path ~keeper_name ~dir request.outputs
+        |> Result.map (fun stored -> (summary, stored))
+        |> Result.map_error (fun detail -> Store_failed detail))
   in
   match outcome with
   | Ok (summary, stored) ->
@@ -292,6 +337,9 @@ let run ~executable ~base_path ~keeper_name request =
       (error_output ("the alphaTex does not parse; fix the source: " ^ diagnostics))
   | Error (Render_failed detail) ->
     Keeper_tool_execution.failure ~class_:Tool_result.Runtime_failure
+      ~effect_disposition:Tool_result.Proven_pre_effect (error_output detail)
+  | Error (Too_large detail) ->
+    Keeper_tool_execution.failure ~class_:Tool_result.Policy_rejection
       ~effect_disposition:Tool_result.Proven_pre_effect (error_output detail)
   | Error (Store_failed detail) ->
     (* Files stored before the failure stay as ephemeral attachments that

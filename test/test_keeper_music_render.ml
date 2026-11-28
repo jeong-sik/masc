@@ -176,6 +176,50 @@ let test_failures_are_classified () =
   | Some (Tool_result.Runtime_failure, _) -> ()
   | Some _ | None -> fail "a missing output file fails the call"
 
+(* A sparse file: the size the store would see, without writing the bytes. *)
+let write_sized path ~header bytes =
+  write_file path header;
+  Unix.truncate path bytes
+
+let contains ~sub text =
+  let sub_length = String.length sub in
+  let rec from index =
+    index + sub_length <= String.length text
+    && (String.equal (String.sub text index sub_length) sub || from (index + 1))
+  in
+  from 0
+
+let stored_for_alice ~base_path =
+  match Attachment_store.list_ephemeral (Attachment_store.create ~base_path) ~keeper:"alice" with
+  | Ok metas -> List.length metas
+  | Error detail -> fail detail
+
+(* Without the size check the store takes the PNG, then refuses the WAV or
+   evicts the PNG for it: a Runtime_failure with a file left behind. *)
+let test_files_too_large_to_store_are_refused_before_storing () =
+  with_render_env @@ fun ~base_path ~fixtures ->
+  write_file (Filename.concat fixtures "score.png") tiny_png;
+  let refused label ~wav_bytes ~names =
+    write_sized (Filename.concat fixtures "score.wav") ~header:tiny_wav wav_bytes;
+    let result =
+      run_with ~base_path ~fixtures Summary {|{"source":":4 3.6","outputs":["score","audio"]}|}
+    in
+    (match failure_of result with
+     | Some (Tool_result.Policy_rejection, Tool_result.Proven_pre_effect) -> ()
+     | Some _ | None ->
+       failf "%s: not a Policy_rejection before any effect: %s" label result.raw_output);
+    check bool (label ^ ": the error says " ^ names) true (contains ~sub:names result.raw_output);
+    check int (label ^ ": nothing stored") 0 (stored_for_alice ~base_path)
+  in
+  refused "one file over the limit" ~wav_bytes:(Attachment_store.max_bytes () + 1)
+    ~names:"the audio file is";
+  let wav_bytes =
+    Attachment_store.default_ephemeral_max_bytes - String.length tiny_png + 1
+  in
+  check bool "each file of the next case fits one attachment" true
+    (wav_bytes <= Attachment_store.max_bytes ());
+  refused "files over the budget together" ~wav_bytes ~names:"the files total"
+
 let test_absent_executable_is_a_missing_dependency () =
   let saved = Sys.getenv_opt "PATH" in
   Unix.putenv "PATH" (Filename.get_temp_dir_name ());
@@ -196,6 +240,8 @@ let () =
     ; ( "render"
       , [ test_case "rendered files are stored" `Quick test_rendered_files_are_stored
         ; test_case "failures are classified" `Quick test_failures_are_classified
+        ; test_case "files too large to store" `Quick
+            test_files_too_large_to_store_are_refused_before_storing
         ; test_case "absent executable" `Quick test_absent_executable_is_a_missing_dependency
         ] )
     ]

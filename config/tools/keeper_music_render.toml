@@ -29,4 +29,7 @@ min_items = 1
 unique_items = true
 description = """
 Which files to make. Defaults to ["score", "midi"]. audio is WAV at 44.1 kHz \
-stereo, about 10 MB per minute of music; one file over 20 MiB is refused."""
+stereo, about 10 MB per minute of music. A render is refused with nothing \
+stored when one file passes 20 MiB or all files together pass this Keeper's \
+20 MiB of temporary attachments. A long WAV pushes this Keeper's older \
+temporary attachments out, so post the files of one render before the next."""

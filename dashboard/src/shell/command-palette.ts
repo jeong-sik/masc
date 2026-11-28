@@ -257,7 +257,7 @@ export function buildPaletteCommands(session: AuthSession): readonly PaletteComm
     },
   )
 
-  // 5. Theme, Appearance & Audio Preferences
+  // 5. Theme and personal preferences
   const currentTheme = activeTheme.peek()
   const currentContrast = activeContrast.peek()
   const currentPrefs = userPrefs.peek()
@@ -403,24 +403,10 @@ export function buildPaletteCommands(session: AuthSession): readonly PaletteComm
       },
     },
     {
-      id: 'audio:toggle-mute',
-      label: currentPrefs.muted
-        ? 'Audio: Unmute Notification Sounds'
-        : 'Audio: Mute Notification Sounds',
-      category: 'Theme',
-      keywords: ['audio', 'sound', 'mute', 'unmute', 'volume', '음소거', '소리', '오디오'],
-      group: 'Theme',
-      subtitle: currentPrefs.muted ? 'Currently muted' : `Volume ${Math.round(currentPrefs.masterVolume * 100)}%`,
-      run: () => {
-        const next = updateUserPrefs({ muted: !userPrefs.peek().muted })
-        pushShellToast(next.muted ? '알림음 음소거됨' : '알림음 음소거 해제됨', 'info')
-      },
-    },
-    {
-      id: 'setting:appearance-audio-prefs',
-      label: 'Setting: Open Appearance & Audio Preferences',
+      id: 'setting:appearance-microphone-prefs',
+      label: 'Setting: Open Appearance & Microphone Preferences',
       category: 'Setting',
-      keywords: ['appearance', 'audio', 'theme', 'sound', 'font', 'density', '화면', '오디오', '설정'],
+      keywords: ['appearance', 'microphone', 'theme', 'font', 'density', '화면', '마이크', '설정'],
       group: 'Setting',
       subtitle: '/account/profile — Available to all roles',
       run: () => navigate('/account/profile'),

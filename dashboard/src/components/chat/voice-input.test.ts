@@ -1,3 +1,4 @@
+import { act, renderHook } from '@testing-library/preact'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 // Mock the core fetch layer so the tests exercise transcribeAudio's contract
@@ -8,7 +9,8 @@ vi.mock('../../api/core', () => ({
 }))
 
 import { fetchWithTimeout } from '../../api/core'
-import { transcribeAudio, voiceInputSupported } from './voice-input'
+import { resetUserPrefs, updateUserPrefs } from '../../lib/user-prefs'
+import { transcribeAudio, useVoiceInput, voiceInputSupported } from './voice-input'
 
 const mockedFetch = vi.mocked(fetchWithTimeout)
 
@@ -141,4 +143,47 @@ describe('voiceInputSupported', () => {
       ;(globalThis as { MediaRecorder?: unknown }).MediaRecorder = origRecorder
     }
   })
+})
+
+it('starts chat voice input with the saved microphone and processing settings', async () => {
+  const originalMediaDevices = Object.getOwnPropertyDescriptor(navigator, 'mediaDevices')
+  const stop = vi.fn()
+  const getUserMedia = vi.fn(async () => ({ getTracks: () => [{ stop }] }))
+  const start = vi.fn()
+  vi.stubGlobal('MediaRecorder', class FakeRecorder { start = start })
+  Object.defineProperty(navigator, 'mediaDevices', {
+    value: { getUserMedia },
+    configurable: true,
+  })
+  const hook = renderHook(() => useVoiceInput({ onTranscribed: vi.fn() }))
+  try {
+    updateUserPrefs({
+      inputDeviceId: 'studio-mic',
+      noiseSuppression: false,
+      echoCancellation: true,
+      autoGainControl: false,
+    })
+    await act(async () => hook.result.current.start())
+
+    expect(getUserMedia).toHaveBeenCalledWith({
+      audio: {
+        deviceId: { ideal: 'studio-mic' },
+        noiseSuppression: false,
+        echoCancellation: true,
+        autoGainControl: false,
+      },
+    })
+    expect(start).toHaveBeenCalledOnce()
+    expect(hook.result.current.state).toBe('recording')
+  } finally {
+    hook.unmount()
+    if (originalMediaDevices) {
+      Object.defineProperty(navigator, 'mediaDevices', originalMediaDevices)
+    } else {
+      Reflect.deleteProperty(navigator, 'mediaDevices')
+    }
+    vi.unstubAllGlobals()
+    resetUserPrefs()
+  }
+  expect(stop).toHaveBeenCalledOnce()
 })

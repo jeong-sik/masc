@@ -5,10 +5,10 @@ import { act, fireEvent } from '@testing-library/preact'
 import { activeContrast, activeTheme, resetShellStateForTests } from '../../shell/shell-state'
 import { resetUserPrefs, userPrefs } from '../../lib/user-prefs'
 import { AppearancePanel } from './appearance-panel'
-import { AudioPrefsPanel } from './audio-prefs-panel'
+import { MicrophonePrefsPanel } from './microphone-prefs-panel'
 import { ProfileSessionsTab } from '../account/profile-tab'
 
-describe('AppearancePanel, AudioPrefsPanel & Account Profile embedding', () => {
+describe('AppearancePanel, MicrophonePrefsPanel & Account Profile embedding', () => {
   let container: HTMLDivElement
 
   beforeEach(() => {
@@ -94,47 +94,26 @@ describe('AppearancePanel, AudioPrefsPanel & Account Profile embedding', () => {
     expect(userPrefs.value.density).toBe('normal')
   })
 
-  it('controls master volume, mute, TTS speed, sound cue toggles, and resets in AudioPrefsPanel', async () => {
+  it('updates and resets microphone processing settings', async () => {
     await act(async () => {
-      render(h(AudioPrefsPanel, {}), container)
+      render(h(MicrophonePrefsPanel, {}), container)
     })
 
-    const volSlider = container.querySelector('input[aria-label="마스터 볼륨"]') as HTMLInputElement
+    const noiseSuppression = container.querySelector<HTMLInputElement>('input[aria-label="소음 억제"]')!
+    expect(noiseSuppression.checked).toBe(true)
     await act(async () => {
-      fireEvent.input(volSlider, { target: { value: '0.45' } })
+      fireEvent.change(noiseSuppression, { target: { checked: false } })
     })
-    expect(userPrefs.value.masterVolume).toBe(0.45)
-    expect(container.querySelector('[data-testid="master-volume-value"]')?.textContent).toBe('45%')
+    expect(userPrefs.value.noiseSuppression).toBe(false)
 
-    const muteCheckbox = container.querySelector('input[aria-label="전체 음소거"]') as HTMLInputElement
     await act(async () => {
-      fireEvent.change(muteCheckbox, { target: { checked: true } })
+      fireEvent.click(container.querySelector('[data-testid="mic-reset-btn"]')!)
     })
-    expect(userPrefs.value.muted).toBe(true)
-
-    const ttsSlider = container.querySelector('input[aria-label="TTS 재생 속도"]') as HTMLInputElement
-    await act(async () => {
-      fireEvent.input(ttsSlider, { target: { value: '1.5' } })
-    })
-    expect(userPrefs.value.ttsRate).toBe(1.5)
-    expect(container.querySelector('[data-testid="tts-rate-value"]')?.textContent).toBe('1.50x')
-
-    // Clicking [테스트] sound cue button does not throw even without AudioContext
-    const testCueBtn = container.querySelector('[data-test-cue="approvalPending"]') as HTMLButtonElement
-    await act(async () => {
-      fireEvent.click(testCueBtn)
-    })
-
-    // Reset restores audio defaults
-    await act(async () => {
-      fireEvent.click(container.querySelector('[data-testid="audio-reset-btn"]')!)
-    })
-    expect(userPrefs.value.masterVolume).toBe(0.7)
-    expect(userPrefs.value.muted).toBe(false)
-    expect(userPrefs.value.ttsRate).toBe(1)
+    expect(userPrefs.value.noiseSuppression).toBe(true)
+    expect(noiseSuppression.checked).toBe(true)
   })
 
-  it('exposes both AppearancePanel and AudioPrefsPanel to non-Admin Workers in ProfileSessionsTab', async () => {
+  it('exposes both AppearancePanel and MicrophonePrefsPanel to non-Admin Workers in ProfileSessionsTab', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response(JSON.stringify({ id: 'u-worker', role: 'worker' }), {
         status: 200,
@@ -164,10 +143,10 @@ describe('AppearancePanel, AudioPrefsPanel & Account Profile embedding', () => {
     expect(container.querySelector('[data-testid="account-user-prefs"]')).not.toBeNull()
     expect(container.querySelector('[data-testid="settings-appearance-panel"]')).not.toBeNull()
 
-    // Switch to Audio & Notifications tab
+    // Switch to the microphone tab
     await act(async () => {
-      fireEvent.click(container.querySelector('[data-testid="prefs-tab-audio"]')!)
+      fireEvent.click(container.querySelector('[data-testid="prefs-tab-microphone"]')!)
     })
-    expect(container.querySelector('[data-testid="settings-audio-prefs-panel"]')).not.toBeNull()
+    expect(container.querySelector('[data-testid="settings-microphone-prefs-panel"]')).not.toBeNull()
   })
 })

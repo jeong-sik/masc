@@ -9,22 +9,17 @@ import {
   cycleDensityPref,
   initUserPrefs,
   resetAppearancePrefs,
-  resetAudioPrefs,
+  resetMicrophonePrefs,
   resetUserPrefs,
   sanitizeUserPrefs,
   stepUiScale,
-  updateDesktopNotifyPref,
-  updateSoundCuePref,
   updateUserPrefs,
   userPrefs,
 } from './user-prefs'
 import {
-  enumerateMediaDevices,
-  getDesktopNotificationPermission,
-  playSoundCue,
-  shouldPlaySoundCue,
+  enumerateMicrophones,
   startMicLevelProbe,
-} from './sound-cues'
+} from './microphone'
 
 describe('user-prefs store, schema clamping & DOM sync', () => {
   beforeEach(() => {
@@ -60,12 +55,9 @@ describe('user-prefs store, schema clamping & DOM sync', () => {
       chatLayout: 'wide',
       chatMeasure: 'narrow',
       reduceMotion: 'maybe',
-      masterVolume: -5,
-      muted: 'yes',
-      ttsRate: Number.NaN,
       inputDeviceId: 12345,
-      soundCues: { approvalPending: false, runFailed: 'bad' },
-      desktopNotify: { keeperAsk: false },
+      echoCancellation: false,
+      noiseSuppression: 'yes',
     })
 
     expect(sanitized.theme).toBe('dark')
@@ -78,14 +70,9 @@ describe('user-prefs store, schema clamping & DOM sync', () => {
     expect(sanitized.chatLayout).toBe('cozy')
     expect(sanitized.chatMeasure).toBe('standard')
     expect(sanitized.reduceMotion).toBe('system')
-    expect(sanitized.masterVolume).toBe(0)
-    expect(sanitized.muted).toBe(false)
-    expect(sanitized.ttsRate).toBe(1)
     expect(sanitized.inputDeviceId).toBe('')
-    expect(sanitized.soundCues.approvalPending).toBe(false)
-    expect(sanitized.soundCues.runFailed).toBe(true)
-    expect(sanitized.desktopNotify.keeperAsk).toBe(false)
-    expect(sanitized.desktopNotify.approvalPending).toBe(true)
+    expect(sanitized.echoCancellation).toBe(false)
+    expect(sanitized.noiseSuppression).toBe(true)
   })
 
   it('applies dataset attributes and CSS variables onto documentElement', () => {
@@ -155,7 +142,7 @@ describe('user-prefs store, schema clamping & DOM sync', () => {
     }
   })
 
-  it('cycles density, steps UI scale within limits, and resets appearance/audio independently', () => {
+  it('cycles density, steps UI scale within limits, and resets appearance and microphone settings independently', () => {
     expect(cycleDensityPref()).toBe('comfortable')
     expect(cycleDensityPref()).toBe('compact')
     expect(cycleDensityPref()).toBe('normal')
@@ -163,20 +150,17 @@ describe('user-prefs store, schema clamping & DOM sync', () => {
     expect(stepUiScale(0.5)).toBe(1.35)
     expect(stepUiScale(-1.0)).toBe(0.85)
 
-    updateSoundCuePref('mention', false)
-    updateDesktopNotifyPref('runFailed', false)
-    updateUserPrefs({ masterVolume: 0.35, accent: 'iris' })
+    updateUserPrefs({ inputDeviceId: 'mic-1', noiseSuppression: false, accent: 'iris' })
 
     resetAppearancePrefs()
     expect(userPrefs.value.accent).toBe('brass')
     expect(userPrefs.value.uiScale).toBe(1)
-    expect(userPrefs.value.masterVolume).toBe(0.35)
-    expect(userPrefs.value.soundCues.mention).toBe(false)
+    expect(userPrefs.value.inputDeviceId).toBe('mic-1')
+    expect(userPrefs.value.noiseSuppression).toBe(false)
 
-    resetAudioPrefs()
-    expect(userPrefs.value.masterVolume).toBe(0.7)
-    expect(userPrefs.value.soundCues.mention).toBe(true)
-    expect(userPrefs.value.desktopNotify.runFailed).toBe(true)
+    resetMicrophonePrefs()
+    expect(userPrefs.value.inputDeviceId).toBe('')
+    expect(userPrefs.value.noiseSuppression).toBe(true)
     expect(localStorage.getItem(USER_PREFS_STORAGE_KEY)).not.toBeNull()
     applyUserPrefsToDocument()
   })
@@ -231,7 +215,7 @@ describe('user-prefs store, schema clamping & DOM sync', () => {
   })
 })
 
-describe('sound-cues synthesizer, mic probe cleanup & notifications', () => {
+describe('microphone enumeration and level probe', () => {
   beforeEach(() => {
     resetUserPrefs()
   })
@@ -240,27 +224,8 @@ describe('sound-cues synthesizer, mic probe cleanup & notifications', () => {
     vi.restoreAllMocks()
   })
 
-  it('honors muted, masterVolume, muteWhenFocused, and per-event toggles', () => {
-    const base = { ...DEFAULT_USER_PREFS, masterVolume: 0.7, muted: false, muteWhenFocused: false }
-    expect(shouldPlaySoundCue('approvalPending', base, true)).toBe(true)
-    expect(shouldPlaySoundCue('turnCompleted', base, false)).toBe(false)
-    expect(shouldPlaySoundCue('approvalPending', { ...base, muted: true }, false)).toBe(false)
-    expect(shouldPlaySoundCue('approvalPending', { ...base, masterVolume: 0 }, false)).toBe(false)
-    expect(shouldPlaySoundCue('approvalPending', { ...base, muteWhenFocused: true }, true)).toBe(false)
-    expect(shouldPlaySoundCue('approvalPending', { ...base, muteWhenFocused: true }, false)).toBe(true)
-
-    // Safe no-op in happy-dom when AudioContext is absent
-    expect(playSoundCue('approvalPending', { force: true })).toBe(false)
-  })
-
-  it('gracefully handles missing mediaDevices & Notification APIs and stops mic tracks on cleanup', async () => {
-    const emptyDevices = await enumerateMediaDevices()
-    expect(emptyDevices.inputs).toEqual([])
-    expect(emptyDevices.outputs).toEqual([])
-
-    expect(['default', 'granted', 'denied', 'unsupported']).toContain(
-      getDesktopNotificationPermission(),
-    )
+  it('enumerates usable microphones and applies saved constraints to the level probe', async () => {
+    expect(await enumerateMicrophones()).toEqual([])
 
     const stopTrack = vi.fn()
     const closeCtx = vi.fn(async () => {})
@@ -274,16 +239,14 @@ describe('sound-cues synthesizer, mic probe cleanup & notifications', () => {
         enumerateDevices: vi.fn(async () => [
           { deviceId: 'mic-1', label: 'Studio Mic', kind: 'audioinput' },
           { deviceId: 'spk-1', label: 'Monitor Out', kind: 'audiooutput' },
+          { deviceId: '', label: '', kind: 'audioinput' },
         ]),
         getUserMedia: mockGetUserMedia,
       },
     })
 
-    const listed = await enumerateMediaDevices()
-    expect(listed.supported).toBe(true)
-    expect(listed.inputs).toHaveLength(1)
-    expect(listed.inputs[0]?.label).toBe('Studio Mic')
-    expect(listed.outputs).toHaveLength(1)
+    const listed = await enumerateMicrophones()
+    expect(listed.map((device) => device.label)).toEqual(['Studio Mic'])
 
     class FakeAudioContext {
       state = 'running'
@@ -302,12 +265,20 @@ describe('sound-cues synthesizer, mic probe cleanup & notifications', () => {
     }
     vi.stubGlobal('AudioContext', FakeAudioContext)
 
+    updateUserPrefs({ inputDeviceId: 'mic-1', echoCancellation: false })
     const levels: number[] = []
     const handle = await startMicLevelProbe({
-      deviceId: 'mic-1',
       onLevel: (v) => levels.push(v),
     })
     expect(handle).not.toBeNull()
+    expect(mockGetUserMedia).toHaveBeenCalledWith({
+      audio: {
+        deviceId: { ideal: 'mic-1' },
+        echoCancellation: false,
+        noiseSuppression: true,
+        autoGainControl: true,
+      },
+    })
     expect(levels.length).toBeGreaterThan(0)
 
     handle?.stop()

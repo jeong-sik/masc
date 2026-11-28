@@ -13,6 +13,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'preact/hooks'
 import { authHeaders, fetchWithTimeout } from '../../api/core'
+import { microphoneConstraints } from '../../lib/microphone'
 import { recordingToWav } from './voice-wav'
 
 export type VoiceInputState = 'idle' | 'recording' | 'transcribing'
@@ -128,7 +129,7 @@ export function useVoiceInput({ onTranscribed, onError }: UseVoiceInputOptions):
     chunksRef.current = []
     let stream: MediaStream
     try {
-      stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      stream = await navigator.mediaDevices.getUserMedia({ audio: microphoneConstraints() })
     } catch (err) {
       const e = err as DOMException
       const message =

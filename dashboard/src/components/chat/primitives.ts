@@ -940,7 +940,7 @@ function traceDur(trace: ChatTraceStep[]): string | null {
 }
 
 function ChatTextBlock({ html: htmlContent }: { html: string }) {
-  return html`<p class="mb-2 text-base leading-airy text-[var(--color-fg-primary)]" dangerouslySetInnerHTML=${renderInlineHtml(htmlContent)} />`
+  return html`<p class="chat-body-text mb-2 leading-airy text-[var(--color-fg-primary)]" dangerouslySetInnerHTML=${renderInlineHtml(htmlContent)} />`
 }
 
 function ChatHeadingBlock({ html: htmlContent }: { html: string }) {
@@ -949,7 +949,7 @@ function ChatHeadingBlock({ html: htmlContent }: { html: string }) {
 
 function ChatListBlock({ items }: { items: string[] }) {
   return html`
-    <ul class="my-1 list-disc pl-5 text-base leading-airy text-[var(--color-fg-primary)]">
+    <ul class="chat-body-text my-1 list-disc pl-5 leading-airy text-[var(--color-fg-primary)]">
       ${items.map((it, i) => html`<li key=${i} dangerouslySetInnerHTML=${renderInlineHtml(it)} />`)}
     </ul>
   `
@@ -2988,7 +2988,7 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
                   ${hasRealText && !hasNonThinkingBlocks
                     ? html`
                         <div
-                          class=${`markdown-body whitespace-pre-wrap break-words text-base leading-airy text-[var(--color-fg-primary)] ${isCollapsible && messageCollapsed ? 'max-h-96 overflow-hidden' : ''}`}
+                          class=${`markdown-body chat-body-text whitespace-pre-wrap break-words leading-airy text-[var(--color-fg-primary)] ${isCollapsible && messageCollapsed ? 'max-h-96 overflow-hidden' : ''}`}
                           dangerouslySetInnerHTML=${renderPlainLinkedHtml(messageText)}
                         />
                       `
@@ -2998,7 +2998,7 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
               ? null
               : html`
                   <div
-                    class=${`markdown-body whitespace-pre-wrap break-words text-base leading-airy text-[var(--color-fg-primary)] ${isCollapsible && messageCollapsed ? 'max-h-96 overflow-hidden' : ''}`}
+                    class=${`markdown-body chat-body-text whitespace-pre-wrap break-words leading-airy text-[var(--color-fg-primary)] ${isCollapsible && messageCollapsed ? 'max-h-96 overflow-hidden' : ''}`}
                     dangerouslySetInnerHTML=${renderPlainLinkedHtml(messageText)}
                   />
                 `}

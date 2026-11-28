@@ -2,9 +2,7 @@
  * Client-side User Preferences store (`masc:user-prefs:v1`).
  *
  * Covers Appearance (theme presets, accents, contrast, UI/chat/code scale,
- * density, chat layout/measure, reduce motion) and Audio & Notifications
- * (volume, mute, TTS, media device IDs, WebRTC processing, sound cues,
- * desktop notifications).
+ * density, chat layout/measure, reduce motion) and microphone capture settings.
  *
  * Uses `persistentSignal` with strict schema validation and clamping so
  * corrupt or partial `localStorage` payloads can never crash the dashboard.
@@ -41,32 +39,6 @@ export type ChatLayoutPref = 'cozy' | 'compact'
 export type ChatMeasurePref = 'standard' | 'wide'
 export type ReduceMotionPref = 'system' | 'on' | 'off'
 
-export type SoundCueEvent =
-  | 'approvalPending'
-  | 'keeperAsk'
-  | 'turnCompleted'
-  | 'runFailed'
-  | 'mention'
-
-export type DesktopNotifyEvent =
-  | 'approvalPending'
-  | 'keeperAsk'
-  | 'runFailed'
-
-export interface SoundCuePrefs {
-  readonly approvalPending: boolean
-  readonly keeperAsk: boolean
-  readonly turnCompleted: boolean
-  readonly runFailed: boolean
-  readonly mention: boolean
-}
-
-export interface DesktopNotifyPrefs {
-  readonly approvalPending: boolean
-  readonly keeperAsk: boolean
-  readonly runFailed: boolean
-}
-
 export interface UserPrefs {
   // Appearance
   readonly theme: ThemePreset
@@ -80,19 +52,11 @@ export interface UserPrefs {
   readonly chatMeasure: ChatMeasurePref
   readonly reduceMotion: ReduceMotionPref
 
-  // Audio & Notifications
-  readonly masterVolume: number
-  readonly muted: boolean
-  readonly muteWhenFocused: boolean
-  readonly ttsAutoplay: boolean
-  readonly ttsRate: number
+  // Microphone
   readonly inputDeviceId: string
-  readonly outputDeviceId: string
   readonly noiseSuppression: boolean
   readonly echoCancellation: boolean
   readonly autoGainControl: boolean
-  readonly soundCues: SoundCuePrefs
-  readonly desktopNotify: DesktopNotifyPrefs
 }
 
 export const THEME_PRESETS: readonly ThemePreset[] = [
@@ -118,20 +82,6 @@ export const CHAT_LAYOUT_PREFS: readonly ChatLayoutPref[] = ['cozy', 'compact'] 
 export const CHAT_MEASURE_PREFS: readonly ChatMeasurePref[] = ['standard', 'wide'] as const
 export const REDUCE_MOTION_PREFS: readonly ReduceMotionPref[] = ['system', 'on', 'off'] as const
 
-export const SOUND_CUE_EVENTS: readonly SoundCueEvent[] = [
-  'approvalPending',
-  'keeperAsk',
-  'turnCompleted',
-  'runFailed',
-  'mention',
-] as const
-
-export const DESKTOP_NOTIFY_EVENTS: readonly DesktopNotifyEvent[] = [
-  'approvalPending',
-  'keeperAsk',
-  'runFailed',
-] as const
-
 export const DENSITY_SCALE_MAP: Readonly<Record<DensityPref, number>> = {
   compact: 0.82,
   normal: 1,
@@ -147,23 +97,7 @@ export const USER_PREFS_LIMITS = {
   uiScale: { min: 0.85, max: 1.35, step: 0.05 },
   chatFontSize: { min: 12, max: 20, step: 1 },
   codeFontSize: { min: 10, max: 18, step: 1 },
-  masterVolume: { min: 0, max: 1, step: 0.05 },
-  ttsRate: { min: 0.75, max: 2.0, step: 0.05 },
 } as const
-
-export const DEFAULT_SOUND_CUE_PREFS: SoundCuePrefs = {
-  approvalPending: true,
-  keeperAsk: true,
-  turnCompleted: false,
-  runFailed: true,
-  mention: true,
-}
-
-export const DEFAULT_DESKTOP_NOTIFY_PREFS: DesktopNotifyPrefs = {
-  approvalPending: true,
-  keeperAsk: true,
-  runFailed: true,
-}
 
 export const DEFAULT_USER_PREFS: UserPrefs = {
   theme: 'dark',
@@ -177,18 +111,10 @@ export const DEFAULT_USER_PREFS: UserPrefs = {
   chatMeasure: 'standard',
   reduceMotion: 'system',
 
-  masterVolume: 0.7,
-  muted: false,
-  muteWhenFocused: false,
-  ttsAutoplay: false,
-  ttsRate: 1,
   inputDeviceId: '',
-  outputDeviceId: '',
   noiseSuppression: true,
   echoCancellation: true,
   autoGainControl: true,
-  soundCues: DEFAULT_SOUND_CUE_PREFS,
-  desktopNotify: DEFAULT_DESKTOP_NOTIFY_PREFS,
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -230,9 +156,6 @@ function pickDeviceId(raw: unknown): string {
 export function sanitizeUserPrefs(raw: unknown): UserPrefs {
   if (!isRecord(raw)) return DEFAULT_USER_PREFS
 
-  const rawCues = isRecord(raw.soundCues) ? raw.soundCues : {}
-  const rawNotify = isRecord(raw.desktopNotify) ? raw.desktopNotify : {}
-
   return {
     theme: pickEnum(raw.theme, THEME_PRESETS, DEFAULT_USER_PREFS.theme),
     accent: pickEnum(raw.accent, ACCENT_IDS, DEFAULT_USER_PREFS.accent),
@@ -263,40 +186,10 @@ export function sanitizeUserPrefs(raw: unknown): UserPrefs {
     chatMeasure: pickEnum(raw.chatMeasure, CHAT_MEASURE_PREFS, DEFAULT_USER_PREFS.chatMeasure),
     reduceMotion: pickEnum(raw.reduceMotion, REDUCE_MOTION_PREFS, DEFAULT_USER_PREFS.reduceMotion),
 
-    masterVolume: clampNumber(
-      raw.masterVolume,
-      USER_PREFS_LIMITS.masterVolume.min,
-      USER_PREFS_LIMITS.masterVolume.max,
-      DEFAULT_USER_PREFS.masterVolume,
-      2,
-    ),
-    muted: pickBoolean(raw.muted, DEFAULT_USER_PREFS.muted),
-    muteWhenFocused: pickBoolean(raw.muteWhenFocused, DEFAULT_USER_PREFS.muteWhenFocused),
-    ttsAutoplay: pickBoolean(raw.ttsAutoplay, DEFAULT_USER_PREFS.ttsAutoplay),
-    ttsRate: clampNumber(
-      raw.ttsRate,
-      USER_PREFS_LIMITS.ttsRate.min,
-      USER_PREFS_LIMITS.ttsRate.max,
-      DEFAULT_USER_PREFS.ttsRate,
-      2,
-    ),
     inputDeviceId: pickDeviceId(raw.inputDeviceId),
-    outputDeviceId: pickDeviceId(raw.outputDeviceId),
     noiseSuppression: pickBoolean(raw.noiseSuppression, DEFAULT_USER_PREFS.noiseSuppression),
     echoCancellation: pickBoolean(raw.echoCancellation, DEFAULT_USER_PREFS.echoCancellation),
     autoGainControl: pickBoolean(raw.autoGainControl, DEFAULT_USER_PREFS.autoGainControl),
-    soundCues: {
-      approvalPending: pickBoolean(rawCues.approvalPending, DEFAULT_SOUND_CUE_PREFS.approvalPending),
-      keeperAsk: pickBoolean(rawCues.keeperAsk, DEFAULT_SOUND_CUE_PREFS.keeperAsk),
-      turnCompleted: pickBoolean(rawCues.turnCompleted, DEFAULT_SOUND_CUE_PREFS.turnCompleted),
-      runFailed: pickBoolean(rawCues.runFailed, DEFAULT_SOUND_CUE_PREFS.runFailed),
-      mention: pickBoolean(rawCues.mention, DEFAULT_SOUND_CUE_PREFS.mention),
-    },
-    desktopNotify: {
-      approvalPending: pickBoolean(rawNotify.approvalPending, DEFAULT_DESKTOP_NOTIFY_PREFS.approvalPending),
-      keeperAsk: pickBoolean(rawNotify.keeperAsk, DEFAULT_DESKTOP_NOTIFY_PREFS.keeperAsk),
-      runFailed: pickBoolean(rawNotify.runFailed, DEFAULT_DESKTOP_NOTIFY_PREFS.runFailed),
-    },
   }
 }
 
@@ -410,40 +303,10 @@ export function applyUserPrefsToDocument(
 }
 
 export function updateUserPrefs(patch: Partial<UserPrefs>): UserPrefs {
-  const current = userPrefs.peek()
-  const next = sanitizeUserPrefs({
-    ...current,
-    ...patch,
-    soundCues: patch.soundCues
-      ? { ...current.soundCues, ...patch.soundCues }
-      : current.soundCues,
-    desktopNotify: patch.desktopNotify
-      ? { ...current.desktopNotify, ...patch.desktopNotify }
-      : current.desktopNotify,
-  })
+  const next = sanitizeUserPrefs({ ...userPrefs.peek(), ...patch })
   userPrefs.value = next
   applyUserPrefsToDocument(next)
   return next
-}
-
-export function updateSoundCuePref(event: SoundCueEvent, enabled: boolean): UserPrefs {
-  const current = userPrefs.peek()
-  return updateUserPrefs({
-    soundCues: {
-      ...current.soundCues,
-      [event]: enabled,
-    },
-  })
-}
-
-export function updateDesktopNotifyPref(event: DesktopNotifyEvent, enabled: boolean): UserPrefs {
-  const current = userPrefs.peek()
-  return updateUserPrefs({
-    desktopNotify: {
-      ...current.desktopNotify,
-      [event]: enabled,
-    },
-  })
 }
 
 export function resetAppearancePrefs(): UserPrefs {
@@ -461,21 +324,13 @@ export function resetAppearancePrefs(): UserPrefs {
   })
 }
 
-export function resetAudioPrefs(): UserPrefs {
+export function resetMicrophonePrefs(): UserPrefs {
   return updateUserPrefs({
-    masterVolume: DEFAULT_USER_PREFS.masterVolume,
-    muted: DEFAULT_USER_PREFS.muted,
-    muteWhenFocused: DEFAULT_USER_PREFS.muteWhenFocused,
-    ttsAutoplay: DEFAULT_USER_PREFS.ttsAutoplay,
-    ttsRate: DEFAULT_USER_PREFS.ttsRate,
     inputDeviceId: DEFAULT_USER_PREFS.inputDeviceId,
-    outputDeviceId: DEFAULT_USER_PREFS.outputDeviceId,
     noiseSuppression: DEFAULT_USER_PREFS.noiseSuppression,
     echoCancellation: DEFAULT_USER_PREFS.echoCancellation,
     autoGainControl: DEFAULT_USER_PREFS.autoGainControl,
-    soundCues: DEFAULT_SOUND_CUE_PREFS,
-    desktopNotify: DEFAULT_DESKTOP_NOTIFY_PREFS,
-  })
+      })
 }
 
 export function resetUserPrefs(): UserPrefs {

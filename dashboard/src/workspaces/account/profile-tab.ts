@@ -17,7 +17,7 @@ import {
 import { startObserverStream } from '../../core/observer'
 import { pushShellToast } from '../../shell/shell-state'
 import { AppearancePanel } from '../settings/appearance-panel'
-import { AudioPrefsPanel } from '../settings/audio-prefs-panel'
+import { MicrophonePrefsPanel } from '../settings/microphone-prefs-panel'
 import { fetchWhoami, postLogout, type WhoamiInfo } from './wire'
 
 type SignedInSession = Extract<AuthSession, { readonly kind: 'multi_account_signed_in' }>
@@ -30,7 +30,7 @@ export function ProfileSessionsTab({
   const [whoami, setWhoami] = useState<WhoamiInfo | null>(null)
   const [whoamiError, setWhoamiError] = useState<string | null>(null)
   const [signingOut, setSigningOut] = useState(false)
-  const [prefsTab, setPrefsTab] = useState<'appearance' | 'audio'>('appearance')
+  const [prefsTab, setPrefsTab] = useState<'appearance' | 'microphone'>('appearance')
   const [prefsOpen, setPrefsOpen] = useState(true)
   const targets = workspaceTargets.value
   const activeWs = activeWorkspaceId.value
@@ -147,9 +147,9 @@ export function ProfileSessionsTab({
       <section class="ap-card" data-testid="account-user-prefs">
         <header class="ap-card-head">
           <div>
-            <h2 class="ap-card-title">Personal Appearance & Audio Preferences</h2>
+            <h2 class="ap-card-title">Appearance & Microphone</h2>
             <p class="ap-card-sub">
-              Browser-local theme, font scale, layout density, audio devices, and sound cues — available to all roles.
+              Theme, font size, layout density, and microphone settings for this browser.
             </p>
           </div>
           <div style=${{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)', flexWrap: 'wrap' }}>
@@ -168,12 +168,12 @@ export function ProfileSessionsTab({
                 <button
                   type="button"
                   role="tab"
-                  class=${`up-tab${prefsTab === 'audio' ? ' is-active' : ''}`}
-                  aria-selected=${prefsTab === 'audio'}
-                  data-testid="prefs-tab-audio"
-                  onClick=${() => setPrefsTab('audio')}
+                  class=${`up-tab${prefsTab === 'microphone' ? ' is-active' : ''}`}
+                  aria-selected=${prefsTab === 'microphone'}
+                  data-testid="prefs-tab-microphone"
+                  onClick=${() => setPrefsTab('microphone')}
                 >
-                  오디오 & 알림
+                  마이크
                 </button>
               </div>
             `}
@@ -190,7 +190,7 @@ export function ProfileSessionsTab({
 
         ${prefsOpen && (prefsTab === 'appearance'
           ? html`<${AppearancePanel} />`
-          : html`<${AudioPrefsPanel} />`)}
+          : html`<${MicrophonePrefsPanel} />`)}
       </section>
     </div>
   `

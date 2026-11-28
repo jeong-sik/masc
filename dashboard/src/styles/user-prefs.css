@@ -165,6 +165,9 @@
 
 .chat-bubble {
   max-width: var(--chat-measure, 78ch);
+}
+
+.chat-body-text {
   font-size: var(--chat-font-size, 14px);
 }
 
@@ -507,7 +510,7 @@
   overflow-x: auto;
 }
 
-/* ── Audio & Notification Rows ───────────────────────────────────────── */
+/* ── Microphone controls ───────────────────────────────────────── */
 
 .up-toggle-list {
   display: flex;
@@ -542,13 +545,6 @@
 .up-toggle-hint {
   font-size: var(--fs-11);
   color: var(--fg-3);
-}
-
-.up-cue-actions {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--sp-2);
-  flex: none;
 }
 
 .up-vu-wrap {

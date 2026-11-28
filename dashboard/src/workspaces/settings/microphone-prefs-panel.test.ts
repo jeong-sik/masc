@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, waitFor } from '@testing-library/preact'
 import { h } from 'preact'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { AudioPrefsPanel } from './audio-prefs-panel'
+import { MicrophonePrefsPanel } from './microphone-prefs-panel'
 
 const originalMediaDevices = Object.getOwnPropertyDescriptor(navigator, 'mediaDevices')
 
@@ -15,7 +15,7 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-describe('AudioPrefsPanel microphone test', () => {
+describe('MicrophonePrefsPanel microphone test', () => {
   it.each(['stop', 'unmount'] as const)('releases a microphone acquired after %s', async cancel => {
     let grant!: (stream: MediaStream) => void
     const getUserMedia = vi.fn(() => new Promise<MediaStream>(resolve => { grant = resolve }))
@@ -27,7 +27,7 @@ describe('AudioPrefsPanel microphone test', () => {
     vi.stubGlobal('AudioContext', AudioContext)
 
     const stop = vi.fn()
-    const view = render(h(AudioPrefsPanel, {}))
+    const view = render(h(MicrophonePrefsPanel, {}))
     const button = view.getByTestId('mic-test-btn')
     fireEvent.click(button)
     expect(getUserMedia).toHaveBeenCalledTimes(1)

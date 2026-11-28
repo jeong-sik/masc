@@ -450,11 +450,13 @@ let test_task_binding_reuses_only_exact_frozen_inputs () =
     not (List.mem "keeper_lane_status" (Masc.Keeper_tool_descriptor.keeper_model_names descriptor))) descriptors in
   check bool "the fixture really changes Tool authority" true (List.length without_lane < List.length descriptors);
   let changed_tools,changed_preparation = bind ~snapshot:first without_lane bound in
-  ignore changed_preparation;
+  check bool "changed Tool authority derives another preparation" false
+    (changed_preparation == prepared);
+  check (list string) "rebinding to changed Tool authority keeps every Task owner"
+    ["task-a";"task-b"] (List.sort String.compare (one_selected changed_tools).task_ids);
   let mixed_binding = Selection.merge [selection;changed_tools] in
   check bool "bound and unbound projections cannot share a reuse proof" true
     (Option.is_none mixed_binding.preparation);
-  ignore (bind ~snapshot:first without_lane mixed_binding);
   let later = snapshot skill_config
       [["lane",document ~name:"lane" ~description:"exact lane" "LATER"]] in
   let changed_source,_ = bind ~snapshot:later descriptors bound in

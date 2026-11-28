@@ -600,8 +600,7 @@ let test_subscribe_isolates_runtime_and_subscription_occurrences () =
         ignore (Masc.Sse.reap_dead_external_subscribers ())) (fun () ->
         List.iter (fun stream -> ignore (Grpc_eio.Stream.take stream)) [first;sibling;foreign];
         let publish base_path text =
-          let event = Ag_ui.make_event ~thread_id:"keeper:alpha" ~delta:(Some text)
-            Ag_ui.Text_message_content in
+          let event = Ag_ui.text_message_content ~thread_id:"keeper:alpha" ~delta:text () in
           Masc.Keeper_chat_broadcast.operation_event ~base_path ~keeper_name:"alpha"
             ~operation_id:"op-X" ~seq:(Some 1) ~event in
         publish base_a "ROOT_A";

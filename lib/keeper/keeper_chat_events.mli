@@ -71,7 +71,7 @@ type runtime_attempt_scope_disposition =
     accumulator decides whether the prior scope was sealed; worker transport
     and live projection carry this closed value without recomputing it. *)
 
-type tool_stream_occurrence =
+type tool_stream_occurrence = Ag_ui.tool_stream_occurrence =
   { stream_scope : int
   ; provider_message_id : string option
   ; block_index : int

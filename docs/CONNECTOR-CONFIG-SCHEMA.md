@@ -103,7 +103,9 @@ A Keeper that writes music in alphaTex makes these files with
 request, WAV audio, each returned as an `attachment_id`. A render whose
 files pass the attachment store's limits (20 MiB a file, and 20 MiB of a
 Keeper's temporary attachments together) is refused with nothing stored,
-before the server reads the files. The tool runs the
+before the server reads the files. WAV grows with the music, so the tool
+passes the per-file limit to `masc-alphatex`, which stops writing at it and
+removes the partial file. The tool runs the
 server host's `masc-alphatex`, so an operator installs or updates it with
 `scripts/install-alphatex.sh`; without it the tool reports a missing
 dependency.

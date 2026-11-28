@@ -23,6 +23,7 @@ const { values, positionals } = parseArgs({
     check: { type: 'boolean' },
     render: { type: 'string' },
     audio: { type: 'string' },
+    'audio-max-bytes': { type: 'string' },
     'export-midi': { type: 'string' },
     record: { type: 'boolean' },
     devices: { type: 'boolean' },
@@ -60,7 +61,8 @@ if (values.help) {
     + '  --record opens audio/MIDI input selection; r begins recording, s saves WAV and UMP.\n'
     + '  --session directory opens a saved waveform/MIDI timeline; --session-root sets the take folder.\n'
     + '  --devices lists CoreAudio devices and CoreMIDI inputs/outputs on macOS.\n'
-    + '  --check validates; --render output.png, --audio output.wav and --export-midi output.mid export using alphaTab 1.8.4.')
+    + '  --check validates; --render output.png, --audio output.wav and --export-midi output.mid export using alphaTab 1.8.4.\n'
+    + '  --audio-max-bytes N stops --audio before the WAV passes N bytes and exits 73.')
   process.exit(0)
 }
 
@@ -103,6 +105,12 @@ try {
   const index = Number(values.index) - 1
   if (!Number.isInteger(index) || index < 0 || index >= sources.length) throw new Error('score index is outside the snapshot')
   if (values.check || values.render || values.audio || values['export-midi']) {
+    // Read before any file is written, so a bad limit leaves no file behind.
+    const limit = values['audio-max-bytes']
+    const audioMaxBytes = limit === undefined ? undefined : Number(limit)
+    if (audioMaxBytes !== undefined && !(Number.isSafeInteger(audioMaxBytes) && audioMaxBytes > 0)) {
+      throw new Error(`--audio-max-bytes must be a positive integer, not ${limit}`)
+    }
     const { readScore, renderScore, midiForScore, engineVersion } = await import('./engine.mjs')
     let score
     try {
@@ -119,7 +127,7 @@ try {
     if (values['export-midi']) writeFileSync(values['export-midi'], midiForScore(sources[index], { smf1Mode: true }).midi.toBinary(), { flag: 'wx', mode: 0o600 })
     if (values.audio) {
       const { exportWave } = await import('./audio.mjs')
-      exportWave(sources[index], values.audio, { soundfontPath: values.soundfont })
+      exportWave(sources[index], values.audio, { soundfontPath: values.soundfont, maxBytes: audioMaxBytes })
     }
     console.log(JSON.stringify({ engine: 'alphaTab', version: engineVersion, title: score.title, tracks: score.tracks.length, bars: score.masterBars.length }))
   } else {

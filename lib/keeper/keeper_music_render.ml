@@ -45,6 +45,10 @@ let render_timeout_sec = 120.0
    not parse, and prints alphaTab's diagnostics on stderr. *)
 let exit_source_unreadable = 65
 
+(* sysexits EX_CANTCREAT: masc-alphatex exits with it when --audio-max-bytes
+   stops a WAV before it passes the limit; the partial file is already gone. *)
+let exit_audio_too_large = 73
+
 (* alphaTab's diagnostics name each error's line and column; this keeps a
    score with many errors from flooding the Keeper's context. *)
 let stderr_max_bytes = 4096
@@ -146,12 +150,20 @@ let render ~executable ~dir request =
   match Fs_compat.save_file source_path request.source with
   | exception Sys_error detail -> Error (Render_failed ("score write failed: " ^ detail))
   | () ->
+    (* WAV grows with the music, so its limit goes to masc-alphatex, which
+       stops writing at it; the store would refuse a larger file anyway. *)
+    let audio_limit =
+      if List.mem Audio request.outputs then
+        [ "--audio-max-bytes"; string_of_int (Attachment_store.max_bytes ()) ]
+      else []
+    in
     let argv =
       executable
       :: source_path
       :: List.concat_map
            (fun output -> [ export_flag output; Filename.concat dir (file_name output) ])
            request.outputs
+      @ audio_limit
     in
     (* Every path in [argv] is absolute, so the process needs no working
        directory of its own. Process_eio opens a [~cwd] beneath its
@@ -172,6 +184,8 @@ let render ~executable ~dir request =
         | Process_eio.Completed 0 -> summary_of_stdout stdout
         | Process_eio.Completed code when code = exit_source_unreadable ->
           Error (Source_unreadable (bounded_stderr stderr))
+        | Process_eio.Completed code when code = exit_audio_too_large ->
+          Error (Too_large (bounded_stderr stderr))
         | Process_eio.Completed code ->
           Error
             (Render_failed

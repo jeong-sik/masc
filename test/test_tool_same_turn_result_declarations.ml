@@ -94,6 +94,35 @@ let test_every_declaring_file_reaches_a_model_name () =
     (Tool_same_turn_result_declarations.sent_as_pointer ())
 ;;
 
+(* RFC-0510 D6 turns the pointer on tool by tool, for tools that only read.
+   The board read declares it. [Execute] has effects: a second run that prints
+   the same text is a second event, not a second copy of the first. *)
+let test_the_board_read_declares_it_and_execute_does_not () =
+  check
+    (option same_turn_result)
+    "masc_board_post_get"
+    (Some Tool_definition_toml.Repeat_sent_as_pointer)
+    (Tool_same_turn_result_declarations.declared "masc_board_post_get");
+  (* The request assembly reads a descriptor's internal name, and Execute's
+     is tool_execute: that file decides what the model's Execute results do. *)
+  check
+    (option same_turn_result)
+    "tool_execute"
+    (Some Tool_definition_toml.Repeat_sent_whole)
+    (Tool_same_turn_result_declarations.declared "tool_execute");
+  let model_names = Keeper_tool_descriptor.same_turn_result_pointer_model_names () in
+  check
+    bool
+    "the request assembly is asked about masc_board_post_get"
+    true
+    (List.exists (String.equal "masc_board_post_get") model_names);
+  check
+    bool
+    "the request assembly is not asked about Execute"
+    false
+    (List.exists (String.equal "Execute") model_names)
+;;
+
 let () =
   run
     "tool same-turn result declarations"
@@ -113,6 +142,10 @@ let () =
             "every declaring file reaches a model name"
             `Quick
             test_every_declaring_file_reaches_a_model_name
+        ; test_case
+            "the board read declares it and Execute does not"
+            `Quick
+            test_the_board_read_declares_it_and_execute_does_not
         ] )
     ]
 ;;

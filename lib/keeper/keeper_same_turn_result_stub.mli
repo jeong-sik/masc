@@ -6,8 +6,7 @@
     state and stores nothing, so the same list gives the same output, and
     appending messages never changes the output for the messages before them:
     a result is decided from the messages in front of it only. A result is
-    therefore a stub from the first request that carries it, and the same stub
-    on every later request (RFC-0510 D5).
+    therefore a stub while the request still carries its target (RFC-0510 D5).
 
     The request assembly ([Keeper_turn_driver_try_provider]) calls it and
     owns three things this module does not: which tools are on ([enabled],
@@ -25,7 +24,8 @@ val encode : first_tool_use_id:string -> bytes:int -> sha256:string -> string
     reads it as [Not_marker]. *)
 
 val apply
-  :  enabled:(string -> bool)
+  :  ?is_transmitted:(int -> bool)
+  -> enabled:(string -> bool)
   -> min_bytes:int
   -> Agent_core.Types.message list
   -> Agent_core.Types.message list
@@ -35,7 +35,10 @@ val apply
     messages before the first such message are one turn of their own. Within
     a turn, the first result with a given text stays as it is and every later
     result with byte-equal text has its [content] replaced by {!encode}
-    pointing at that first result. A result never points into another turn.
+    pointing at that first result. [is_transmitted], when provided, selects
+    candidate results by their zero-based message index. Only selected results
+    can be stubs or serve as their targets. Turn boundaries and tool names
+    still come from the original messages. A result never points into another turn.
 
     A result is left exactly as it is when any of these hold:
 

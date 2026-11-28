@@ -3310,6 +3310,52 @@ let test_alternating_write_and_retract_receipts_carry_the_id_history () =
   ignore (fingerprint second_raw)
 ;;
 
+(* A folded log keeps only the last removal per id, so retractions can vanish
+   with the folded detail rows; the receipt must then say every count is a
+   lower bound, not only inserts (reviews on #55484). *)
+let test_of_history_marks_folded_history_as_lower_bounds () =
+  with_temp_dir
+  @@ fun base_path ->
+  let log_path = Filename.concat base_path "keeper-log.jsonl" in
+  let base = Result.get_ok (Librarian_archive.history log_path) in
+  let origin : Keeper_memory_os_types.origin =
+    { kind = Keeper_memory_os_types.Authored; trace_id = "fixture" }
+  in
+  let fact =
+    Keeper_memory_os_types.observed ~claim:"folded away" ~category:Keeper_memory_os_types.Fact
+      ~now:1. ~origin
+  in
+  let id = Keeper_memory_os_types.memory_id fact in
+  let left : Librarian_archive.left =
+    { fact
+    ; removal = Librarian_effects.Retracted { by = Librarian_effects.Keeper; reason = "folded away" }
+    ; at = 5.
+    ; line_at = 0
+    }
+  in
+  let folded_marker : Librarian_archive.folded =
+    { through_seq = 10; min_revision = 1; max_revision = 10; min_at = 1.; max_at = 10. }
+  in
+  let check_folded label history =
+    let t = Keeper_memory_id_history.of_history ~memory_id:id history in
+    Alcotest.(check bool) (label ^ ": folded flag set") true t.folded;
+    Alcotest.(check int) (label ^ ": the surviving removal is still counted") 1 t.retracted;
+    let key, json = Keeper_memory_id_history.receipt_field (Ok t) in
+    Alcotest.(check string) (label ^ ": receipt key") "memory_id_history" key;
+    (match json with
+     | `Assoc fields ->
+       Alcotest.(check bool)
+         (label ^ ": every count is marked a lower bound")
+         true
+         (List.assoc "older_history_folded" fields = `Bool true)
+     | _ -> Alcotest.fail (label ^ ": receipt is not an object"))
+  in
+  check_folded "compaction fold"
+    { base with folded = Some folded_marker; unsequenced = [left] };
+  check_folded "sidecar left row only" { base with unsequenced = [left] };
+  ()
+;;
+
 let test_source_snapshot_commit_notifications () =
   let module Source = Masc.Keeper_memory_source_current in
   let module Notifications = Masc.Keeper_memory_commit_notifications in
@@ -3937,6 +3983,10 @@ let () =
             "alternating write and retract receipts carry the id history"
             `Quick
             test_alternating_write_and_retract_receipts_carry_the_id_history
+        ; tool_case
+            "folded history marks every count as a lower bound"
+            `Quick
+            test_of_history_marks_folded_history_as_lower_bounds
         ; tool_case
             "source parser accepts every supported value"
             `Quick

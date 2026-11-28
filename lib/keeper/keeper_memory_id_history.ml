@@ -35,9 +35,10 @@ let count_removal ~at acc (removal : Librarian_effects.removal) =
 let is_id ~memory_id fact = String.equal (Types.memory_id fact) memory_id
 
 let of_history ~memory_id (history : Librarian_archive.history) =
-  let initial =
-    empty ~unreadable:history.unreadable ~folded:(Option.is_some history.folded)
-  in
+  (* A sidecar [Left] row reads as [unsequenced] with [folded = None], but the
+     detail rows behind it are gone all the same. *)
+  let folded = Option.is_some history.folded || history.unsequenced <> [] in
+  let initial = empty ~unreadable:history.unreadable ~folded in
   let after_unsequenced =
     List.fold_left
       (fun acc (left : Librarian_archive.left) ->
@@ -84,7 +85,7 @@ let to_json t =
          | None -> `Null )
      ]
      @ (if t.unreadable = 0 then [] else [ "unreadable_log_lines", `Int t.unreadable ])
-     @ if t.folded then [ "older_inserts_folded", `Bool true ] else [])
+     @ if t.folded then [ "older_history_folded", `Bool true ] else [])
 ;;
 
 let receipt_field = function

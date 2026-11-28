@@ -8,7 +8,8 @@
     the same ids ten times each). This reads the id's past off the commit log
     the receipt's commit was appended to, so the receipt can carry it.
 
-    Counts include the commit the receipt reports. Nothing here writes. *)
+    Counts include the commit the receipt reports and are exact only while the
+    log is unfolded and fully decodable. Nothing here writes. *)
 
 type t =
   { inserted : int
@@ -19,13 +20,15 @@ type t =
   (** Removals of this id for any other reason: dropped, merged, revised,
       superseded, lost support or molted. *)
   ; last_retracted_at : float option
-  (** Commit time of the latest retraction, when there was one. *)
+  (** Commit time of the latest retraction when one is recorded; folded-away
+      history can hide it, so [None] does not mean "never retracted". *)
   ; unreadable : int
   (** Commit log lines that did not decode. What they did is not known, so
       every count is a lower bound when this is not 0. *)
   ; folded : bool
-  (** Compaction folded older commits into removal-only rows. Inserts from
-      before the fold are not counted, so [inserted] is a lower bound. *)
+  (** Older commits were folded away — by compaction, or into a sidecar
+      [Left] row. Every count is then a lower bound and [last_retracted_at]
+      may be [None] even when retractions happened. *)
   }
 
 val of_history : memory_id:string -> Librarian_archive.history -> t

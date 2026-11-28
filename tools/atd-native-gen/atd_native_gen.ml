@@ -9,9 +9,13 @@
 
 let usage = "usage: atd_native_gen swift FILE.atd"
 
+let load path =
+  match Atd.Util.load_file ~inherit_fields:true ~inherit_variants:true path with
+  | atd -> Atd_native.Native_ir.of_module atd
+  | exception Atd.Ast.Atd_error message -> Error message
+
 let generate path =
-  let atd = Atd.Util.load_file ~inherit_fields:true ~inherit_variants:true path in
-  match Atd_native.Native_ir.of_module atd with
+  match load path with
   | Ok defs ->
     print_string (Atd_native.Swift_gen.emit ~source:(Filename.basename path) defs);
     0

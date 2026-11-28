@@ -246,6 +246,85 @@ let check_payloads defs =
          | Record _ | Enum _ -> [])
        defs)
 
+(* Words swiftc 6.4.2 refuses both as a property name and as an enum case
+   name (swiftc -typecheck, one file per word, 2026-11-28). Contextual
+   keywords such as open, await and some compile and are not here. *)
+let swift_keywords =
+  [ "associatedtype"; "class"; "deinit"; "enum"; "extension"; "fileprivate"; "func"; "import"
+  ; "init"; "inout"; "internal"; "let"; "operator"; "private"; "precedencegroup"; "protocol"
+  ; "public"; "rethrows"; "static"; "struct"; "subscript"; "typealias"; "var"; "break"; "case"
+  ; "catch"; "continue"; "default"; "defer"; "do"; "else"; "fallthrough"; "for"; "guard"; "if"
+  ; "in"; "repeat"; "return"; "throw"; "switch"; "where"; "while"; "as"; "false"; "is"; "nil"
+  ; "self"; "super"; "throws"; "true"; "try"
+  ]
+
+(* Type names the generated Swift already uses, plus Self and Any, which
+   swiftc refuses as type names. A definition with one of these names would
+   shadow or break the generated code. *)
+let swift_taken_types =
+  [ "String"; "Int"; "Double"; "Bool"; "JSONValue"; "Decodable"; "Equatable"; "Sendable"
+  ; "Decoder"; "CodingKey"; "CodingKeys"; "DecodingError"; "TagKey"; "Self"; "Any"
+  ]
+
+let def_name = function
+  | Record { name; _ } | Enum { name; _ } | Tagged { name; _ } -> name
+
+(* [atd_names] become [native] names; two ATD names must not become one. *)
+let distinct ~what pairs =
+  let rec go seen = function
+    | [] -> Ok ()
+    | (atd, native) :: rest ->
+      (match List.assoc_opt native seen with
+       | Some other -> Error (Printf.sprintf "%s %s and %s both become %s" what other atd native)
+       | None -> go ((native, atd) :: seen) rest)
+  in
+  go [] pairs
+
+let not_keyword ~what (atd, native) =
+  if List.mem native swift_keywords
+  then Error (Printf.sprintf "%s %s becomes %s, a Swift keyword" what atd native)
+  else Ok ()
+
+let case_names ~owner ~openness names =
+  let what = "case of " ^ owner in
+  let pairs = List.map (fun name -> name, Naming.lower_camel name) names in
+  let* () = distinct ~what pairs in
+  let* _ = all (List.map (not_keyword ~what) pairs) in
+  match openness, List.find_opt (fun (_, native) -> native = "unrecognized") pairs with
+  | Open, Some (atd, _) ->
+    Error (Printf.sprintf "%s %s becomes unrecognized, the case <native open> adds" what atd)
+  | Open, None | Closed, _ -> Ok ()
+
+let check_names defs =
+  let types = List.map (fun def -> def_name def, Naming.upper_camel (def_name def)) defs in
+  let* () = distinct ~what:"type" types in
+  let* _ =
+    all
+      (List.map
+         (fun (atd, native) ->
+           if List.mem native swift_taken_types
+           then Error (Printf.sprintf "type %s becomes %s, which the generated Swift already names" atd native)
+           else Ok ())
+         types)
+  in
+  let* _ =
+    all
+      (List.map
+         (function
+           | Record { name; fields } ->
+             let what = "field of " ^ name in
+             let pairs = List.map (fun (field : field) -> field.name, Naming.lower_camel field.name) fields in
+             let* () = distinct ~what pairs in
+             let* _ = all (List.map (not_keyword ~what) pairs) in
+             Ok ()
+           | Enum { name; cases; openness } ->
+             case_names ~owner:name ~openness (List.map (fun case -> case.case_name) cases)
+           | Tagged { name; cases; openness } ->
+             case_names ~owner:name ~openness (List.map (fun case -> case.tag_name) cases))
+         defs)
+  in
+  Ok ()
+
 let of_module (atd : A.module_) =
   let* () =
     match atd.imports with
@@ -258,6 +337,7 @@ let of_module (atd : A.module_) =
   in
   let* defs = all (List.map (def ~json_aliases) other_defs) in
   let* _ = check_payloads defs in
+  let* () = check_names defs in
   Ok defs
 
 let uses_json defs =

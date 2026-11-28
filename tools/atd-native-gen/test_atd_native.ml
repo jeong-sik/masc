@@ -18,25 +18,48 @@ let find_def name defs =
       | Record { name = n; _ } | Enum { name = n; _ } | Tagged { name = n; _ } -> String.equal n name)
     defs
 
+(* Cases per sum and fields per record (inherit expanded) in the ATD. *)
+let ast_sizes (atd : Atd.Ast.module_) =
+  List.filter_map
+    (fun (def : Atd.Ast.type_def) ->
+      let (TN path) = def.name in
+      let name = String.concat "." path in
+      match def.value with
+      | Sum (_, variants, _) -> Some (name, List.length variants)
+      | Record (_, fields, _) -> Some (name, List.length fields)
+      | Name _ | Tuple _ | List _ | Option _ | Nullable _ | Shared _ | Wrap _ | Tvar _ -> None)
+    atd.type_defs
+
+let ir_size : Native_ir.def -> int = function
+  | Record { fields; _ } -> List.length fields
+  | Enum { cases; _ } -> List.length cases
+  | Tagged { cases; _ } -> List.length cases
+
 let test_wire_is_taken () =
-  match Native_ir.of_module (wire ()) with
+  let atd = wire () in
+  match Native_ir.of_module atd with
   | Error message -> Alcotest.fail message
   | Ok defs ->
+    let sizes = ast_sizes atd in
+    Alcotest.(check int) "one definition per ATD record and sum" (List.length sizes) (List.length defs);
+    List.iter
+      (fun (name, size) ->
+        match find_def name defs with
+        | Some def -> Alcotest.(check int) ("every case and field of " ^ name) size (ir_size def)
+        | None -> Alcotest.failf "%s is missing" name)
+      sizes;
     (match find_def "frame" defs with
-     | Some (Tagged { cases; openness = Open; _ }) ->
-       Alcotest.(check int) "frame kinds" 10 (List.length cases)
+     | Some (Tagged { openness = Open; _ }) -> ()
      | Some (Record _ | Enum _ | Tagged { openness = Closed; _ }) | None ->
        Alcotest.fail "frame is not an open tagged sum");
     (match find_def "custom_name" defs with
-     | Some (Enum { cases; openness = Open; _ }) ->
-       Alcotest.(check int) "custom names" 30 (List.length cases)
+     | Some (Enum { openness = Open; _ }) -> ()
      | Some (Record _ | Tagged _ | Enum { openness = Closed; _ }) | None ->
        Alcotest.fail "custom_name is not an open enum");
     (match find_def "role" defs with
      | Some (Enum { openness = Closed; _ }) -> ()
      | Some (Record _ | Tagged _ | Enum { openness = Open; _ }) | None ->
-       Alcotest.fail "role is not a closed enum");
-    Alcotest.(check bool) "json alias is not a type of its own" true (find_def "json" defs = None)
+       Alcotest.fail "role is not a closed enum")
 
 let type_field = {|<json adapter.ocaml="Atdgen_runtime.Json_adapter.Type_field">|}
 
@@ -54,6 +77,12 @@ type t = [ A of r ] <json adapter.ocaml="My.Adapter">|}, "adapter My.Adapter"
   ; "a default field", "type t = { ~x : int }", "default field"
   ; "an abstract type that is not json", "type t = abstract", "record or a sum"
   ; "a parametric type", "type 'a t = { x : 'a }", "parametric"
+  ; "a field that becomes a Swift keyword", "type t = { default : int }", "a Swift keyword"
+  ; "a case that becomes a Swift keyword", "type t = [ Default | B ]", "a Swift keyword"
+  ; "two fields that become one name", "type t = { run_id : int; run__id : int }", "both become runId"
+  ; "two types that become one name", "type a_b = { x : int }\ntype a__b = { x : int }", "both become AB"
+  ; "a type the generated Swift names", "type double = { x : int }", "already names"
+  ; "an open case named unrecognized", "type t = [ A | Unrecognized ] <native open>", "<native open> adds"
   ]
 
 let contains ~phrase text =

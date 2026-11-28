@@ -4962,6 +4962,11 @@ supports_structured_output = true
 supports_native_streaming = true
 ignored_sampling_parameters = ["temperature", "top_p"]
 
+# K2.7 Code Highspeed. The Coding Plan lists its reasoning as "Thinking:ON"
+# and says it "does not support adjustable thinking effort", so the row
+# takes no depth. An explicit disable is accepted as none, which the plan
+# serves with K2.8 Preview without thinking, as on k3 above. Checked
+# 2026-11-28T11:38Z: https://www.kimi.com/code/docs/en/kimi-code/models.html.
 [[models]]
 model_id = "kimi-for-coding-highspeed"
 provider_name = "kimi_coding"
@@ -4976,12 +4981,18 @@ prompt_cache_wire = "kimi_prompt_cache_options"
 thinking_control_format = "reasoning_effort_default_on"
 reasoning_streaming_format = "delta:reasoning_content"
 reasoning_replay = "preserve_always"
-accepted_reasoning_efforts = ["none", "low", "high", "max"]
+accepted_reasoning_efforts = ["none"]
 supports_response_format_json = true
 supports_structured_output = true
 supports_native_streaming = true
 ignored_sampling_parameters = ["temperature", "top_p"]
 
+# K3.1 Pro takes low/high/max, default high, and runs with thinking on
+# only: the plan's effort table answers off/none/disabled with HTTP 400
+# ("requests with thinking disabled are rejected"). none is therefore not
+# in the ladder, and an explicit disable is refused before the request
+# leaves. Checked 2026-11-28T11:38Z:
+# https://www.kimi.com/code/docs/en/kimi-code/models.html.
 [[models]]
 model_id = "k3.1-pro"
 provider_name = "kimi_coding"
@@ -4996,12 +5007,13 @@ prompt_cache_wire = "kimi_prompt_cache_options"
 thinking_control_format = "reasoning_effort_default_on"
 reasoning_streaming_format = "delta:reasoning_content"
 reasoning_replay = "preserve_always"
-accepted_reasoning_efforts = ["none", "low", "high", "max"]
+accepted_reasoning_efforts = ["low", "high", "max"]
 supports_image_input = true
 supports_multimodal_inputs = true
 supports_native_streaming = true
 ignored_sampling_parameters = ["temperature"]
 
+# The effort contract of k3.1-pro above.
 [[models]]
 model_id = "k3.1-pro-highspeed"
 provider_name = "kimi_coding"
@@ -5016,7 +5028,7 @@ prompt_cache_wire = "kimi_prompt_cache_options"
 thinking_control_format = "reasoning_effort_default_on"
 reasoning_streaming_format = "delta:reasoning_content"
 reasoning_replay = "preserve_always"
-accepted_reasoning_efforts = ["none", "low", "high", "max"]
+accepted_reasoning_efforts = ["low", "high", "max"]
 supports_image_input = true
 supports_multimodal_inputs = true
 supports_native_streaming = true

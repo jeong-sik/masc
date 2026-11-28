@@ -220,6 +220,67 @@ let test_configured_effort model_id () =
     check_effort "explicit disable without a configured depth" (Some "none")
       (request {default with enable_thinking = Some false}))
 
+(* The Coding Plan model table, checked 2026-11-28T11:38Z
+   (https://www.kimi.com/code/docs/en/kimi-code/models.html): K3.1 Pro answers
+   a thinking-disabled request with HTTP 400, and K2.7 Code Highspeed takes no
+   thinking depth. The catalog ladder refuses both in admission, before the
+   request leaves. *)
+let admitted_request config =
+  Result.bind (Provider.Complete_common.validate_all config)
+    (fun () -> Provider.Complete_common.serialize_http_request ~stream:false ~config
+        ~messages:[Provider.Types.user_msg "Weather?"] ~tools:[])
+
+let request_effort label config =
+  match admitted_request config with
+  | Ok artifact ->
+    Yojson.Safe.from_string artifact.body |> J.member "reasoning_effort" |> J.to_string_option
+  | Error (Provider.Http_client.AcceptRejected {reason}) -> failf "%s was refused: %s" label reason
+  | Error _ -> failf "%s: Kimi Coding request serialization failed" label
+
+let refused_in_admission label config =
+  match admitted_request config with
+  | Error (Provider.Http_client.AcceptRejected _) -> ()
+  | Ok _ -> failf "%s was admitted" label
+  | Error _ -> failf "%s failed outside admission" label
+
+let with_configured_effort (runtime : Runtime_schema.config) model_id effort =
+  provider_config {runtime with models = List.map
+      (fun (model : Runtime_schema.model_spec) ->
+        if model.id = model_id then {model with reasoning_effort = Some effort}
+        else model) runtime.models} model_id
+
+let test_thinking_only_model_refuses_disable model_id () =
+  with_catalog (fun () ->
+    let runtime = runtime_config () in
+    let default = provider_config runtime model_id in
+    check (option string) "shipped default omits effort" None
+      (request_effort "the shipped default" default);
+    List.iter (fun effort ->
+      let config = with_configured_effort runtime model_id effort in
+      check (option string) "documented effort reaches the request"
+        (Some (Provider.Reasoning_effort.to_string effort))
+        (request_effort "a documented effort" {config with enable_thinking = Some true});
+      refused_in_admission "an explicit disable over a configured depth"
+        {config with enable_thinking = Some false})
+      Provider.Reasoning_effort.[Low; High; Max];
+    refused_in_admission "an explicit disable" {default with enable_thinking = Some false})
+
+let test_fixed_depth_model_takes_no_effort model_id () =
+  with_catalog (fun () ->
+    let runtime = runtime_config () in
+    let default = provider_config runtime model_id in
+    check (option string) "shipped default omits effort" None
+      (request_effort "the shipped default" default);
+    check (option string) "explicit enable omits effort" None
+      (request_effort "an explicit enable" {default with enable_thinking = Some true});
+    List.iter (fun effort ->
+      refused_in_admission ("effort " ^ Provider.Reasoning_effort.to_string effort)
+        (with_configured_effort runtime model_id effort))
+      Provider.Reasoning_effort.[Low; High; Max];
+    (* The plan serves this with K2.8 Preview without thinking, as on k3. *)
+    check (option string) "explicit disable travels as none" (Some "none")
+      (request_effort "an explicit disable" {default with enable_thinking = Some false}))
+
 let () =
   Alcotest.run "Kimi Coding replay"
     [ "configured HTTP checkpoint replay",
@@ -230,4 +291,11 @@ let () =
         ["kimi-for-coding"; "kimi-k3"; "kimi-k3-256k"]
     ; "configured HTTP effort contract",
       List.map (fun model_id -> test_case model_id `Quick (test_configured_effort model_id))
-        ["kimi-for-coding"; "kimi-k3"; "kimi-k3-256k"] ]
+        ["kimi-for-coding"; "kimi-k3"; "kimi-k3-256k"]
+    ; "thinking-only models refuse a disable",
+      List.map (fun model_id ->
+          test_case model_id `Quick (test_thinking_only_model_refuses_disable model_id))
+        ["kimi-k3-1-pro"; "kimi-k3-1-pro-highspeed"]
+    ; "fixed-depth model takes no effort",
+      [ test_case "kimi-for-coding-highspeed" `Quick
+          (test_fixed_depth_model_takes_no_effort "kimi-for-coding-highspeed") ] ]

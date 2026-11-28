@@ -403,7 +403,10 @@ let read store = match store.comments_source with
         unavailable (Comments_workspace_refused rejection)
       | Ok before ->
         let path = Board_paths.comments_path store in
-        match Fs_compat.private_jsonl_snapshot_success_receipt (read_file store path) with
+        let seen, received = Source_file.around_read store.comments_source_seen ~path (fun () ->
+          Fs_compat.private_jsonl_snapshot_success_receipt (read_file store path)) in
+        store.comments_source_seen <- seen;
+        match received with
         | Error error ->
           diagnostics := [Comments_file_diagnostic error];
           let failure = Comments_transaction_failed error in
@@ -532,7 +535,8 @@ let rec contradicts_observation = function
 
 (* #55449: a refusal that one more read of the same file can end is read
    again before the next operation, as the posts source is (task-4036). A
-   refusal for any other reason is not: the file would refuse again. *)
+   refusal for any other reason is read again once the file has changed since
+   this store last read it (#55465). *)
 let stale_observation = function
   | Comments_transaction_failed error -> Board_posts_source.fresh_read_can_clear error
   | Comments_not_observed | Comments_rows_rejected _ | Comments_missing
@@ -540,7 +544,9 @@ let stale_observation = function
   | Comments_reload_required | Comments_workspace_refused _ | Comments_raised _ -> false
 
 let reobservation_due store = match store.comments_source with
-  | Comments_refused { failure; _ } -> stale_observation failure
+  | Comments_refused { failure; _ } ->
+    stale_observation failure
+    || Source_file.changed_since store.comments_source_seen ~path:(Board_paths.comments_path store)
   | Comments_unobserved | Comments_readable _ | Comments_publishing _ | Comments_recovered _
   | Comments_unsettled _ -> false
 

@@ -201,10 +201,12 @@ let read_source store =
       let path = Board_paths.persist_path store in
       let stage = ref Read_posts in
       try
-        let result = match store.posts_source_io.posts with
-          | None -> Fs_compat.read_private_jsonl_durable_locked_result path ~after:None
-          | Some io -> Fs_compat.read_private_jsonl_durable_locked_with_io_for_testing ~io path ~after:None in
-        match Fs_compat.private_jsonl_snapshot_success_receipt result with
+        let seen, received = Source_file.around_read store.posts_source_seen ~path (fun () ->
+          Fs_compat.private_jsonl_snapshot_success_receipt (match store.posts_source_io.posts with
+            | None -> Fs_compat.read_private_jsonl_durable_locked_result path ~after:None
+            | Some io -> Fs_compat.read_private_jsonl_durable_locked_with_io_for_testing ~io path ~after:None)) in
+        store.posts_source_seen <- seen;
+        match received with
         | Error error -> add (File_diagnostic { file = Posts_file; error });
           unavailable (Posts_transaction_failed error)
         | Ok receipt ->
@@ -366,11 +368,10 @@ let write store ~pre_write ~kind ~workspace_observation ~bytes ~diagnostics perf
    longer the one observed. A path that changed during the operation and a
    contended lock end when the other writer does. The rest describe the file
    as it is (a torn tail, a second hard link, not a regular file) or an
-   operation that failed. While such a cause lasts a read meets it again, and
-   nothing here tells when it has gone, so a source that kept asking would
-   take persistence at every operation. Such a refusal is not read again: it
-   lasts until a restart, also after the file was repaired or the failure
-   passed (#55465). *)
+   operation that failed. While such a cause lasts a read meets it again, so
+   a source that kept asking would take persistence at every operation. Such
+   a refusal is read again only once the file is no longer the one this
+   store last read ([Source_file], #55465). *)
 let rec fresh_read_can_clear = function
   | Fs_compat.Cursor_mismatch _ | Transaction_content_changed _
   | Transaction_path_binding_changed _ | Stable_lock_contended _ -> true
@@ -398,18 +399,23 @@ type reobservation =
   | Reobserved of posts_source_read
   | Unsettled_write_pending
 
+(* #55465: a refusal for any other cause is read again once the file has
+   changed since this store last read it: one [lstat], and no lock. A stale
+   observation is asked first, so it costs no IO. *)
+let reobservation_due store = match store.posts_source with
+  | Posts_refused { failure; _ } ->
+    stale_observation failure
+    || Source_file.changed_since store.posts_source_seen ~path:(Board_paths.persist_path store)
+  | Posts_unobserved | Posts_readable _ | Posts_unsettled _ -> false
+
 (* An unsettled store keeps its unknown-write evidence: a read cannot prove a
    durability-unknown publication durable (the parent-sync case), so only a
    fresh store settles it. Reobservation reports that instead of re-reading. *)
 let reobserve store = match store.posts_source with
   | Posts_unobserved | Posts_readable _ -> Reobservation_not_due
-  | Posts_refused { failure; _ } ->
-    if stale_observation failure then Reobserved (read_source store) else Reobservation_not_due
+  | Posts_refused _ ->
+    if reobservation_due store then Reobserved (read_source store) else Reobservation_not_due
   | Posts_unsettled _ -> Unsettled_write_pending
-
-let reobservation_due store = match store.posts_source with
-  | Posts_refused { failure; _ } -> stale_observation failure
-  | Posts_unobserved | Posts_readable _ | Posts_unsettled _ -> false
 
 let observe_guard_refusal store observation failure =
   match store.posts_source with

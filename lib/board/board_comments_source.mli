@@ -71,11 +71,11 @@ val rewrite : store -> snapshot -> unit write_outcome
 
 val require_readable : store -> (unit, board_error) result
 val reobservation_due : store -> bool
-(** Pure. True only when this store is refused for a cause
-    {!Board_posts_source.fresh_read_can_clear} accepts: its file moved away
-    from the observation it holds, or the read met another writer's lock.
-    False for every other refusal and for a pending publication or an unknown
-    write (#55449). *)
+(** Whether this source is read again, by the rule of
+    {!Board_posts_source.reobservation_due}: it is refused, and either its
+    cause is one {!Board_posts_source.fresh_read_can_clear} accepts (#55449)
+    or its file has changed since this store last read it (#55465). False,
+    without IO, for a pending publication or an unknown write. *)
 val observe_guard_refusal : store -> comments_source_observation ->
   Fs_compat.private_jsonl_guard_failure -> unit
 (** Notify only this exact current observation after a parent guard refusal.

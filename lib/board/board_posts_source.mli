@@ -42,24 +42,32 @@ val require_readable : store -> (unit, board_error) result
     source reads and writes. A fresh store loads the actual source instead. *)
 type reobservation =
   | Reobservation_not_due
-      (** Readable, never observed, or refused for a cause
-          {!fresh_read_can_clear} does not accept. No IO was performed. *)
+      (** Readable, never observed, or refused with nothing due
+          ({!reobservation_due}). The file was not read. *)
   | Reobserved of posts_source_read
-      (** The store was refused for a cause {!fresh_read_can_clear} accepts.
-          The caller installs the read into the model and {!publish_read}s
-          it. *)
+      (** The store was refused and due ({!reobservation_due}). The caller
+          installs the read into the model and {!publish_read}s it. *)
   | Unsettled_write_pending
       (** An earlier write's outcome is unknown. No IO is performed: a read
           cannot prove a durability-unknown publication durable, so only a
           fresh store (server restart) settles it. *)
 
 val reobserve : store -> reobservation
-(** Caller holds persistence. Re-reads the posts file only when the store is
-    refused for a cause {!fresh_read_can_clear} accepts, so a write refused
-    because another writer appended does not refuse every later write. *)
+(** Caller holds persistence. Re-reads the posts file only when
+    {!reobservation_due}: a write refused because another writer appended
+    does not refuse every later write, and a refusal for what the file was
+    ends once the file is repaired. *)
 
 val reobservation_due : store -> bool
-(** Pure. Whether {!reobserve} would read the file. *)
+(** Whether {!reobserve} would read the file. The store is refused, and
+    either its cause is one {!fresh_read_can_clear} accepts, or the file has
+    changed since this store last read it
+    ({!Board_types.Source_file.changed_since}, #55465). The first is answered
+    from the store's fields. The second is asked only when the first is no:
+    one [lstat], no lock. A read that fails before it reaches the file leaves
+    what the store last saw as it was, so the source stays due and the next
+    call tries again; a store whose reads never reached the file is always
+    due. Every other phase answers [false] without IO. *)
 
 val failure_to_board_error : posts_source_failure -> board_error
 val finish_write : posts_write_outcome -> (unit, board_error) result
@@ -87,9 +95,9 @@ val fresh_read_can_clear : Fs_compat.private_jsonl_transaction_error -> bool
     operation: a cursor or content mismatch, a path that changed during the
     operation, or a contended lock. A torn tail, a second hard link, a file
     that is not regular and a failed operation are not: a refusal for one
-    lasts until a restart, also after the file was repaired or the failure
-    passed (#55465). Every Board source asks this before it reads
-    again (#55449). *)
+    is read again only once the file has changed since the store last read
+    it ({!reobservation_due}, #55465). Every Board source asks this before it
+    reads again (#55449). *)
 val propagate_reserved : exn -> Printexc.raw_backtrace -> unit
 val defer_reserved :
   result:(unit, board_error) result -> exn -> Printexc.raw_backtrace -> unit

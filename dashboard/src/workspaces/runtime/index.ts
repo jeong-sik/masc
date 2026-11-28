@@ -2,18 +2,17 @@ import { html } from 'htm/preact'
 import { AddonsTab } from './addons-tab'
 import { EfficiencyTab } from './efficiency-tab'
 import { LanesTab } from './lanes-tab'
+import { PromptsTab } from './prompts-tab'
 import { QuotasTab } from './quotas-tab'
 import { ToolsTab } from './tools-tab'
 import {
   normalizeRuntimeSubroute,
-  RUNTIME_TABS,
   type RuntimeSubroute,
   type WorkspaceInspectPayload,
   type WorkspaceViewProps,
 } from './types'
 
 export {
-  RUNTIME_TABS,
   normalizeRuntimeSubroute,
   type RuntimeSubroute,
   type WorkspaceInspectPayload,
@@ -32,6 +31,8 @@ export function RuntimeWorkspace(props: WorkspaceViewProps) {
       return html`<${LanesTab} ...${props} />`
     case 'tools':
       return html`<${ToolsTab} ...${props} />`
+    case 'prompts':
+      return html`<${PromptsTab} ...${props} />`
     case 'addons':
       return html`<${AddonsTab} ...${props} />`
   }

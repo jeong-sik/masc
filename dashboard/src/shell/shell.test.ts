@@ -21,7 +21,7 @@ import {
 import { resourceCache } from '../core/resource-cache'
 import { resetTimeWindowForTests, timeWindow } from '../core/time-window'
 import { apiMutate } from '../core/transport'
-import { currentRoute, navigate, resetRouterForTests } from '../routes/router'
+import { WORKSPACE_NAV, currentRoute, navigate, resetRouterForTests } from '../routes/router'
 import { App, ShellToastHost } from '../app'
 import { CommandPalette, buildPaletteCommands } from './command-palette'
 import { FastApprovalStrip } from './fast-approval-strip'
@@ -1089,12 +1089,13 @@ describe('Proposal A+ Shell components', () => {
       render(h(TopBar, {}), container)
     })
 
-    // Desktop .ap-subtabs hidden; mobile .ap-mobile-subtabs exposes all 5 Runtime L1 sub-tabs
+    // Desktop .ap-subtabs hidden; mobile .ap-mobile-subtabs exposes every Runtime L1 sub-tab
     expect(container.querySelector('.ap-subtabs')).toBeNull()
     const mobileBar = container.querySelector('[data-testid="mobile-subtabs"]')
     expect(mobileBar).not.toBeNull()
     expect(mobileBar?.classList.contains('ap-mobile-subtabs')).toBe(true)
-    expect(mobileBar?.querySelectorAll('.ap-subtab')).toHaveLength(5)
+    expect(Array.from(mobileBar?.querySelectorAll('.ap-subtab') ?? []).map(tab => tab.getAttribute('data-subtab')))
+      .toEqual(WORKSPACE_NAV.find(nav => nav.id === 'runtime')?.subtabs.map(tab => tab.id))
     expect(mobileBar?.querySelector('[data-subtab="quotas"]')?.getAttribute('aria-current')).toBe('page')
 
     // 1-tap navigation to another L1 sub-tab (/runtime/lanes)

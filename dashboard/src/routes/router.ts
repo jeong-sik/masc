@@ -3,7 +3,7 @@
  *
  * - 6 L0 Trunks: `pulse`, `work`, `knowledge`, `keepers`, `runtime`, `infra`.
  * - 2 Rail Footer Anchors: `settings` (Admin-only), `account` (Public).
- * - Strict 2-level cap: max 5 L1 sub-tabs per workspace.
+ * - Two levels: a workspace and its L1 sub-tabs.
  * - Declarative RBAC (`public | member | admin`) aligned with `Auth_gate.decide`
  *   so non-Admin `multi_account` Workers never trigger speculative 403 fetches.
  * - Syncs canonical slash paths via URL hash (`#/work/goals`, `#/keepers/grimja/chat`)
@@ -102,7 +102,7 @@ export type AccountSubTab = (typeof ACCOUNT_SUBTABS)[number]
 
 /**
  * Locked Proposal A+ Navigation Manifest:
- * 6 L0 Trunks + 2 Rail Footer Anchors, max 5 L1 sub-tabs each.
+ * 6 L0 Trunks + 2 Rail Footer Anchors, each with its L1 sub-tabs.
  */
 export const WORKSPACE_NAV: readonly WorkspaceNavDef[] = Object.freeze([
   {
@@ -180,6 +180,7 @@ export const WORKSPACE_NAV: readonly WorkspaceNavDef[] = Object.freeze([
       { id: 'efficiency', label: 'Efficiency', path: '/runtime/efficiency', access: 'member', supportsTimeWindow: true, defaultProvenance: 'LIVE SSE' },
       { id: 'lanes', label: 'Lanes', path: '/runtime/lanes', access: 'member', supportsTimeWindow: true, defaultProvenance: 'SYNCED' },
       { id: 'tools', label: 'Tools', path: '/runtime/tools', access: 'member', supportsTimeWindow: true, defaultProvenance: 'LIVE SSE' },
+      { id: 'prompts', label: 'Prompts', path: '/runtime/prompts', access: 'member', defaultProvenance: 'SYNCED' },
       { id: 'addons', label: 'Add-ons', path: '/runtime/addons', access: 'member', supportsTimeWindow: true, defaultProvenance: 'SYNCED' },
     ],
   },
@@ -258,6 +259,7 @@ export const ROUTE_MANIFEST: readonly APlusRouteEntry[] = Object.freeze([
   { id: 'runtime-efficiency', workspace: 'runtime', subroute: 'efficiency', path: '/runtime/efficiency', label: '5 Runtime → Efficiency & Prompt Cache', keywords: ['cache', 'cost', 'spend', 'velocity', '캐시', '효율'], access: 'member', supportsTimeWindow: true, defaultProvenance: 'LIVE SSE' },
   { id: 'runtime-lanes', workspace: 'runtime', subroute: 'lanes', path: '/runtime/lanes', label: '5 Runtime → Lanes, Exact Output & Fusion', keywords: ['lane', 'failover', 'exact', 'fusion', 'model', '레인'], access: 'member', supportsTimeWindow: true, defaultProvenance: 'SYNCED' },
   { id: 'runtime-tools', workspace: 'runtime', subroute: 'tools', path: '/runtime/tools', label: '5 Runtime → Tools, Skills & Connectors', keywords: ['tool', 'skill', 'connector', 'discord', 'slack', '도구'], access: 'member', supportsTimeWindow: true, defaultProvenance: 'LIVE SSE' },
+  { id: 'runtime-prompts', workspace: 'runtime', subroute: 'prompts', path: '/runtime/prompts', label: '5 Runtime → Prompts, World & Presets', keywords: ['prompt', 'world', 'worldview', 'preset', 'override', '프롬프트', '세계관', '프리셋'], access: 'member', supportsTimeWindow: false, defaultProvenance: 'SYNCED' },
   { id: 'runtime-addons', workspace: 'runtime', subroute: 'addons', path: '/runtime/addons', label: '5 Runtime → Lane Add-ons & Browser Lane', keywords: ['addon', 'browser', 'plugin', '애드온'], access: 'member', supportsTimeWindow: true, defaultProvenance: 'SYNCED' },
   { id: 'infra-sandboxes', workspace: 'infra', subroute: 'sandboxes', path: '/infra/sandboxes', label: '6 Infra → Sandboxes (MicroVM / SSH / Docker)', keywords: ['sandbox', 'microvm', 'ssh', 'docker', '샌드박스'], access: 'su_read_ma_admin', supportsTimeWindow: false, defaultProvenance: 'SYNCED' },
   { id: 'infra-repos', workspace: 'infra', subroute: 'repos', path: '/infra/repos', label: '6 Infra → Repositories & 24h Diffs', keywords: ['repo', 'git', 'diff', '저장소'], access: 'su_read_ma_admin', supportsTimeWindow: false, defaultProvenance: 'SNAPSHOT' },

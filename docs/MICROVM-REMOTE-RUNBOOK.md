@@ -140,7 +140,7 @@ keeper 를 돌리지 않는 호스트는 `--no-guest-shim` 으로 건너뛴다.
 같은 버전이 이미 깔려 있으면 설치기는 shim 도 그대로 둔다. shim 만 다시 받으려면
 `scripts/install.sh --version vX.Y.Z --force --base-path <workspace>` 로 돌린다.
 
-평소 로컬 빌드 설치는 릴리즈를 조회하지 않는다. 작업 공간 shim 의 소스 신원이 새
+로컬 빌드 설치는 작업 공간 shim 의 소스 신원이 새
 서버와 다르면(신원을 안 적은 shim 포함) 설치가 서버를 바꾸기 전에 같은 checkout 에서
 shim 을 다시 빌드한다(아래 「직접 빌드」). 릴리즈 shim(sidecar 가 있는 shim)도 같다.
 이때 옛 sidecar 는 지운다. 옛 바이트의 sha256 이라서, 남기면 서버가 새 shim 을
@@ -148,27 +148,14 @@ shim 을 다시 빌드한다(아래 「직접 빌드」). 릴리즈 shim(sidecar
 단 그 sidecar 가 shim 의 sha256 을 적고 있지 않으면 sidecar 를 지운다(손으로 shim 만 바꿔 넣은 경우).
 microVM Keeper 를 돌리지 않는 workspace 는 shim 이 필요 없다. 다시 빌드할 수 없으면(Docker 없음)
 `masc-exec-shim` 을 지우고 설치한다.
-checkout 에서 고친 서버·shim 을 microVM 에 배포할 때는 옵션 없이
+checkout 에서 고친 서버·shim 을 microVM 에 배포할 때는
 `scripts/install-local-build.sh` 를 돌린다. 위에 적은 대로 신원이 다른 shim 을 다시 빌드한다.
-`--refresh-guest-shim` 은 이미 있는 릴리즈 shim 을 그 릴리즈의 자산으로 맞춘다.
-빌드한 서버가 그 릴리즈와 같은 소스일 때만 shim 을 바꾼다. checkout 빌드는 릴리즈를 읽으면
-아래 표의 소스 신원 행에서 멈추고, 릴리즈를 못 읽으면 WARN 한 줄 뒤 shim 을 둔 채 설치를 계속한다.
-빌드가 끝났으면 `--skip-build` 도 붙인다. 새로 놓지는 않는다.
-이 옵션을 주고 workspace 에 바이너리와 sidecar 가 둘 다 있으면, 빌드한
-서버가 말하는 버전의 릴리즈에서 같은 자산을 받아 `SHA256SUMS` 와 맞춰 보고 두 파일을
-바꾼다. 어느 자산(arm64, amd64)인지는 sidecar 에 적힌 이름에서 읽는다.
-아래 표는 `--refresh-guest-shim` 을 준 경우다.
-
-| 경우 | 하는 일 |
-|---|---|
-| shim 이 없다 | 아무것도 안 한다 |
-| shim 이 이미 그 릴리즈의 것 | 체크섬은 조회하고, 바이너리는 다시 받지 않는다 |
-| sidecar 가 없다 (소스로 빌드한 shim) | 이 옵션은 건드리지 않는다. 기본 설치가 다시 빌드한다(아래 「직접 빌드」) |
-| sidecar 에 릴리즈 자산 이름이 없다 | shim 을 그대로 두고 WARN 한 줄, 설치는 계속 |
-| 릴리즈를 읽을 수 없거나, 릴리즈에 그 자산이 없다 | shim 을 그대로 두고 WARN 한 줄(curl 이 말한 이유 포함), 설치는 계속. 다음 명시적 갱신 때 다시 받는다 |
-| 받은 자산이 `SHA256SUMS` 와 다르다 | 아무것도 설치하지 않고 멈춘다 |
-| 받은 자산이나 이미 깔린 그 릴리즈 자산이 이 빌드와 다른 소스 신원을 적었다(또는 안 적었다) | 아무것도 설치하지 않고 멈춘다. 서버가 그 shim 을 거절하기 때문이다. checkout 빌드는 릴리즈의 소스가 아니므로 늘 여기서 멈춘다. 메시지가 지금 트리로 빌드하는 명령(아래 「직접 빌드」)을 알려 준다 |
-| 빌드한 서버(`main_eio.exe`)에서 소스 신원을 하나로 읽지 못한다 | 아무것도 설치하지 않고 멈춘다 |
+빌드가 끝났으면 `--skip-build` 를 붙인다. shim 이 없는 workspace 에 새로 놓지는 않는다.
+workspace 에 shim 이 있는데 빌드한 서버(`main_eio.exe`)에서 소스 신원을 하나로 읽지 못하면
+아무것도 설치하지 않고 멈춘다.
+릴리즈 shim 을 그 릴리즈의 자산으로 되돌리는 일은 릴리즈 설치기가 한다
+(`scripts/install.sh --version vX.Y.Z --force --base-path <workspace>`).
+릴리즈 설치기는 shim 만 바꾸지 않는다. prefix 에 깔린 서버도 그 릴리즈로 바꾼다.
 
 켜져 있는 게스트는 다음 요청부터 새 shim 을 쓴다. 서버는 옛 shim 이 probe 에 답한
 릴리즈와 기능 목록을 다시 띄울 때까지 들고 있다.
@@ -205,8 +192,7 @@ shim(0.73.1 이하 릴리즈, 이 변경 전 checkout 빌드)은 값이 없다.
 microsandbox) 모두에서 그 게스트를 건드리기 전에 난다.
 릴리즈 서버는 같은 태그의 자산이 맞는다(`scripts/install.sh --version vX.Y.Z
 --force --base-path <workspace>`). checkout 으로 빌드한 서버는 어떤 릴리즈 자산과도 맞지 않으니, 같은
-checkout 에서 shim 을 빌드한다. `install-local-build.sh --refresh-guest-shim` 도
-이 경우 릴리즈 shim 을 깔지 않고 멈춘다. 그 옵션 없이 돌린 `install-local-build.sh` 는
+checkout 에서 shim 을 빌드한다. `install-local-build.sh` 는
 작업 공간 shim 의 신원이 다르면 sidecar 가 있든 없든 아래 빌드를 대신 한다. 아키텍처는 옛 shim 의
 ELF 헤더에서 읽는다. 옛 shim 은 옆에 `masc-exec-shim.previous` 로 남는다. 이 파일은
 마지막으로 바꾼 shim 하나만 담고, 다음 빌드가 덮어쓴다.
@@ -216,6 +202,7 @@ ELF 헤더에서 읽는다. 옛 shim 은 옆에 `masc-exec-shim.previous` 로 �
 `masc-exec-shim` 으로 옮긴다. 옛 shim 이 릴리즈 shim 이었다면 sidecar 는 이미 지워져서
 되돌린 shim 은 sha256 대조 없이 돈다. sidecar 까지 되돌리려면
 `scripts/install.sh --version vX.Y.Z --force --base-path <workspace>` 로 같은 작업 공간에 그 릴리즈를 다시 깐다.
+이때 prefix 의 서버도 그 릴리즈로 바뀐다.
 릴리즈 없이 지금 트리로 만들어야 할 때는 아래처럼 직접 빌드한다. 손으로 빌드한
 shim 에는 sidecar 가 없어야 한다. 없으면 부팅이 검증 없이 돌리고 로그에 그렇게
 적는다.

@@ -46,25 +46,8 @@
 # the replaced shim does not come back that way, and the server runs the shim
 # without one.
 #
-# No release is asked for unless --refresh-guest-shim is given. That option
-# hands a release shim (masc-exec-shim with its sha256 sidecar) to the
-# release instead of the source build above. The release installer places
-# it initially.
-# With this option, an existing release shim is replaced by
-# the same asset of the release this build names, checked against that
-# release's SHA256SUMS. Which asset is read from the sidecar, which records
-# the one that was installed; nothing is guessed from this shell. A workspace
-# with no shim is given none, and a shim without a sidecar is the source
-# build above. A release that cannot be read leaves the shim as it is
-# and says so; an asset that does not match its checksum installs nothing.
-# The server refuses a shim built from another source (#52968, RFC
-# host-and-shim-share-one-build-identity), so a release shim that does not
-# declare this build's source identity installs nothing either, and the
-# install stops with the source build to use instead
-# (scripts/remote-ssh/build-shim.sh). A checkout build is never a release's
-# source, so for it this option always ends there.
-# MASC_RELEASE_BASE_URL and MASC_REPO name the release the way
-# scripts/install.sh does.
+# scripts/install.sh places a release shim. This script only rebuilds a shim
+# from the checkout.
 #
 # The dashboard bundle goes the same way (scripts/lib/install-workspace-dashboard.sh,
 # #49980). A workspace that holds <workspace>/assets/dashboard gets this
@@ -81,7 +64,6 @@
 # Usage: scripts/install-local-build.sh [--prefix DIR]
 #                                       [--from REF]
 #                                       [--skip-build] [--build-dir DIR] [--base-path DIR]
-#                                       [--refresh-guest-shim]
 #                                       [--no-browser-addon]
 #                                       [--print-build-targets]
 #   --prefix        where masc, masc-tui, the browser Add-on programs, SSH
@@ -108,14 +90,10 @@
 #   --no-browser-addon do not build or install the browser Add-on programs, and
 #                   leave the workspace's browser Add-on package and declaration
 #                   as they are. Without the Add-on no browser route works.
-#   --refresh-guest-shim fetch release checksums and refresh an existing release
-#                   guest exec shim (one with a sha256 sidecar) from the
-#                   release this build names, instead of the source build
-#                   below; default installation asks no release
 #   --print-build-targets print the exact Dune inputs for this install and exit
 #                   without locking, building, checking or changing a workspace
 #
-#   By default a workspace guest exec shim is rebuilt from this checkout
+#   A workspace guest exec shim is rebuilt from this checkout
 #   (scripts/remote-ssh/build-shim.sh, which needs Docker) when it declares
 #   another source than this build, and the sha256 sidecar of a release shim
 #   replaced this way is removed. A failed rebuild installs nothing.
@@ -125,7 +103,6 @@ repo=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)
 prefix="$HOME/.local/bin"
 build_dir="$repo/_build/default/bin"
 skip_build=false
-guest_shim=false
 # Every browser route runs in the browser Add-on, so its programs are installed with masc, from the same build, unless
 # --no-browser-addon says the workspace needs no browser.
 browser_addon=true
@@ -162,7 +139,6 @@ while [ $# -gt 0 ]; do
     --prefix) prefix=${2:?--prefix needs a directory}; shift 2 ;;
     --build-dir) build_dir=${2:?--build-dir needs a directory}; build_dir_given=true; shift 2 ;;
     --from) from_ref=${2:?--from needs a git ref}; shift 2 ;;
-    --refresh-guest-shim) guest_shim=true; shift ;;
     --no-browser-addon) browser_addon=false; shift ;;
     --skip-build) skip_build=true; shift ;;
     --print-build-targets) print_build_targets=true; shift ;;
@@ -445,17 +421,6 @@ fi
 # it finds next, which is the mismatch this fixes. The helper is required above,
 # so every install replaces the pair together with the server.
 
-# The guest shim is staged before any binary is replaced, so an asset that
-# fails its checksum leaves the prefix and the workspace as they were. The
-# guests read the shim directory through a read-only mount and the server
-# execs the shim anew for each request, so a running guest runs the new shim
-# on its next request. The server keeps what the old shim answered to its
-# probe (release, capabilities) until it restarts. A release that cannot be
-# read is a line here and not a refusal: the shim already in place stays, and
-# the server checks its source identity before any guest boots with it.
-# Server and shim are never one release apart: the server refuses a shim of
-# another source (#52968), so this step never installs one.
-
 # python3 already classifies the workspace above, so hashing through it adds
 # no tool this script has to look for.
 sha256_of() {
@@ -470,10 +435,6 @@ sidecar_digest_of() {
 blank = b" \x0c\n\r\t"
 print(open(sys.argv[1], "rb").read().strip(blank).split(b" ")[0].strip(blank).decode("ascii", "replace"))' "$1"
 }
-
-# The assets a release ships for the guest shim (scripts/install.sh,
-# guest_shim_asset).
-guest_shim_assets="masc-exec-shim-linux-arm64 masc-exec-shim-linux-amd64"
 
 # The source identity a binary declares, read with the grammar the server
 # reads the mounted shim with (Source_identity.scan): the literal
@@ -532,123 +493,11 @@ print(GUEST_ARCHES[machine])
 PY
 }
 
-# One attempt each, because the build lock is held while this waits and the
-# next explicit refresh tries again: SHA256SUMS is a few kilobytes, the shim about five
-# megabytes.
-guest_shim_sums_timeout_s=20
-guest_shim_asset_timeout_s=120
-
-# Runs in a subshell: its EXIT trap removes whatever was staged on every way
-# out, and [exit] here ends the step, with a non-zero status ending the
-# install under set -e.
-refresh_guest_shim() (
-  [ "$guest_shim" = true ] || exit 0
-  shim_dir="$workspace_root/.masc/microvm/shim"
-  shim="$shim_dir/masc-exec-shim"
-  sidecar="$shim.sha256"
-  [ -e "$shim" ] || exit 0
-  # A shim without a sidecar is a source build, and checkout_guest_shim has
-  # already said what it did with it.
-  [ -f "$sidecar" ] || exit 0
-  # The sidecar is the release's SHA256SUMS line for the asset that was
-  # installed: "<sha256>  <asset>". The asset names the guest architecture,
-  # which this shell cannot tell: a Rosetta shell on Apple Silicon says x86_64.
-  recorded=""
-  asset=""
-  read -r recorded asset 2>/dev/null < "$sidecar" || true
-  case " $guest_shim_assets " in
-    *" $asset "*) ;;
-    *)
-      echo "install-local-build: WARN guest exec shim left as it is: $sidecar does not name a release shim asset (it names '$asset')" >&2
-      exit 0
-      ;;
-  esac
-  version=$(MASC_RUNTIME_EVENTS=0 "$build_dir/main_eio.exe" --version 2>/dev/null | tail -n 1) || version=""
-  if ! grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' <<<"$version"; then
-    echo "install-local-build: WARN guest exec shim left as it is: $build_dir/main_eio.exe names no release version (--version said '$version')" >&2
-    exit 0
-  fi
-  # The server binary carries the declaration its shim must match, because
-  # it links the same generated Source_identity.
-  if ! required_source=$(source_identity_of "$build_dir/main_eio.exe"); then
-    echo "install-local-build: $build_dir/main_eio.exe does not declare exactly one source identity (found: $required_source), so no release shim can be matched to it; nothing installed" >&2
-    exit 1
-  fi
-  guest_arch=${asset##*-}
-  source_build_hint="build the shim from this checkout instead: scripts/remote-ssh/build-shim.sh --arch $guest_arch, copy dist/remote-ssh/$asset to $shim and remove $sidecar (docs/MICROVM-REMOTE-RUNBOOK.md)"
-  # Fails the install when [file] does not declare [required_source]: the
-  # server would refuse a guest booted with it.
-  refuse_other_source() {
-    local file="$1" what="$2" declared
-    if declared=$(source_identity_of "$file") && [ "$declared" = "$required_source" ]; then
-      return 0
-    fi
-    echo "install-local-build: $what declares source identity $declared, but this build is $required_source and its server refuses that shim; nothing installed. No release shim fits this build: $source_build_hint" >&2
-    exit 1
-  }
-  release_base="${MASC_RELEASE_BASE_URL:-https://github.com/${MASC_REPO:-jeong-sik/masc}/releases/download}"
-  tag="v$version"
-  sums=""
-  staged_shim=""
-  staged_sidecar=""
-  remove_staged() {
-    for staged in "$sums" "$staged_shim" "$staged_sidecar"; do
-      [ -z "$staged" ] || rm -f "$staged"
-    done
-  }
-  trap remove_staged EXIT
-  sums=$(mktemp "${TMPDIR:-/tmp}/masc-guest-shim-sums.XXXXXX")
-  if ! refused=$(curl -fsSL --max-time "$guest_shim_sums_timeout_s" -o "$sums" "$release_base/$tag/SHA256SUMS" 2>&1); then
-    echo "install-local-build: WARN guest exec shim left as it is: $release_base/$tag/SHA256SUMS could not be read ($(printf '%s' "$refused" | tr '\n' ' ')); rerun with --refresh-guest-shim to retry" >&2
-    exit 0
-  fi
-  expected=$(awk -v asset="$asset" '$2 == asset { print $1; exit }' "$sums")
-  if [ -z "$expected" ]; then
-    echo "install-local-build: WARN guest exec shim left as it is: release $tag lists no $asset in its SHA256SUMS" >&2
-    exit 0
-  fi
-  if ! installed=$(sha256_of "$shim"); then
-    echo "install-local-build: the sha256 of $shim could not be computed; nothing installed" >&2
-    exit 1
-  fi
-  if [ "$recorded" = "$expected" ] && [ "$installed" = "$expected" ]; then
-    refuse_other_source "$shim" "the installed $tag guest exec shim $shim"
-    echo "guest exec shim in $shim_dir is already the $tag asset"
-    exit 0
-  fi
-  staged_shim=$(mktemp "$shim_dir/masc-exec-shim.partial.XXXXXX")
-  if ! refused=$(curl -fsSL --max-time "$guest_shim_asset_timeout_s" -o "$staged_shim" "$release_base/$tag/$asset" 2>&1); then
-    echo "install-local-build: WARN guest exec shim left as it is: $release_base/$tag/$asset could not be downloaded ($(printf '%s' "$refused" | tr '\n' ' ')); rerun with --refresh-guest-shim to retry" >&2
-    exit 0
-  fi
-  if ! downloaded=$(sha256_of "$staged_shim"); then
-    echo "install-local-build: the sha256 of the downloaded $asset could not be computed; nothing installed" >&2
-    exit 1
-  fi
-  if [ "$downloaded" != "$expected" ]; then
-    echo "install-local-build: $asset of $tag does not match its SHA256SUMS line ($expected); nothing installed" >&2
-    exit 1
-  fi
-  refuse_other_source "$staged_shim" "$asset of $tag"
-  chmod 755 "$staged_shim"
-  staged_sidecar=$(mktemp "$shim_dir/masc-exec-shim.sha256.partial.XXXXXX")
-  printf '%s  %s\n' "$expected" "$asset" > "$staged_sidecar"
-  chmod 644 "$staged_sidecar"
-  # Two files cannot change in one step: a guest that boots between the two
-  # renames is refused once (microvm_shim_hash_mismatch) and boots the next
-  # time.
-  mv "$staged_shim" "$shim"
-  staged_shim=""
-  mv "$staged_sidecar" "$sidecar"
-  staged_sidecar=""
-  echo "installed the $tag guest exec shim into $shim_dir (replacing sha256 $recorded)"
-)
-
 # The source-built shim this build's server accepts, built from this checkout
 # (#53164). Before this step, every checkout install followed by masc restart
 # failed each microVM Keeper's Execute with microvm_shim_other_source until
 # somebody rebuilt the shim by hand. It runs before any binary is replaced
-# and in a subshell like refresh_guest_shim: its EXIT trap removes the build
+# and in a subshell: its EXIT trap removes the build
 # directory and the staged copy on every way out, and a non-zero status ends
 # the install under set -e. One rename puts the new shim in place, so a guest
 # never finds the name missing. The server does not remember a refused shim
@@ -658,14 +507,9 @@ checkout_guest_shim() (
   shim="$shim_dir/masc-exec-shim"
   sidecar="$shim.sha256"
   [ -e "$shim" ] || exit 0
-  # --refresh-guest-shim asks for the release's asset, so a release shim (one
-  # with a sidecar) goes to refresh_guest_shim and each shim goes to exactly
-  # one of the two steps. Without the option this step takes it: the sidecar
+  # A release shim (one with a sidecar) is judged like any other: the sidecar
   # says where the bytes came from, and whether this build's server runs them
   # is the identity they declare, read below.
-  if [ "$guest_shim" = true ] && [ -f "$sidecar" ]; then
-    exit 0
-  fi
   if ! required_source=$(source_identity_of "$build_dir/main_eio.exe"); then
     echo "install-local-build: $build_dir/main_eio.exe does not declare exactly one source identity (found: $required_source), so its server refuses every guest exec shim, $shim too; nothing installed" >&2
     exit 1
@@ -815,7 +659,6 @@ checkout_guest_shim() (
   echo "installed the $guest_arch guest exec shim built from $repo into $shim_dir (source identity $required_source; the previous one is kept as $previous).$sidecar_note The running server refuses it until masc restart."
 )
 checkout_guest_shim
-refresh_guest_shim
 
 mkdir -p "$prefix"
 install -m 755 "$build_dir/main_eio.exe" "$prefix/masc"

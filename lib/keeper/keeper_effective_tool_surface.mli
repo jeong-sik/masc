@@ -6,9 +6,6 @@
 type tool_origin =
   | Descriptor
   | Instruction_skill
-  | Composition_skill of
-      { provenance : Keeper_skill_catalog.provenance option }
-  | Composition_control
 
 type tool =
   { name : string
@@ -53,7 +50,6 @@ type t =
   ; skill_snapshot_revision : Skill_catalog_snapshot.snapshot_revision
   ; skill_resource_read_max_bytes : int option
   ; instruction_skills : Skill_reference.t list
-  ; composition_skills : Skill_reference.t list
   ; skill_profiles : Keeper_skill_observability.profile list
   ; skill_load_reasons : (Skill_reference.t * skill_load_reason list) list
   ; tool_surface_bytes : int

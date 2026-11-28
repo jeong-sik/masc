@@ -588,7 +588,6 @@ export type DashboardEffectiveKeeperSurface =
       skill_snapshot_revision: string
       skill_resource_read_max_bytes: number | null
       instruction_skills: DashboardSkillReference[]
-      composition_skills: DashboardSkillReference[]
       skill_profiles: DashboardEffectiveSkillProfile[]
       tool_surface_bytes: number
       skill_tool_surface_bytes: number

@@ -3,9 +3,6 @@ open Result.Syntax
 type tool_origin =
   | Descriptor
   | Instruction_skill
-  | Composition_skill of
-      { provenance : Keeper_skill_catalog.provenance option }
-  | Composition_control
 
 type tool =
   { name : string
@@ -40,7 +37,6 @@ type t =
   ; skill_snapshot_revision : Skill_catalog_snapshot.snapshot_revision
   ; skill_resource_read_max_bytes : int option
   ; instruction_skills : Skill_reference.t list
-  ; composition_skills : Skill_reference.t list
   ; skill_profiles : Keeper_skill_observability.profile list
   ; skill_load_reasons : (Skill_reference.t * skill_load_reason list) list
   ; tool_surface_bytes : int
@@ -183,7 +179,6 @@ let project
            skill.reference)
         readable_instruction_skills
     in
-    let composition_skills = [] in
     let instruction_rows =
       if not masc_enabled
       then []
@@ -201,11 +196,10 @@ let project
     let* rows =
       collect_rows (descriptor_rows descriptors @ instruction_rows)
     in
-    let instruction_skills, composition_skills, tools, schema_tools =
+    let instruction_skills, tools, schema_tools =
       match tool_delivery with
-      | Tools_delivered ->
-        instruction_skills, composition_skills, List.map fst rows, List.map snd rows
-      | Tools_suppressed_runtime_unsupported -> [], [], [], []
+      | Tools_delivered -> instruction_skills, List.map fst rows, List.map snd rows
+      | Tools_suppressed_runtime_unsupported -> [], [], []
     in
     let skill_profiles =
       match tool_delivery with
@@ -245,8 +239,7 @@ let project
     in
     let skill_tool_surface_bytes =
       let is_skill_row = function
-        | { origin = (Instruction_skill | Composition_skill _ | Composition_control); _ }, _ ->
-          true
+        | { origin = Instruction_skill; _ }, _ -> true
         | { origin = Descriptor; _ }, _ -> false
       in
       match tool_delivery with
@@ -299,7 +292,6 @@ let project
           Skill_catalog_snapshot.snapshot_revision skill_snapshot
       ; skill_resource_read_max_bytes
       ; instruction_skills
-      ; composition_skills
       ; skill_profiles
       ; skill_load_reasons
       ; tool_surface_bytes
@@ -561,15 +553,6 @@ let projection_basis_to_string = function
 let origin_to_yojson = function
   | Descriptor -> `Assoc [ "kind", `String "descriptor" ]
   | Instruction_skill -> `Assoc [ "kind", `String "instruction_skill" ]
-  | Composition_skill { provenance } ->
-    `Assoc
-      [ "kind", `String "composition_skill"
-      ; ( "skill_provenance"
-        , match provenance with
-          | Some provenance -> Keeper_skill_catalog.provenance_to_yojson provenance
-          | None -> `Null )
-      ]
-  | Composition_control -> `Assoc [ "kind", `String "composition_control" ]
 ;;
 
 let to_yojson = function
@@ -626,7 +609,6 @@ let to_yojson = function
           | Some max_bytes -> `Int max_bytes
           | None -> `Null )
       ; "instruction_skills", reference_list surface.instruction_skills
-      ; "composition_skills", reference_list surface.composition_skills
       ; ( "skill_profiles"
         , `List
             (List.map (skill_profile_to_yojson surface) surface.skill_profiles) )

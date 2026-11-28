@@ -120,6 +120,5 @@ val skills : t -> skill list
 val find : t -> string -> skill option
 val instruction_entries : t -> (string * string * string) list
 val surface_to_string : surface -> string
-val provenance_to_yojson : provenance -> Yojson.Safe.t
 val error_code : error -> string
 val error_to_string : error -> string

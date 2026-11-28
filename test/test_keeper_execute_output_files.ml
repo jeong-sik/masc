@@ -68,7 +68,7 @@ let with_process_output ?(stdout = stdout) ?(stderr = stderr) ?(pool = false) ?s
 let test_changed_eof_source_is_not_published () =
   with_process_output (fun ~base_path ~redaction ~stdout_path ~stderr_path files ->
     Unix.truncate stdout_path 1;
-    (match Publish.publish ~inline_ceiling_bytes:default_ceiling ~base_path ~redaction files with
+    (match Publish.publish ~placement:(Publish.Inline_when_at_most default_ceiling) ~base_path ~redaction files with
      | Error (Publish.Persistence_failed _) -> ()
      | Error error -> Alcotest.fail (Publish.error_to_string error)
      | Ok _ -> Alcotest.fail "a stale EOF receipt became complete output");
@@ -84,7 +84,7 @@ let test_changed_eof_source_is_not_published () =
 let test_publication_retains_sources_until_release () =
   with_process_output (fun ~base_path ~redaction ~stdout_path ~stderr_path files ->
     let publication =
-      match Publish.publish ~inline_ceiling_bytes:default_ceiling ~base_path ~redaction files with
+      match Publish.publish ~placement:(Publish.Inline_when_at_most default_ceiling) ~base_path ~redaction files with
       | Ok publication -> publication
       | Error error -> Alcotest.fail (Publish.error_to_string error)
     in
@@ -140,7 +140,7 @@ let payload bytes =
 let publish_payload ~lane bytes check_fields =
   let payload = payload bytes in
   with_process_output ~stdout:payload ~stderr:"" (fun ~base_path ~redaction ~stdout_path:_ ~stderr_path:_ files ->
-    match Publish.publish ~inline_ceiling_bytes:(lane_ceiling lane) ~base_path ~redaction files with
+    match Publish.publish ~placement:(Publish.Inline_when_at_most (lane_ceiling lane)) ~base_path ~redaction files with
     | Error error -> Alcotest.fail (Publish.error_to_string error)
     | Ok publication ->
       Alcotest.(check int) "compared bytes match the redacted stream"
@@ -165,7 +165,7 @@ let test_non_utf8_child_output_is_preserved () =
   let stdout = "한글 intact\n" ^ "\x89PNG\r\n\x1a\n" in
   let stderr = "cut Korean: \xed\x95" in
   with_process_output ~stdout ~stderr ~pool:true (fun ~base_path ~redaction ~stdout_path:_ ~stderr_path:_ files ->
-    match Publish.publish ~inline_ceiling_bytes:default_ceiling ~base_path ~redaction files with
+    match Publish.publish ~placement:(Publish.Inline_when_at_most default_ceiling) ~base_path ~redaction files with
     | Error error -> Alcotest.fail (Publish.error_to_string error)
     | Ok publication ->
       let fields = publication.Publish.fields in
@@ -189,7 +189,7 @@ let test_worker_publication_preserves_secret_snapshot () =
     ~pool:true ~secret (fun ~base_path ~redaction ~stdout_path:_ ~stderr_path:_ files ->
       Alcotest.(check string) "caller has already matched the snapshot"
         "[REDACTED]" (Redaction.redact_text redaction secret);
-      match Publish.publish ~inline_ceiling_bytes:0 ~base_path ~redaction files with
+      match Publish.publish ~placement:(Publish.Inline_when_at_most 0) ~base_path ~redaction files with
       | Error error -> Alcotest.fail (Publish.error_to_string error)
       | Ok publication ->
         let fields = publication.Publish.fields in

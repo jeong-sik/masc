@@ -24,6 +24,10 @@ type publication =
   ; release_sources : unit -> unit
   }
 
+type placement =
+  | Inline_when_at_most of int
+  | Stored
+
 let complete_path stream = function
   | Process_output_capture.Complete_file { path; byte_length } -> Ok (path, byte_length)
   | Process_output_capture.Incomplete_file _ -> Error (Incomplete_stream stream)
@@ -84,7 +88,7 @@ let stream_artifact_fields
   ]
 ;;
 
-let publish ~inline_ceiling_bytes ~base_path ~redaction (files : Process_output_capture.files) =
+let publish ~placement ~base_path ~redaction (files : Process_output_capture.files) =
   let* stdout_path, stdout_bytes = complete_path "stdout" files.stdout in
   let* stderr_path, stderr_bytes = complete_path "stderr" files.stderr in
   (* Redaction and blob hashing share this file job; bound its CPU work when
@@ -136,10 +140,13 @@ let publish ~inline_ceiling_bytes ~base_path ~redaction (files : Process_output_
            Preserve malformed text/binary output in the same durable artifacts
            as oversized output instead of corrupting the tool result and trace. *)
         let inline_output =
-          if total_bytes <= inline_ceiling_bytes then
-            let bytes = In_channel.with_open_bin combined In_channel.input_all in
-            if String_util.is_valid_utf8 bytes then Some bytes else None
-          else None
+          match placement with
+          | Stored -> None
+          | Inline_when_at_most ceiling_bytes ->
+            if total_bytes <= ceiling_bytes then
+              let bytes = In_channel.with_open_bin combined In_channel.input_all in
+              if String_util.is_valid_utf8 bytes then Some bytes else None
+            else None
         in
         let fields =
           match inline_output with

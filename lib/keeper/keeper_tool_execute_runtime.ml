@@ -236,12 +236,18 @@ let redact_execute_output redaction ~stdout ~stderr =
   in
   stdout, stderr, output
 
-(* [inline_ceiling_bytes] is the ceiling of the projection this call's result
-   crosses on its way to the model, resolved for the lane running it. Holding
-   stdout back at a narrower global bound would spill output the lane had
-   declared (maxResultSizeChars) it would take inline. *)
-let composable_output_fields ~inline_ceiling_bytes ~base_path ~stdout ~stderr ~output =
-  if String.length output <= inline_ceiling_bytes && String_util.is_valid_utf8 output
+(* The ceiling a placement names is the ceiling of the projection this call's
+   result crosses on its way to the model, resolved for the lane running it.
+   Holding stdout back at a narrower global bound would spill output the lane
+   had declared (maxResultSizeChars) it would take inline. *)
+let composable_output_fields ~placement ~base_path ~stdout ~stderr ~output =
+  let inline =
+    match (placement : Keeper_execute_output_files.placement) with
+    | Inline_when_at_most ceiling_bytes ->
+      String.length output <= ceiling_bytes && String_util.is_valid_utf8 output
+    | Stored -> false
+  in
+  if inline
   then Ok [ "output", `String output ]
   else
     try
@@ -1185,16 +1191,76 @@ let handle_tool_execute_typed
                  meta.name
                  (Printexc.to_string exn));
             let succeeded = Option.is_none transport_failure && exit_report.Keeper_tool_execute_exit_report.ok in
-            let output_fields =
+            let timeout_fields = match observation with
+              | Command_result_observed -> exit_report.Keeper_tool_execute_exit_report.timeout_fields
+              | Command_request_not_sent | Command_effect_unknown -> [] in
+            (* The result this call answers with, for the output fields a
+               publication chose. *)
+            let answer_with (publication : Keeper_execute_output_files.publication)
+                  completeness_evidence =
+              let output_fields = publication.Keeper_execute_output_files.fields in
+              let handler_stored = List.mem_assoc "output_artifact" output_fields in
+              (* [execution_location] stays with the model: it is the
+                 observation channel for where a call ran.
+                 So do the
+                 conditions it ran under, read beside the exit they may
+                 explain (#32799). *)
+              let payload =
+                `Assoc
+                  ([ "ok", `Bool succeeded
+                   ; "status", status_json
+                   ]
+                   @ model_shim_evidence_fields receipts
+                   @ dispatched_location_fields ()
+                   @ execution_conditions
+                   @ escaped_shell_fields
+                   @ timeout_fields
+                   @ output_fields
+                   @ [ "typed", `Bool true
+                     ; execution_time_field, `Int elapsed_ms
+                     ])
+              in
+              (* The same call's audit fields: tool-result metadata reaches
+                 the tool-call ledger as [execution_evidence] and is not part
+                 of a direct call's provider request (#39035). The execution
+                 conditions are in the payload as well; they stay here
+                 because a payload stored as a blob reaches the ledger's
+                 route evidence as a marker, not as these fields (#32799). *)
+              let execution_evidence =
+                Keeper_tool_call_log.execution_evidence_metadata
+                  ([ "shim_execution_evidence", shim_execution_evidence_json receipts
+                   ; "compared_output_bytes", `Int publication.compared_output_bytes
+                   ; "handler_stored", `Bool handler_stored
+                   ]
+                   @ completeness_evidence
+                   @ sandbox_extra_fields)
+              in
+              match transport_failure with
+              | Some message ->
+                Tool_result.make_err
+                  ~tool_name:"tool_execute"
+                  ~class_:Tool_result.Dependency_unavailable
+                  ~effect_disposition
+                  ~start_time:t0 ~data:payload ~metadata:execution_evidence
+                  message
+              | None ->
+                Tool_result.make_ok
+                  ~tool_name:"tool_execute"
+                  ~start_time:t0
+                  ~data:payload
+                  ~metadata:execution_evidence
+                  ()
+            in
+            let publish_output placement =
               match result.output_files with
               | Some files ->
                 Keeper_execute_output_files.publish
-                  ~inline_ceiling_bytes
+                  ~placement
                   ~base_path:config.base_path ~redaction:output_redaction files
                 |> Result.map (fun publication -> publication, [])
               | None ->
                 composable_output_fields
-                  ~inline_ceiling_bytes
+                  ~placement
                   ~base_path:config.base_path ~stdout ~stderr ~output
                 |> Result.map (fun fields ->
                   ( { Keeper_execute_output_files.fields
@@ -1209,6 +1275,31 @@ let handle_tool_execute_typed
                   , [ "output_completeness", `String "capture_only" ] ))
                 |> Result.map_error (fun message ->
                   Keeper_execute_output_files.Persistence_failed message)
+            in
+            (* Output within the lane's ceiling can still make a result that is
+               not: JSON escaping and the status fields are added around it. That
+               result would be stored whole and reach the model as a preview of
+               escaped JSON. The projection is asked about the result itself, and
+               the output is stored when the answer is no, so the model still
+               reads the exit status inline (#55433). *)
+            let output_fields =
+              let answered (publication, completeness_evidence) =
+                publication, answer_with publication completeness_evidence
+              in
+              match
+                publish_output
+                  (Keeper_execute_output_files.Inline_when_at_most inline_ceiling_bytes)
+                |> Result.map answered
+              with
+              | Ok (publication, answer)
+                when (not
+                        (List.mem_assoc "output_artifact"
+                           publication.Keeper_execute_output_files.fields))
+                     && not
+                          (Tool_projection.fits_inline ~model_projection:result_projection
+                             answer) ->
+                publish_output Keeper_execute_output_files.Stored |> Result.map answered
+              | (Ok _ | Error _) as chosen -> chosen
             in
             (match output_fields with
              | Error detail ->
@@ -1239,47 +1330,7 @@ let handle_tool_execute_typed
                           @ dispatched_model_location_fields ()
                           @ execution_conditions)
                        message))
-             | Ok (publication, completeness_evidence) ->
-               let output_fields = publication.Keeper_execute_output_files.fields in
-               let handler_stored = List.mem_assoc "output_artifact" output_fields in
-               let timeout_fields = match observation with
-                 | Command_result_observed -> exit_report.Keeper_tool_execute_exit_report.timeout_fields
-                 | Command_request_not_sent | Command_effect_unknown -> [] in
-               (* [execution_location] stays with the model: it is the
-                  observation channel for where a call ran.
-                  So do the
-                  conditions it ran under, read beside the exit they may
-                  explain (#32799). *)
-               let payload =
-                 `Assoc
-                   ([ "ok", `Bool succeeded
-                    ; "status", status_json
-                    ]
-                    @ model_shim_evidence_fields receipts
-                    @ dispatched_location_fields ()
-                    @ execution_conditions
-                    @ escaped_shell_fields
-                    @ timeout_fields
-                    @ output_fields
-                    @ [ "typed", `Bool true
-                      ; execution_time_field, `Int elapsed_ms
-                      ])
-               in
-               (* The same call's audit fields: tool-result metadata reaches
-                  the tool-call ledger as [execution_evidence] and is not part
-                  of a direct call's provider request (#39035). The execution
-                  conditions are in the payload as well; they stay here
-                  because a payload stored as a blob reaches the ledger's
-                  route evidence as a marker, not as these fields (#32799). *)
-               let execution_evidence =
-                 Keeper_tool_call_log.execution_evidence_metadata
-                   ([ "shim_execution_evidence", shim_execution_evidence_json receipts
-                    ; "compared_output_bytes", `Int publication.compared_output_bytes
-                    ; "handler_stored", `Bool handler_stored
-                    ]
-                    @ completeness_evidence
-                    @ sandbox_extra_fields)
-               in
+             | Ok (publication, answer) ->
                (* A process that ran and exited nonzero (or died to a
                   signal) is an observed tool result the model reads and
                   reacts to — the payload carries ok:false, the exit
@@ -1318,24 +1369,7 @@ let handle_tool_execute_typed
                     Tool_bridge.attach_artifact_manifest
                       ~projection
                       ~base_path:config.base_path
-                      (let answered =
-                         match transport_failure with
-                         | Some message ->
-                           Tool_result.make_err
-                             ~tool_name:"tool_execute"
-                             ~class_:Tool_result.Dependency_unavailable
-                             ~effect_disposition
-                             ~start_time:t0 ~data:payload ~metadata:execution_evidence
-                             message
-                         | None ->
-                           Tool_result.make_ok
-                             ~tool_name:"tool_execute"
-                             ~start_time:t0
-                             ~data:payload
-                             ~metadata:execution_evidence
-                             ()
-                       in
-                       answered)
+                      answer
                   with
                   | Ok result ->
                     publication.release_sources ();

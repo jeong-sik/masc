@@ -397,6 +397,34 @@ let test_narrow_lanes_still_store_20000_bytes () =
           (stored_bytes ~base_path "output_artifact" result)))
     [ "Codex", codex_lane; "Antigravity", antigravity_lane ]
 
+(* #55433: output under the lane's ceiling whose result is over it. A newline
+   takes two bytes in JSON and the status fields ride beside the output, so the
+   result that carried this output inline would be stored whole and reach the
+   model as a preview of escaped JSON. The output is stored and the result
+   keeps its exit status where the model reads it. *)
+let test_output_under_the_ceiling_is_stored_when_its_result_is_over () =
+  let ceiling = Runtime_execution.tool_result_inline_ceiling_bytes codex_lane in
+  let stdout = payload (ceiling - 64) in
+  with_completed_execute ~lane:codex_lane ~stdout (fun ~base_path result ->
+    check bool "the output alone is within the lane's ceiling" true
+      (String.length stdout <= ceiling);
+    check bool "the result is not built around the inline output" true
+      (Json.member "output" result = `Null);
+    check string "the stored output is the command's bytes" stdout
+      (stored_bytes ~base_path "output_artifact" result);
+    check bool "the result keeps the exit status" true
+      (Json.member "status" result <> `Null))
+
+(* The other side of the same question: a result that fits keeps its output. *)
+let test_output_is_inline_when_its_result_fits () =
+  let ceiling = Runtime_execution.tool_result_inline_ceiling_bytes codex_lane in
+  let stdout = payload (ceiling / 2) in
+  with_completed_execute ~lane:codex_lane ~stdout (fun ~base_path:_ result ->
+    check bool "the result that carries the output is within the ceiling" true
+      (String.length (Yojson.Safe.to_string result) <= ceiling);
+    check (option string) "the output comes back inline" (Some stdout)
+      (Json.member "output" result |> Json.to_string_option))
+
 let test_manifest_preserves_execute_answer_identity () =
   let observe ~base_path (outcome : Keeper_tool_execution.t) =
     let require = function Ok value -> value | Error error -> fail error.Tool_bridge.message in
@@ -489,6 +517,10 @@ let () =
             test_claude_lane_stores_40000_bytes_byte_identical
         ; test_case "Codex and Antigravity lanes still store 20,000 bytes" `Quick
             test_narrow_lanes_still_store_20000_bytes
+        ; test_case "output under the ceiling is stored when its result is over" `Quick
+            test_output_under_the_ceiling_is_stored_when_its_result_is_over
+        ; test_case "output is inline when its result fits" `Quick
+            test_output_is_inline_when_its_result_fits
         ] )
     ]
 ;;

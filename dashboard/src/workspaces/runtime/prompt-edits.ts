@@ -15,7 +15,7 @@
 import { signal, type ReadonlySignal } from '@preact/signals'
 import { sessionEpoch } from '../../core'
 import { pushShellToast } from '../../shell/shell-state'
-import type { PromptOverrideRequest } from './prompts-wire'
+import type { CuratorRefresh, OverrideApplied, PromptOverrideRequest } from './prompts-wire'
 
 /** A request for one prompt: in flight, refused with the server's reason, or sent with no answer to read. */
 export type PromptWrite =
@@ -33,6 +33,27 @@ export function writeEndText(end: PromptWriteEnd): string {
     case 'unknown':
       return `결과를 알 수 없어요 (${end.why}).`
   }
+}
+
+function curatorRefreshNote(refresh: CuratorRefresh | null): string | null {
+  if (refresh === null) return null
+  switch (refresh.status) {
+    case 'queued':
+      return 'Workspace Memory 큐레이터가 새 텍스트로 다시 읽도록 대기열에 넣었어요.'
+    case 'no_owner':
+      return 'Workspace Memory 큐레이터를 맡은 Keeper 가 없어서 다시 읽기를 넣지 않았어요.'
+    case 'unavailable':
+      return `Workspace Memory 큐레이터 다시 읽기를 넣지 못했어요: ${refresh.detail}`
+  }
+}
+
+/** What the operator reads about a request the server applied. */
+export function appliedToast(request: PromptOverrideRequest, applied: OverrideApplied): string {
+  const head = request.action === 'set'
+    ? `${applied.key} override 를 저장했어요.`
+    : `${applied.key} override 를 지웠어요. 지금은 ${applied.source} 텍스트를 써요.`
+  const curator = curatorRefreshNote(applied.curator_refresh)
+  return curator === null ? head : `${head} ${curator}`
 }
 
 export interface PromptEdits {

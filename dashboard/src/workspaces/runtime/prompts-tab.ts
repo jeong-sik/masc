@@ -24,6 +24,10 @@
  * - Drafts and requests live in `prompt-edits.ts`, so they outlast the detail
  *   and the tab. An outcome is also told in a toast unless the detail of
  *   that prompt shows it: open in the edit view, with the catalog read.
+ * - The second view lists prompt presets (`presets-panel.ts`), which snapshot
+ *   the overrides together with keeper instructions and runtime routing. It
+ *   reads the same catalog to compare a preset's overrides with the text in
+ *   force.
  */
 
 import { html } from 'htm/preact'
@@ -40,14 +44,17 @@ import {
   finishPromptWrite,
   isPromptShown,
   promptEditsFor,
+  appliedToast,
   setPromptDraft,
   writeEndText,
   type PromptWriteEnd,
 } from './prompt-edits'
+import { PresetsPanel } from './presets-panel'
+import { PresetFeedback } from './preset-writes'
+import { fieldStyle } from './prompt-styles'
 import {
   decodeOverrideApplied,
   decodePromptCatalog,
-  type CuratorRefresh,
   type OverrideApplied,
   type PromptCatalog,
   type PromptEntry,
@@ -60,6 +67,13 @@ export const PROMPT_CATALOG_CACHE_KEY = 'runtime:prompts'
 
 type FetchReason = 'mount' | 'manual'
 
+type Section = 'prompts' | 'presets'
+
+const SECTIONS: readonly (readonly [Section, string])[] = [
+  ['prompts', '프롬프트'],
+  ['presets', '프리셋'],
+]
+
 function loadPromptCatalog(reason: FetchReason) {
   return resourceCache.fetch<PromptCatalog>(
     PROMPT_CATALOG_CACHE_KEY,
@@ -68,37 +82,11 @@ function loadPromptCatalog(reason: FetchReason) {
   )
 }
 
-function curatorRefreshNote(refresh: CuratorRefresh | null): string | null {
-  if (refresh === null) return null
-  switch (refresh.status) {
-    case 'queued':
-      return 'Workspace Memory 큐레이터가 새 텍스트로 다시 읽도록 대기열에 넣었어요.'
-    case 'no_owner':
-      return 'Workspace Memory 큐레이터를 맡은 Keeper 가 없어서 다시 읽기를 넣지 않았어요.'
-    case 'unavailable':
-      return `Workspace Memory 큐레이터 다시 읽기를 넣지 못했어요: ${refresh.detail}`
-  }
-}
-
-function appliedToast(request: PromptOverrideRequest, applied: OverrideApplied): string {
-  const head = request.action === 'set'
-    ? `${applied.key} override 를 저장했어요.`
-    : `${applied.key} override 를 지웠어요. 지금은 ${applied.source} 텍스트를 써요.`
-  const curator = curatorRefreshNote(applied.curator_refresh)
-  return curator === null ? head : `${head} ${curator}`
-}
-
 function matchesSearch(entry: PromptEntry, needle: string): boolean {
   if (needle === '') return true
   return entry.key.toLowerCase().includes(needle) || entry.description.toLowerCase().includes(needle)
 }
 
-const fieldStyle = {
-  padding: 'var(--sp-1) var(--sp-2)',
-  background: 'var(--input-bg)',
-  border: '1px solid var(--input-border)',
-  borderRadius: 'var(--radius-sm)',
-} as const
 
 export function PromptsTab(_props: WorkspaceViewProps) {
   const session = authSession.value
@@ -111,6 +99,7 @@ export function PromptsTab(_props: WorkspaceViewProps) {
   const [onlyOverrides, setOnlyOverrides] = useState(false)
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
   const { drafts, writes } = promptEditsFor(epoch)
+  const [section, setSection] = useState<Section>('prompts')
 
   useEffect(() => {
     void loadPromptCatalog('mount')
@@ -275,24 +264,38 @@ export function PromptsTab(_props: WorkspaceViewProps) {
       <header class="ov-head" style=${{ flexShrink: 0 }}>
         <div>
           <span class="ov-eyebrow">5 RUNTIME · PROMPTS</span>
-          <h1>공유 프롬프트 · World · override</h1>
+          <h1>공유 프롬프트 · World · 프리셋</h1>
+        </div>
+        <div class="ap-viewseg" role="group" aria-label="프롬프트 화면 선택">
+          ${SECTIONS.map(([id, label]) => html`
+            <button key=${id} type="button" data-section=${id} aria-pressed=${section === id} class=${`ap-viewbtn ${section === id ? 'on' : ''}`} onClick=${() => setSection(id)}>
+              ${label}
+            </button>
+          `)}
         </div>
       </header>
       ${!canEdit && html`
         <div class="wka-card" role="status" data-testid="prompts-admin-locked" style=${{ flexShrink: 0, fontSize: 'var(--fs-13)', color: 'var(--fg-2)' }}>
-          프롬프트는 읽을 수만 있어요. override 저장과 지우기는 관리자 세션에서 할 수 있어요.
+          프롬프트와 프리셋은 읽을 수만 있어요. override 저장·지우기와 프리셋 저장·복원·삭제는 관리자 세션에서 할 수 있어요.
         </div>
       `}
+      <${PresetFeedback} />
       <div style=${{ flex: '1 1 0%', minHeight: 0 }}>
-        <${MasterDetail}
-          masterLabel="프롬프트 목록"
-          detailLabel="프롬프트"
-          master=${master}
-          detail=${detail}
-          hasSelection=${selected !== null}
-          selectionKey=${selectedKey}
-          emptyDetail=${html`<div class="wka-card dtable-absent">목록에서 프롬프트를 고르면 지금 쓰는 텍스트와 편집기가 열려요.</div>`}
-        />
+        ${section === 'presets'
+          ? html`<${PresetsPanel}
+              canEdit=${canEdit}
+              catalog=${catalog}
+              onPromptsChanged=${() => { resourceCache.invalidateTopic('prompts'); return loadPromptCatalog('manual') }}
+            />`
+          : html`<${MasterDetail}
+              masterLabel="프롬프트 목록"
+              detailLabel="프롬프트"
+              master=${master}
+              detail=${detail}
+              hasSelection=${selected !== null}
+              selectionKey=${selectedKey}
+              emptyDetail=${html`<div class="wka-card dtable-absent">목록에서 프롬프트를 고르면 지금 쓰는 텍스트와 편집기가 열려요.</div>`}
+            />`}
       </div>
     </div>
   `

@@ -1361,6 +1361,167 @@ let test_muse_permission_grammar () =
     ]
 ;;
 
+(* Calls MASC denied a Keeper on muse-spark-1.3 (system log, 2026-11-26 and
+   27): tools of its own bridge, which the host kinded by what each tool
+   does. The toolCallId, the tool in [name], the title and the kind are the
+   logged ones; the log prints the permission frame merged with the call's
+   tool_call frame. *)
+let muse_logged_bridge_owner = "code-reviewer-brother"
+
+let muse_logged_bridge_calls =
+  [ "01a2168a-d9d3-7a92-a968-9ffb3772b086", "Read", "mcp__masc_b68ca01d__Read", "read"
+  ; ( "01a21a65-c726-7800-94e4-ee3895452431"
+    , "keeper_artifact_read"
+    , "mcp__masc_b68ca01d__keeper_artifact_read"
+    , "read" )
+  ; ( "01a21bc9-e28a-7551-a710-f7bb719cda19"
+    , "keeper_capability_search"
+    , "mcp__masc_b68ca01d__keeper_capability_search board post get read comments"
+    , "search" )
+  ; ( "01a216d9-eb60-7ac1-a683-c0974845e7ce"
+    , "masc_board_search"
+    , "mcp__masc_b68ca01d__masc_board_search code-reviewer-brother"
+    , "search" )
+  ; ( "01a21b1a-7cb5-79c1-88f2-43c1c03162fa"
+    , "Grep"
+    , "mcp__masc_b68ca01d__Grep 55077"
+    , "search" )
+  ; "01a21a62-f714-73f1-93f6-7202c4e09968", "Write", "mcp__masc_b68ca01d__Write", "edit"
+  ]
+;;
+
+let muse_logged_tool_call_fields ~tool_call_id ~tool ~title ~kind =
+  [ "toolCallId", `String tool_call_id
+  ; "title", `String title
+  ; "name", `String ("mcp__masc_b68ca01d__" ^ tool)
+  ; "kind", `String kind
+  ; "status", `String "pending"
+  ]
+;;
+
+let test_muse_bridge_tool_keeps_its_server_under_any_kind () =
+  let bridge =
+    Runtime_acp_client.bridge_server_name
+      Runtime_acp_client.Muse_code
+      ~owner:muse_logged_bridge_owner
+  in
+  check string "the bridge name MASC gives the logged Keeper" "masc_b68ca01d" bridge;
+  let allowed_tool_names = List.map (fun (_, tool, _, _) -> tool) muse_logged_bridge_calls in
+  let mcp_only =
+    Runtime_acp_client.Allow_masc_mcp_only { mcp_server_name = bridge; allowed_tool_names }
+  in
+  let read_and_mcp =
+    Runtime_acp_client.Allow_read_and_masc_mcp { mcp_server_name = bridge; allowed_tool_names }
+  in
+  let classify =
+    Runtime_acp_client.For_testing.classify_tool_call_json
+      ~driver:Runtime_acp_client.Muse_code
+      ~mcp_server_name:bridge
+  in
+  let allowed policy identity = Runtime_acp_client.should_allow_tool_call ~policy identity in
+  List.iter
+    (fun (tool_call_id, tool, title, kind) ->
+       let identity =
+         classify (`Assoc (muse_logged_tool_call_fields ~tool_call_id ~tool ~title ~kind))
+       in
+       (match identity with
+        | Runtime_acp_client.Mcp_tool
+            { server = Runtime_acp_client.Explicit_server server; tool_name } ->
+          check string (tool ^ " is a call to the bridge") bridge server;
+          check string (tool ^ " keeps its name") tool tool_name
+        | Runtime_acp_client.Mcp_tool { server = Runtime_acp_client.Implicit_mcp_kind; _ }
+        | Runtime_acp_client.Managed_mcp_schema_read _
+        | Runtime_acp_client.Native_tool _ ->
+          failf "%s with kind %s was not read as a call to the bridge" tool kind);
+       check bool (tool ^ " with kind " ^ kind ^ " is allowed under mcp-only") true
+         (allowed mcp_only identity))
+    muse_logged_bridge_calls;
+  let frame fields = classify (`Assoc (("toolCallId", `String "t-neg") :: fields)) in
+  (* A title is display text. Without [name], one that reads like a bridge
+     tool keeps the kind gate, so under kind read it stays a native read. *)
+  let title_only =
+    frame [ "title", `String "mcp__masc_b68ca01d__Read"; "kind", `String "read" ]
+  in
+  (match title_only with
+   | Runtime_acp_client.Native_tool _ -> ()
+   | Runtime_acp_client.Mcp_tool _ | Runtime_acp_client.Managed_mcp_schema_read _ ->
+     fail "a title alone named a bridge tool under kind read");
+  check bool "a title alone is denied under mcp-only" false (allowed mcp_only title_only);
+  (* The operator's own MASC entry serves the same tools under another
+     server. Read through [name], its Read is a foreign MCP call, not a
+     native read the read posture would allow. *)
+  let operator_read =
+    frame
+      [ "title", `String "mcp__masc__Read"
+      ; "name", `String "mcp__masc__Read"
+      ; "kind", `String "read"
+      ]
+  in
+  check bool "the operator's masc Read is denied under read-and-mcp" false
+    (allowed read_and_mcp operator_read);
+  check bool "a native read_file is still a native read" true
+    (allowed read_and_mcp
+       (frame
+          [ "title", `String "read_file"; "name", `String "read_file"; "kind", `String "read" ]));
+  check bool "a kind the client does not know keeps a bridge tool native" false
+    (allowed mcp_only
+       (frame
+          [ "title", `String "mcp__masc_b68ca01d__Read"
+          ; "name", `String "mcp__masc_b68ca01d__Read"
+          ; "kind", `String "future_kind"
+          ]))
+;;
+
+(* The keeper's stream projection gets the call as parsed from the host's
+   tool_call frame. A call to the bridge opens no native block and fences
+   nothing; the bridge itself opens its tool_use block when MASC runs it. *)
+let test_muse_bridge_tool_call_frame_opens_no_native_block () =
+  let bridge =
+    Runtime_acp_client.bridge_server_name
+      Runtime_acp_client.Muse_code
+      ~owner:muse_logged_bridge_owner
+  in
+  let fenced = ref 0 in
+  let on_acp_event, _, _, _, observed_tool_calls =
+    Keeper_acp_runtime.For_testing.project_stream_for_testing
+      ~on_effect_attempted:(fun () -> incr fenced)
+      ~driver:Runtime_acp_client.Muse_code
+      ~mcp_server_name:bridge
+      ~model:"muse-spark-1.3"
+      ~session_id:"sess-muse-logged"
+      ~turn_count:1
+      ~native_posture:Runtime_native_tools.Native_none
+      ~allowed_tool_names:(List.map (fun (_, tool, _, _) -> tool) muse_logged_bridge_calls)
+      ()
+  in
+  List.iter
+    (fun (tool_call_id, tool, title, kind) ->
+       let update =
+         `Assoc
+           (("sessionUpdate", `String "tool_call")
+            :: muse_logged_tool_call_fields ~tool_call_id ~tool ~title ~kind)
+       in
+       match
+         Runtime_acp_client.For_testing.parse_session_update
+           ~driver:Runtime_acp_client.Muse_code
+           (`Assoc [ "sessionId", `String "sess-muse-logged"; "update", update ])
+       with
+       | Some event -> on_acp_event event
+       | None -> failf "the %s tool_call frame did not parse" tool)
+    muse_logged_bridge_calls;
+  check int "no bridge call fences a same-turn retry" 0 !fenced;
+  let native_calls =
+    Yojson.Safe.Util.(
+      observed_tool_calls ()
+      |> to_list
+      |> List.filter_map (fun call ->
+        match member "origin" call |> to_string_option with
+        | Some "native" -> member "tool_name" call |> to_string_option
+        | Some _ | None -> None))
+  in
+  check (list string) "no bridge call is recorded as a native tool" [] native_calls
+;;
+
 let test_muse_toml_row_and_effort () =
   let source =
     {|
@@ -1921,7 +2082,14 @@ let test_build_argv_and_strict_permission_posture () =
   check_kind "Read -> Delete escalates to Delete"
     (Some Tool_delete) (merge ~prior:(Some Tool_read) ~incoming:(Some Tool_delete));
   check_kind "Read -> Unknown escalates to Unknown"
-    (Some (Tool_unknown "x")) (merge ~prior:(Some Tool_read) ~incoming:(Some (Tool_unknown "x")))
+    (Some (Tool_unknown "x")) (merge ~prior:(Some Tool_read) ~incoming:(Some (Tool_unknown "x")));
+  (* A host's tool name admits an MCP call under edit, so a conflict marked
+     on an edit frame must not be absorbed by it. *)
+  check_kind "Edit -> conflict escalates to the conflict"
+    (Some (Tool_unknown "conflict:identity"))
+    (merge ~prior:(Some Tool_edit) ~incoming:(Some (Tool_unknown "conflict:identity")));
+  check_kind "Unknown -> Edit stays Unknown"
+    (Some (Tool_unknown "x")) (merge ~prior:(Some (Tool_unknown "x")) ~incoming:(Some Tool_edit))
 ;;
 
 let http_post ~sw ~net ~endpoint ~authorization ?protocol_version body =
@@ -7244,6 +7412,194 @@ let test_muse_prompt_without_a_journal_keeps_the_prompt_and_says_why () =
   | Runtime_acp_client.Usage_unreadable _ -> fail "expected the journal to be reported missing"
 ;;
 
+(* A mock muse host announces each call with a tool_call frame and then asks
+   permission with a frame that carries only the toolCallId, so the client
+   answers from the tool_call frame it kept. The first three are calls MASC
+   denied a Keeper on muse-spark-1.3 (2026-11-26 and 27), with the logged
+   title, name and kind. *)
+let test_muse_permission_answers_bridge_tools_of_any_kind () =
+  let tmp = Filename.temp_dir ~perms:0o700 "acp-muse-perm-" "" in
+  let mock_script = Filename.concat tmp "mock_muse_perm.py" in
+  let outcomes_file = Filename.concat tmp "perm_outcomes.json" in
+  let data_home = Filename.concat tmp "data" in
+  Unix.mkdir data_home 0o700;
+  let script_body =
+    Printf.sprintf
+      {|import json, sys
+
+def send(obj):
+    sys.stdout.write(json.dumps(obj) + "\n")
+    sys.stdout.flush()
+
+SESSION = "sess-muse-perm"
+BRIDGE = "mcp__masc_b68ca01d__"
+OPTIONS = [
+    {"optionId": "allow_once_id", "kind": "allow_once"},
+    {"optionId": "reject_once_id", "kind": "reject_once"}
+]
+# (request id, tool_call fields, extra fields of the permission toolCall)
+CALLS = [
+    (3001, {"toolCallId": "01a21bc9-e28a-7551-a710-f7bb719cda19",
+            "title": BRIDGE + "keeper_capability_search board post get read comments",
+            "name": BRIDGE + "keeper_capability_search", "kind": "search"}, {}),
+    (3002, {"toolCallId": "01a21a65-c726-7800-94e4-ee3895452431",
+            "title": BRIDGE + "keeper_artifact_read",
+            "name": BRIDGE + "keeper_artifact_read", "kind": "read"}, {}),
+    (3003, {"toolCallId": "01a21a62-f714-73f1-93f6-7202c4e09968",
+            "title": BRIDGE + "Write", "name": BRIDGE + "Write", "kind": "edit"}, {}),
+    (3004, {"toolCallId": "tc-operator-read",
+            "title": "mcp__masc__Read", "name": "mcp__masc__Read", "kind": "read"}, {}),
+    (3005, {"toolCallId": "tc-name-conflict",
+            "title": BRIDGE + "Write", "name": BRIDGE + "Write", "kind": "edit"},
+           {"name": BRIDGE + "Execute"}),
+    (3006, {"toolCallId": "tc-native-read",
+            "title": "read_file", "name": "read_file", "kind": "read"}, {}),
+    (3007, {"toolCallId": "tc-title-only",
+            "title": BRIDGE + "Read", "kind": "read"}, {}),
+    (3008, {"toolCallId": "tc-late-other-name",
+            "title": BRIDGE + "Read", "kind": "read"}, {"name": BRIDGE + "Write"}),
+    (3009, {"toolCallId": "tc-late-same-name",
+            "title": BRIDGE + "Read", "kind": "read"}, {"name": BRIDGE + "Read"}),
+    (3010, {"toolCallId": "tc-name-then-meta",
+            "title": "read_file", "name": "read_file", "kind": "read"},
+           {"_meta": {"tool_name": BRIDGE + "Write"}}),
+    (3011, {"toolCallId": "tc-meta-then-name",
+            "title": "Read file", "kind": "read",
+            "_meta": {"tool_name": BRIDGE + "Read"}},
+           {"name": "read_file"}),
+    (3012, {"toolCallId": "tc-name-and-meta-agree",
+            "title": BRIDGE + "Read", "name": BRIDGE + "Read", "kind": "read"},
+           {"_meta": {"tool_name": BRIDGE + "Read"}}),
+]
+IDS = [rid for rid, _, _ in CALLS]
+
+outcomes = {}
+pending_prompt_id = None
+for line in sys.stdin:
+    line = line.strip()
+    if not line:
+        continue
+    msg = json.loads(line)
+    method = msg.get("method")
+    mid = msg.get("id")
+    if method == "initialize":
+        send({"jsonrpc": "2.0", "id": mid, "result": {
+            "protocolVersion": 1,
+            "agentCapabilities": {"promptCapabilities": {"image": False}}
+        }})
+    elif method == "session/new":
+        send({"jsonrpc": "2.0", "id": mid, "result": {"sessionId": SESSION}})
+    elif method == "session/prompt":
+        pending_prompt_id = mid
+        for rid, call, extra in CALLS:
+            update = {"sessionUpdate": "tool_call", "status": "pending"}
+            update.update(call)
+            send({"jsonrpc": "2.0", "method": "session/update", "params": {
+                "sessionId": SESSION, "update": update}})
+            tool_call = {"toolCallId": call["toolCallId"]}
+            tool_call.update(extra)
+            send({"jsonrpc": "2.0", "id": rid, "method": "session/request_permission",
+                  "params": {"sessionId": SESSION, "toolCall": tool_call, "options": OPTIONS}})
+        send({"jsonrpc": "2.0", "method": "session/update", "params": {
+            "sessionId": SESSION,
+            "update": {"sessionUpdate": "agent_message_chunk",
+                       "content": {"type": "text", "text": "done"}}}})
+    elif method is None and mid in IDS:
+        outcomes[str(mid)] = msg.get("result", {}).get("outcome", {})
+        if len(outcomes) == len(IDS) and pending_prompt_id is not None:
+            with open(%S, "w") as f:
+                json.dump(outcomes, f)
+            send({"jsonrpc": "2.0", "id": pending_prompt_id,
+                  "result": {"stopReason": "end_turn"}})
+            pending_prompt_id = None
+|}
+      outcomes_file
+  in
+  Out_channel.with_open_text mock_script (fun oc -> output_string oc script_body);
+  Fun.protect ~finally:(fun () -> rm_rf tmp) (fun () ->
+    with_xdg_data_home data_home (fun () ->
+      Eio_main.run (fun env ->
+        let clock = Eio.Stdenv.clock env in
+        let proc_mgr =
+          Runtime_acp_client.foreground_process_mgr ~clock ~grace_seconds:1.0 ()
+        in
+        let cfg =
+          { (Runtime_acp_client.default_config ~driver:Runtime_acp_client.Muse_code ~cwd:tmp) with
+            cli_path = "python3"
+          ; args = [ mock_script ]
+          }
+        in
+        Eio.Switch.run (fun sw ->
+          let client =
+            match
+              Runtime_acp_client.start ~sw ~proc_mgr ~clock ~fs:(Eio.Stdenv.fs env)
+                ~config:cfg ()
+            with
+            | Ok c -> c
+            | Error err -> failf "start failed: %s" (Runtime_acp_client.error_to_string err)
+          in
+          Fun.protect ~finally:(fun () -> Runtime_acp_client.close client) (fun () ->
+            let session =
+              match Runtime_acp_client.new_session client ~cwd:tmp () with
+              | Ok s -> s
+              | Error err ->
+                failf "new_session failed: %s" (Runtime_acp_client.error_to_string err)
+            in
+            let policy =
+              Runtime_acp_client.Allow_masc_mcp_only
+                { mcp_server_name =
+                    Runtime_acp_client.bridge_server_name
+                      Runtime_acp_client.Muse_code
+                      ~owner:muse_logged_bridge_owner
+                ; allowed_tool_names =
+                    [ "keeper_capability_search"
+                    ; "keeper_artifact_read"
+                    ; "Write"
+                    ; "Execute"
+                    ; "Read"
+                    ]
+                }
+            in
+            (match
+               Runtime_acp_client.prompt
+                 client
+                 ~session_id:session.session_id
+                 ~blocks:[ Runtime_acp_client.Text_block "review" ]
+                 ~permission_policy:policy
+                 ()
+             with
+             | Ok result -> check string "the reply" "done" result.Runtime_acp_client.text
+             | Error err ->
+               failf "prompt failed: %s" (Runtime_acp_client.error_to_string err));
+            let outcomes = Yojson.Safe.from_file outcomes_file in
+            let option_of id =
+              Yojson.Safe.Util.(outcomes |> member id |> member "optionId" |> to_string)
+            in
+            List.iter
+              (fun (id, label, expected) -> check string label expected (option_of id))
+              [ "3001", "keeper_capability_search with kind search is allowed", "allow_once_id"
+              ; "3002", "keeper_artifact_read with kind read is allowed", "allow_once_id"
+              ; "3003", "Write with kind edit is allowed", "allow_once_id"
+              ; "3004", "the operator's masc Read is denied", "reject_once_id"
+              ; "3005", "a name that changes between frames is denied", "reject_once_id"
+              ; "3006", "a native read_file is denied under mcp-only", "reject_once_id"
+              ; "3007", "a bridge tool named only by its title is denied", "reject_once_id"
+              ; ( "3008"
+                , "a later name that differs from the title is denied under kind read"
+                , "reject_once_id" )
+              ; "3009", "a later name equal to the title is allowed", "allow_once_id"
+              ; ( "3010"
+                , "a later _meta.tool_name that differs from the earlier name is denied"
+                , "reject_once_id" )
+              ; ( "3011"
+                , "a later name that differs from the earlier _meta.tool_name is denied"
+                , "reject_once_id" )
+              ; ( "3012"
+                , "a later _meta.tool_name equal to the earlier name is allowed"
+                , "allow_once_id" )
+              ])))))
+;;
+
 let () =
   run "runtime_acp_client"
     [ ( "profiles"
@@ -7296,6 +7652,12 @@ let () =
             test_muse_stream_projection_uses_bridge_server_name
         ; test_case "muse MCP grammar and permission policy" `Quick
             test_muse_permission_grammar
+        ; test_case "muse bridge tool keeps its server under any kind" `Quick
+            test_muse_bridge_tool_keeps_its_server_under_any_kind
+        ; test_case "muse bridge tool_call frame opens no native block" `Quick
+            test_muse_bridge_tool_call_frame_opens_no_native_block
+        ; test_case "muse permission answers bridge tools of any kind" `Quick
+            test_muse_permission_answers_bridge_tools_of_any_kind
         ; test_case "kimi --skills-dir order & strict permission posture" `Quick
             test_build_argv_and_strict_permission_posture
         ; test_case "agy acp mcp(masc/...) and call_mcp_tool permission posture" `Quick

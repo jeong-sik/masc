@@ -382,8 +382,15 @@ let profile_of_driver = function
     (* Live-verified against muse acp 1.4.25 (2026-11-24): session/update
        tool_call emits title = name = "mcp__<server>__<tool>" with kind =
        "other"; native tools use plain names ("read_file", kind "read"). The
-       host's default permission profile has a model run approve MCP calls and
-       sends no session/request_permission frame. In five sessions each call to
+       kind "other" held for that stub tool only. For a Keeper on
+       muse-spark-1.3 (2026-11-26 and 27) MASC denied 56 permission requests
+       for its own bridge's tools: their frames had kind "read", "search" or
+       "edit", and a title that adds a summary of the arguments after the
+       name. [name] kept "mcp__<server>__<tool>", so MASC reads the server
+       from [name] under any kind ([kind_admits_mcp_identifier]). For the
+       stub tool the host's default permission profile had a model run
+       approve MCP calls and sent no session/request_permission frame. In five
+       sessions each call to
        a no-argument stub tool, ordered by the prompt, added one reviewer run
        (a 4,002-token prefix in all five): the host estimated its prompt at
        13.6 to 13.7k tokens in four and 11.6k in the one whose main
@@ -1339,8 +1346,12 @@ let is_read_only_tool_kind = function
      ([Tool_read] additionally permits managed schema reads).
    - [Branch_mcp]: [Tool_vendor_mcp] < [Tool_other] < [Tool_execute]
      (progressively narrower MCP authorization predicates).
-   - [Branch_restricted]: Edit/Delete/Move/Fetch/Switch_mode/Unknown —
-     denied and effect-fenced everywhere.
+   - [Branch_restricted]: Edit/Delete/Move/Fetch/Switch_mode < Unknown —
+     a native tool of these kinds is denied and effect-fenced everywhere.
+     [Tool_unknown] is never admitted, so it ranks above the others: a
+     conflict {!merge_tool_call_wire} marks on an [edit] frame is not lost
+     (an MCP tool named by the host's tool-name field is admitted under every
+     other kind, see {!kind_admits_mcp_identifier}).
    Merging within a branch takes the more restrictive kind; any cross-branch
    conflict (empty policy intersection, e.g. Read+Execute, Read+Other,
    Execute+Read) escalates to [Tool_unknown "conflict:<prior>-><incoming>"].
@@ -1358,13 +1369,16 @@ let branch_of_tool_kind = function
     Branch_restricted
 ;;
 
+(* HIGH-RISK-UNREVIEWED: [Tool_unknown] ranks above the other restricted
+   kinds, so a conflict mark survives a merge with an [edit] frame. *)
 let within_branch_rank = function
   | Tool_read -> 0
   | Tool_search | Tool_think -> 1
   | Tool_vendor_mcp -> 0
   | Tool_other -> 1
   | Tool_execute -> 2
-  | Tool_edit | Tool_delete | Tool_move | Tool_fetch | Tool_switch_mode | Tool_unknown _ -> 3
+  | Tool_edit | Tool_delete | Tool_move | Tool_fetch | Tool_switch_mode -> 3
+  | Tool_unknown _ -> 4
 ;;
 
 let merge_tool_kind ~(prior : tool_kind option) ~(incoming : tool_kind option)
@@ -1378,9 +1392,11 @@ let merge_tool_kind ~(prior : tool_kind option) ~(incoming : tool_kind option)
     then Some p
     else (
       match branch_of_tool_kind p, branch_of_tool_kind i with
-      | Branch_restricted, (Branch_restricted | Branch_read_only | Branch_mcp) -> Some p
+      | Branch_restricted, (Branch_read_only | Branch_mcp) -> Some p
       | (Branch_read_only | Branch_mcp), Branch_restricted -> Some i
-      | Branch_read_only, Branch_read_only | Branch_mcp, Branch_mcp ->
+      | Branch_read_only, Branch_read_only
+      | Branch_mcp, Branch_mcp
+      | Branch_restricted, Branch_restricted ->
         if within_branch_rank i > within_branch_rank p then Some i else Some p
       | Branch_read_only, Branch_mcp | Branch_mcp, Branch_read_only ->
         Some
@@ -1503,7 +1519,8 @@ let raw_input_conflicts prev inc =
    Execute/Edit) can weaken policy enforcement. Missing fields may still be
    enriched and locations are unioned. Any conflicting non-empty structured
    identity field ([name], [_meta.server_name], [_meta.tool_name], key-order-
-   insensitive [raw_input]), conflicting whitespace-free MCP identifier [title]
+   insensitive [raw_input]), a [name] that differs from the other frame's
+   [_meta.tool_name] (either order), conflicting whitespace-free MCP identifier [title]
    (under any MCP- or wrapper-eligible kind including [Tool_execute] for
    Antigravity [mcp(<srv>/<tool>)], while preserving live ACP human-display
    title progress such as [kimi acp 2.7.2] "Read" -> "Reading hello.txt"), or
@@ -1518,9 +1535,11 @@ let merge_tool_call_wire ~(prior : tool_call_wire) ~(incoming : tool_call_wire) 
     || Option.is_some incoming.name
   in
   let merged_kind = merge_tool_kind ~prior:prior.kind ~incoming:incoming.kind in
+  (* A host's tool name names an MCP call under any kind the client knows
+     ([kind_admits_mcp_identifier]), so one that arrives after an
+     identifier-like title and differs from it conflicts under every kind. *)
   let structured_name_introduced_conflict =
-    is_allowed_explicit_mcp_wrapper_kind merged_kind
-    && Option.is_none prior.name
+    Option.is_none prior.name
     && Option.is_none prior.meta_tool_name
     &&
     match prior.title with
@@ -1532,10 +1551,23 @@ let merge_tool_call_wire ~(prior : tool_call_wire) ~(incoming : tool_call_wire) 
       differs incoming.name || differs incoming.meta_tool_name
     | Some _ | None -> false
   in
+  (* The host writes both [name] and [_meta.tool_name], and
+     {!classify_tool_call} reads [_meta.tool_name] first. If one frame's
+     [name] differs from another frame's [_meta.tool_name], the later frame
+     would switch which tool the call is judged as. So the two fields
+     conflict across frames in either order. *)
+  let cross_field_name_conflict =
+    string_opt_conflicts prior.name incoming.meta_tool_name
+    || string_opt_conflicts prior.meta_tool_name incoming.name
+  in
+  (* HIGH-RISK-UNREVIEWED: decides when two frames of one call disagree on
+     which tool runs. A conflict sets [kind] to [Tool_unknown], so the call
+     classifies as a native tool that only [Allow_all] admits. *)
   let identity_conflict =
     string_opt_conflicts prior.name incoming.name
     || string_opt_conflicts prior.meta_server_name incoming.meta_server_name
     || string_opt_conflicts prior.meta_tool_name incoming.meta_tool_name
+    || cross_field_name_conflict
     || raw_input_conflicts prior.raw_input incoming.raw_input
     || structured_name_introduced_conflict
     || ((not has_structured_tool_name)
@@ -1810,6 +1842,49 @@ let parse_qualified_mcp_identifier ~driver ?mcp_server_name ~(kind : tool_kind o
       else None)
 ;;
 
+(* Where a frame's MCP identifier was read. The host fills [_meta.tool_name]
+   and [name] with the name it registered the tool under. It writes [title]
+   for display, often from the call's arguments ("Reading <path>",
+   "bash: <command>"), so the model can shape it. *)
+type identifier_field =
+  | Host_tool_name of string
+  | Display_title of string
+
+let identifier_text = function
+  | Host_tool_name text | Display_title text -> text
+;;
+
+(* Whether a frame of [kind] may name an MCP tool through [field]. A title
+   needs the kind hosts give an MCP call ({!is_allowed_mcp_kind}): a native
+   tool whose title reads like an MCP name still carries the native tool's
+   kind. A host's tool name needs only a kind the client knows, because a
+   host may kind an MCP tool by what the tool does. muse acp asked permission
+   for MASC's keeper_artifact_read and Read with kind [read], for
+   keeper_memory_search, keeper_capability_search, masc_board_search and Grep
+   with kind [search], and for Write with kind [edit] (56 frames, 2026-11-26
+   and 27). [Tool_unknown] is also the mark of a conflict
+   {!merge_tool_call_wire} found, so it never admits.
+   HIGH-RISK-UNREVIEWED: this decides which kinds may carry an MCP call. *)
+let kind_admits_mcp_identifier ~kind = function
+  | Display_title _ -> is_allowed_mcp_kind kind
+  | Host_tool_name _ ->
+    (match kind with
+     | None
+     | Some
+         ( Tool_read
+         | Tool_edit
+         | Tool_delete
+         | Tool_move
+         | Tool_search
+         | Tool_execute
+         | Tool_think
+         | Tool_fetch
+         | Tool_switch_mode
+         | Tool_other
+         | Tool_vendor_mcp ) -> true
+     | Some (Tool_unknown _) -> false)
+;;
+
 let classify_tool_call ~driver ?managed_schema_root ?mcp_server_name (wire : tool_call_wire)
   : tool_call_identity
   =
@@ -1871,26 +1946,26 @@ let classify_tool_call ~driver ?managed_schema_root ?mcp_server_name (wire : too
           bypass server checks by omitting [_meta.tool_name]. *)
     match wire.meta_server_name with
     | Some srv ->
-      if not (is_allowed_mcp_kind wire.kind)
-      then fallback ()
-      else (
-        let candidate_tool =
-          let pick_non_empty = function
-            | Some s ->
-              let t = String.trim s in
-              if t <> "" && not (has_ascii_whitespace t) then Some t else None
-            | None -> None
-          in
-          match pick_non_empty wire.meta_tool_name with
-          | Some _ as found -> found
-          | None ->
-            (match pick_non_empty wire.name with
-             | Some _ as found -> found
-             | None -> pick_non_empty wire.title)
+      let candidate_tool =
+        let pick_non_empty = function
+          | Some s ->
+            let t = String.trim s in
+            if t <> "" && not (has_ascii_whitespace t) then Some t else None
+          | None -> None
         in
-        match candidate_tool with
-        | Some tool_name -> Mcp_tool { server = Explicit_server srv; tool_name }
-        | None -> fallback ())
+        match
+          pick_non_empty wire.meta_tool_name, pick_non_empty wire.name, pick_non_empty wire.title
+        with
+        | Some tool, _, _ | None, Some tool, _ -> Some (Host_tool_name tool)
+        | None, None, Some tool -> Some (Display_title tool)
+        | None, None, None -> None
+      in
+      (* HIGH-RISK-UNREVIEWED: admits [_meta.server_name]'s server for any
+         driver. No recorded host sends that field. *)
+      (match candidate_tool with
+       | Some field when kind_admits_mcp_identifier ~kind:wire.kind field ->
+         Mcp_tool { server = Explicit_server srv; tool_name = identifier_text field }
+       | Some _ | None -> fallback ())
     | None ->
       (* 3. Read-only lazy MCP schema read strictly targeting a single direct
             child file inside this client's MASC-owned
@@ -1929,15 +2004,15 @@ let classify_tool_call ~driver ?managed_schema_root ?mcp_server_name (wire : too
                4a. Explicit [mcp(<srv>/<tool>)] / [mcp(<srv>:<tool>)] wrapper
                    (Antigravity only, permitted across None/mcp/other/execute).
                4b. Driver-declared qualified identifiers gated strictly on
-                   [is_allowed_mcp_kind] and [driver_profile.mcp_identifier_syntaxes]. *)
-         let candidate =
-           match wire.meta_tool_name with
-           | Some s -> Some s
-           | None ->
-             (match wire.name with
-              | Some s -> Some s
-              | None -> wire.title)
+                   [kind_admits_mcp_identifier] and
+                   [driver_profile.mcp_identifier_syntaxes]. *)
+         let field =
+           match wire.meta_tool_name, wire.name, wire.title with
+           | Some text, _, _ | None, Some text, _ -> Some (Host_tool_name text)
+           | None, None, Some text -> Some (Display_title text)
+           | None, None, None -> None
          in
+         let candidate = Option.map identifier_text field in
          (match Option.bind candidate parse_explicit_mcp_wrapper with
           | Some id ->
             if is_allowed_explicit_mcp_wrapper_kind wire.kind
@@ -1948,16 +2023,20 @@ let classify_tool_call ~driver ?managed_schema_root ?mcp_server_name (wire : too
               | None -> fallback ())
             else fallback ()
           | None ->
-            if is_allowed_mcp_kind wire.kind
-            then (
-              match
-                Option.bind
-                  candidate
-                  (parse_qualified_mcp_identifier ~driver ?mcp_server_name ~kind:wire.kind)
-              with
-              | Some id -> id
-              | None -> fallback ())
-            else fallback ())))
+            (* HIGH-RISK-UNREVIEWED: a driver-qualified name becomes an MCP
+               call here. *)
+            (match field with
+             | Some field when kind_admits_mcp_identifier ~kind:wire.kind field ->
+               (match
+                  parse_qualified_mcp_identifier
+                    ~driver
+                    ?mcp_server_name
+                    ~kind:wire.kind
+                    (identifier_text field)
+                with
+                | Some id -> id
+                | None -> fallback ())
+             | Some _ | None -> fallback ()))))
 ;;
 
 let classify_tool_call_json ~driver ?managed_schema_root ?mcp_server_name json =

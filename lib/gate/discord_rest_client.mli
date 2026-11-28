@@ -296,10 +296,41 @@ val send_files :
 
     Discord enforces the per-file size limit, which depends on the server's
     boost tier, and answers an oversized file with a typed {!error}; this
-    client does not guess the limit. The default [timeout_sec] is the shared
-    HTTP default, which a large file on a slow uplink can exceed.
+    client does not guess the limit. [timeout_sec] bounds the request only
+    when [clock] is given, as for every call here.
 
     Returns the created message id on [Ok]. *)
+
+type voice_clip
+(** One Discord voice message: an Ogg stream, its length and its waveform. *)
+
+val voice_waveform_max_points : int
+(** Most waveform points a voice message carries, one byte each. *)
+
+val voice_clip :
+  duration_secs:float -> waveform:string -> string -> (voice_clip, string) result
+(** [voice_clip ~duration_secs ~waveform ogg]. [Error] unless
+    [duration_secs] is finite and positive, [waveform] has 1 to
+    {!voice_waveform_max_points} bytes, and [ogg] begins with the Ogg capture
+    pattern ["OggS"]. Discord's clients send mono 48 kHz Opus at 32 kbps;
+    the bytes are not decoded here. *)
+
+val voice_clip_duration_secs : voice_clip -> float
+
+val send_voice_message :
+  ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
+  ?timeout_sec:float ->
+  token:string ->
+  channel_id:string ->
+  ?reply_to_message_id:string ->
+  clip:voice_clip ->
+  unit ->
+  (string, error) result
+(** Posts [clip] as a voice message: the [IS_VOICE_MESSAGE] flag and one
+    [audio/ogg] file whose attachment entry carries [duration_secs] and the
+    base64 [waveform]. A voice message has no content and cannot be edited
+    afterwards; text that goes with it is a separate message. Returns the
+    created message id on [Ok]. *)
 
 (** {1 Internal — exposed for unit testing}
 
@@ -425,6 +456,18 @@ val build_upload_request :
     alt text when given; it carries the same fail-closed [allowed_mentions],
     reply reference and nonce fields as {!build_request}.
     {!send_files} draws a fresh boundary on [Error]. *)
+
+val build_voice_message_request :
+  token:string ->
+  channel_id:snowflake ->
+  boundary:boundary ->
+  ?reply_to_message_id:snowflake ->
+  clip:voice_clip ->
+  unit ->
+  (string * (string * string) list * string, upload_build_error) result
+(** The request {!send_voice_message} sends: [payload_json] with [flags]
+    [1 lsl 13] and one attachment [{id = 0; filename; duration_secs;
+    waveform}], then [files[0]] as [audio/ogg]. *)
 
 val parse_response :
   ?request_id:string ->

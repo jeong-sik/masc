@@ -595,6 +595,134 @@ let multipart_parts ~boundary body =
 let png_bytes = "\x89PNG\r\n\x1a\n\x00\x00--\r\n\xff"
 let midi_bytes = "MThd\x00\x00\x00\x06\x00\x01"
 
+(* An Ogg page header followed by bytes that hold CRLF and NUL. *)
+let ogg_bytes = "OggS\x00\x02\r\n\x00\xff"
+
+let test_voice_clip ~duration_secs ~waveform ogg =
+  match R.voice_clip ~duration_secs ~waveform ogg with
+  | Ok clip -> clip
+  | Error message -> failf "voice clip rejected: %s" message
+
+(* A voice message is one audio/ogg file with the IS_VOICE_MESSAGE flag and
+   no content; its attachment entry carries duration_secs and the base64
+   waveform Discord draws. *)
+let test_voice_message_request_shape () =
+  let boundary = "test-boundary-voice" in
+  let clip =
+    test_voice_clip ~duration_secs:2.5 ~waveform:"\x00\x7f\xff" ogg_bytes
+  in
+  match
+    R.build_voice_message_request ~token:"sekret" ~channel_id:(sf "123")
+      ~boundary:(test_boundary boundary) ~reply_to_message_id:(sf "42") ~clip ()
+  with
+  | Error R.Boundary_in_payload -> fail "unexpected boundary collision"
+  | Ok (url, headers, body) ->
+    check string "create-message URL"
+      "https://discord.com/api/v10/channels/123/messages" url;
+    check string "multipart Content-Type names the boundary"
+      ("multipart/form-data; boundary=" ^ boundary)
+      (header_value headers "Content-Type");
+    (match multipart_parts ~boundary body with
+     | [ (_, payload); (audio_headers, audio) ] ->
+       let open Yojson.Safe.Util in
+       let json = Yojson.Safe.from_string payload in
+       check int "IS_VOICE_MESSAGE flag" 8192 (json |> member "flags" |> to_int);
+       check bool "no content" true (json |> member "content" = `Null);
+       check string "reply reference" "42"
+         (json |> member "message_reference" |> member "message_id" |> to_string);
+       (match json |> member "attachments" |> to_list with
+        | [ attachment ] ->
+          check int "attachment id is files[0]" 0
+            (attachment |> member "id" |> to_int);
+          check string "filename" "voice-message.ogg"
+            (attachment |> member "filename" |> to_string);
+          check (float 0.0) "duration_secs" 2.5
+            (attachment |> member "duration_secs" |> to_number);
+          check string "waveform is base64 of the points" "AH//"
+            (attachment |> member "waveform" |> to_string)
+        | _ -> fail "a voice message names exactly one attachment");
+       check string "audio part headers"
+         "Content-Disposition: form-data; name=\"files[0]\"; \
+          filename=\"voice-message.ogg\"\r\nContent-Type: audio/ogg"
+         audio_headers;
+       check string "Ogg bytes unchanged" ogg_bytes audio
+     | parts -> failf "expected payload and one audio part, got %d" (List.length parts))
+
+let test_voice_clip_refuses_what_discord_cannot_draw () =
+  let refused label = function
+    | Error (_ : string) -> ()
+    | Ok _ -> failf "%s was accepted" label
+  in
+  let clip ?(duration_secs = 1.0) ?(waveform = "\x10") ogg =
+    R.voice_clip ~duration_secs ~waveform ogg
+  in
+  refused "zero duration" (clip ~duration_secs:0.0 ogg_bytes);
+  refused "NaN duration" (clip ~duration_secs:Float.nan ogg_bytes);
+  refused "infinite duration" (clip ~duration_secs:Float.infinity ogg_bytes);
+  refused "empty waveform" (clip ~waveform:"" ogg_bytes);
+  refused "waveform over the limit"
+    (clip ~waveform:(String.make (R.voice_waveform_max_points + 1) 'a') ogg_bytes);
+  refused "bytes that are not Ogg" (clip "ID3\x04");
+  check bool "the full waveform fits" true
+    (Result.is_ok
+       (clip ~waveform:(String.make R.voice_waveform_max_points 'a') ogg_bytes))
+
+(* [samples] mono s16le samples, each [value]. *)
+let pcm_of_samples values =
+  let buffer = Bytes.create (2 * List.length values) in
+  List.iteri (fun index value -> Bytes.set_int16_le buffer (2 * index) value) values;
+  Bytes.to_string buffer
+
+let constant_pcm ~samples value = pcm_of_samples (List.init samples (fun _ -> value))
+
+let test_voice_waveform_one_point_per_100ms () =
+  let rate = Discord_voice_clip.waveform_sample_rate in
+  (match
+     Discord_voice_clip.waveform_of_pcm_s16le ~sample_rate:rate
+       (constant_pcm ~samples:(2 * rate) 16384)
+   with
+   | Some (duration_secs, waveform) ->
+     check (float 1e-9) "two seconds" 2.0 duration_secs;
+     check int "20 points for 2 s" 20 (String.length waveform);
+     check bool "half scale maps to 127" true
+       (String.for_all (fun c -> Char.code c = 127) waveform)
+   | None -> fail "two seconds of audio gave no waveform");
+  (match
+     Discord_voice_clip.waveform_of_pcm_s16le ~sample_rate:rate
+       (constant_pcm ~samples:(60 * rate) 1000)
+   with
+   | Some (_, waveform) ->
+     check int "a minute is capped at the point limit"
+       R.voice_waveform_max_points (String.length waveform)
+   | None -> fail "a minute of audio gave no waveform");
+  (* Loud then silent: the waveform follows the signal in time. *)
+  let rate = 100 in
+  let half = constant_pcm ~samples:50 (-32768) ^ constant_pcm ~samples:50 0 in
+  match Discord_voice_clip.waveform_of_pcm_s16le ~sample_rate:rate half with
+  | Some (_, waveform) ->
+    check int "10 points for 1 s" 10 (String.length waveform);
+    check int "the most negative sample is the top byte" 255 (Char.code waveform.[0]);
+    check int "silence is zero" 0 (Char.code waveform.[9])
+  | None -> fail "one second of audio gave no waveform"
+
+let test_voice_waveform_edges () =
+  let rate = Discord_voice_clip.waveform_sample_rate in
+  check bool "no samples" true
+    (Discord_voice_clip.waveform_of_pcm_s16le ~sample_rate:rate "" = None);
+  check bool "half a sample" true
+    (Discord_voice_clip.waveform_of_pcm_s16le ~sample_rate:rate "\x01" = None);
+  check bool "no sample rate" true
+    (Discord_voice_clip.waveform_of_pcm_s16le ~sample_rate:0 (pcm_of_samples [ 1 ])
+     = None);
+  match
+    Discord_voice_clip.waveform_of_pcm_s16le ~sample_rate:rate
+      (pcm_of_samples [ 32767 ] ^ "\x7f")
+  with
+  | Some (_, waveform) ->
+    check string "one sample is one full point; a trailing byte is ignored"
+      "\xff" waveform
+  | None -> fail "one sample gave no waveform"
+
 let test_upload_request_is_payload_json_then_files_in_order () =
   let boundary = "test-boundary-1" in
   let nonce =
@@ -725,6 +853,18 @@ let () =
             test_upload_refuses_values_that_break_part_headers
         ; test_case "a boundary inside a part is refused" `Quick
             test_upload_request_refuses_a_boundary_inside_a_part
+        ] )
+    ; ( "build_voice_message_request"
+      , [ test_case "one audio/ogg file, the voice flag, no content" `Quick
+            test_voice_message_request_shape
+        ; test_case "a clip Discord cannot draw is refused" `Quick
+            test_voice_clip_refuses_what_discord_cannot_draw
+        ] )
+    ; ( "voice waveform"
+      , [ test_case "one point per 100 ms, capped, in time order" `Quick
+            test_voice_waveform_one_point_per_100ms
+        ; test_case "no samples, half a sample, one sample" `Quick
+            test_voice_waveform_edges
         ] )
     ; ( "snowflake"
       , [ test_case "rejects non-decimal IDs" `Quick

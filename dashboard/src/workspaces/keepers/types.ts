@@ -629,17 +629,7 @@ export interface KeeperMemoryJournalData {
   } | null
 }
 
-export type MemoryActPayload =
-  | { readonly action: 'resume' }
-  | { readonly action: 'adopt'; readonly observed: string }
-  | { readonly action: 'restart_reading'; readonly observed: string }
-  | { readonly action: 'skip_line'; readonly offset: number }
-  | {
-      readonly action: 'skip_item'
-      readonly target:
-        | { readonly kind: 'unreadable_unit'; readonly turn_log: string; readonly line: number }
-        | { readonly kind: 'head_item'; readonly turn_log: string; readonly line: number; readonly store: string; readonly at: number }
-    }
+export type { MemoryRecoveryActPayload as MemoryActPayload } from '../../lib/memory-recovery'
 
 // ── Portrait & Candle (#36) ───────────────────────────────────────────────
 

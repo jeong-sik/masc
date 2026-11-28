@@ -183,6 +183,44 @@ describe('Pulse Workspace — Model & Formatters', () => {
     expect(formatObserved(kpis[3]!.value)).toBe('$0 Sub')
   })
 
+  it('keeps unknown task totals unknown when only the other task metric is reported', () => {
+    const makeShell = (done: number | null, awaiting: number | null) => observedValue({
+      generated_at: null,
+      project: null,
+      version: null,
+      counts: { agents: null, tasks: null, tasks_done_24h: done, keepers: null, configured_keepers: null, total_runtimes: null },
+      scorecard: {
+        tasks_done_24h: done,
+        tasks_awaiting_verification: awaiting,
+        tasks_in_progress: null,
+        turns_24h: null,
+        cost_24h_usd: null,
+        verifications_passed_24h: null,
+        verifications_rejected_24h: null,
+        goals_completed_24h: null,
+      },
+      groups: [],
+    })
+    const makeKpis = (done: number | null, awaiting: number | null) => buildPulseKpis({
+      shell: makeShell(done, awaiting),
+      keepers: observedAbsent(),
+      costs: observedAbsent(),
+      usage: observedAbsent(),
+      window: '24h',
+      nowSec: USAGE_NOW,
+    })
+
+    const doneUnknown = makeKpis(null, 3).find((kpi) => kpi.id === 'tasks_24h')!
+    expect(formatObserved(doneUnknown.value)).toBe('미보고')
+    expect(doneUnknown.secondary).toBe('검증 대기 3')
+    expect(doneUnknown.exactTooltip).toBe('검증 대기 3건')
+
+    const awaitingUnknown = makeKpis(4, null).find((kpi) => kpi.id === 'tasks_24h')!
+    expect(formatObserved(awaitingUnknown.value)).toBe('4')
+    expect(awaitingUnknown.secondary).toBe('검증 대기 미확인')
+    expect(awaitingUnknown.exactTooltip).toBe('24h 완료 4건')
+  })
+
   it('sorts attention queue by severity and maps routes accurately', () => {
     const now = 1_700_000_000
     const queue = buildAttentionQueue({
@@ -551,14 +589,17 @@ describe('PulseWorkspace DOM Integration', () => {
       expect(attn?.textContent).toContain('도구 승인 (멀티 계정 미지원)')
       expect(attn?.textContent).toContain('Keeper 질문 (멀티 계정 미지원)')
       expect(attn?.textContent).toContain('Keeper 상태 (멀티 계정 미지원)')
-      expect(attn?.textContent).toContain('비어 있음으로 확정할 수 없습니다')
+      expect(attn?.textContent).toContain('도구 승인·Keeper 질문·Keeper 오류에서 확인된 대기 항목은 없습니다')
+      expect(attn?.textContent).toContain('Goal 완료 확인과 채널 Gate는 포함하지 않습니다')
     })
     const attn1 = first.container.querySelector('section[aria-label="주의 필요 대기열"]')!
     const pill1 = attn1.querySelector('.pulse-header-meta .pulse-pill')!
     expect(pill1.getAttribute('data-tone')).toBe('warn')
     expect(pill1.textContent?.trim()).toBe('일부 미확인')
-    expect(attn1.textContent).not.toContain('대기 중인 승인·질문·오류 없음')
-    expect(attn1.textContent).toContain('비어 있음으로 확정할 수 없습니다')
+    expect(attn1.textContent).not.toContain('도구 승인·Keeper 질문·Keeper 오류 없음.')
+    expect(attn1.textContent).toContain('확인된 대기 항목은 없습니다')
+    expect(attn1.textContent).toContain('이 범위의 대기열이 비었는지는 확인할 수 없습니다')
+    expect(attn1.textContent).toContain('Goal 완료 확인과 채널 Gate는 포함하지 않습니다')
     expect(requestedUrls.some((u) => u.includes('/api/v1/keepers/tool-approvals'))).toBe(false)
     expect(requestedUrls.some((u) => u.includes('/api/v1/keepers/asks'))).toBe(false)
     expect(requestedUrls.some((u) => u.includes('/api/v1/gate/keepers'))).toBe(false)

@@ -41,7 +41,7 @@ import {
   type TaskItem,
   type WorkspacePreconditionSnapshot,
 } from './index'
-import { readWorkspacePrecondition } from './types'
+import { filterTasksByChip, readWorkspacePrecondition } from './types'
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -272,15 +272,19 @@ describe('workspaces/work', () => {
       { id: 't3', title: 'Awaiting task', description: null, priority: 2, status: 'AwaitingVerification', assignee: 'k1', goalId: 'g1', verificationId: 'v1', createdAt: null, updatedAt: null, cancelledBy: null, cancelReason: null, handoff: { kind: 'absent' } },
       { id: 't4', title: 'Todo unlinked', description: null, priority: 2, status: 'Todo', assignee: null, goalId: null, verificationId: null, createdAt: null, updatedAt: null, cancelledBy: null, cancelReason: null, handoff: { kind: 'absent' } },
       { id: 't5', title: 'Done task', description: null, priority: 3, status: 'Done', assignee: 'k1', goalId: null, verificationId: null, createdAt: null, updatedAt: null, cancelledBy: null, cancelReason: null, handoff: { kind: 'absent' } },
+      { id: 't6', title: 'Cancelled task', description: null, priority: 3, status: 'Cancelled', assignee: null, goalId: null, verificationId: null, createdAt: null, updatedAt: null, cancelledBy: 'k1', cancelReason: 'No longer needed', handoff: { kind: 'absent' } },
     ]
 
     const counts = computeTaskFilterCounts(tasks)
-    expect(counts.all).toBe(5)
+    expect(counts.all).toBe(6)
     expect(counts.active).toBe(2)
     expect(counts.awaiting_verify).toBe(1)
     expect(counts.todo).toBe(1)
     expect(counts.unlinked).toBe(2)
     expect(counts.done).toBe(1)
+    expect(counts.cancelled).toBe(1)
+    expect(filterTasksByChip(tasks, 'done').map((task) => task.id)).toEqual(['t5'])
+    expect(filterTasksByChip(tasks, 'cancelled').map((task) => task.id)).toEqual(['t6'])
 
     expect(checkTaskGoalLinkable(tasks[0]!).ok).toBe(true)
     expect(checkTaskGoalLinkable(tasks[1]!)).toEqual({ ok: false, error: 'Already_assigned' })
@@ -1911,6 +1915,45 @@ describe('workspaces/work', () => {
     firstRow().click()
     await flushUi(2)
     expect(shownPane()).toBe('detail')
+  })
+
+  it('Tasks menu filters Done and Cancelled separately and shows their individual counts', async () => {
+    authSession.value = {
+      kind: 'single_user_local',
+      mode: 'single_user',
+      tokenPresent: true,
+      authMethods: { google: false, github: false, dev_token: true },
+      workspaceId: 'default',
+    }
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.startsWith('/api/v1/dashboard/planning')) {
+        return jsonResponse({ goals: [], tasks: [
+          { id: 'task-done', title: 'Finished task', status: 'done', priority: 1, goal_id: null },
+          { id: 'task-cancelled', title: 'Stopped task', status: 'cancelled', priority: 1, goal_id: null },
+        ] })
+      }
+      if (url.startsWith('/api/v1/dashboard/execution')) return jsonResponse({ tasks: [] })
+      if (url.includes('/api/v1/dashboard/scheduled-automation')) {
+        return jsonResponse({ status: 'ok', schedule_store_known: true, schedule_store_read_error: null, request_count: 0, truncated: false, requests: [] })
+      }
+      return jsonResponse({})
+    }) as typeof fetch
+
+    render(
+      html`<${WorkWorkspace} subroute="tasks" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`,
+      container,
+    )
+    await flushUi(4)
+    await pickTasksFilter('done')
+    expect(container.querySelector('[aria-label="태스크 목록"]')?.textContent).toContain('Finished task')
+    expect(container.querySelector('[aria-label="태스크 목록"]')?.textContent).not.toContain('Stopped task')
+    expect(container.querySelector('[data-testid="tasks-status-filter"]')?.textContent).toContain('(1)')
+
+    await pickTasksFilter('cancelled')
+    expect(container.querySelector('[aria-label="태스크 목록"]')?.textContent).toContain('Stopped task')
+    expect(container.querySelector('[aria-label="태스크 목록"]')?.textContent).not.toContain('Finished task')
+    expect(container.querySelector('[data-testid="tasks-status-filter"]')?.textContent).toContain('(1)')
   })
 
   it('Tasks pane switch: with no schedule to select, the detail is out of reach', async () => {

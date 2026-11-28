@@ -296,26 +296,28 @@ export function buildPulseKpis(params: {
       tasksKpi = {
         id: 'tasks_24h',
         label: 'Tasks Done / Verify',
-        value: observedAbsent(),
+        value: observedUnreported(),
         exactTooltip: null,
         secondary: null,
         tone: 'default',
         route: '/work/tasks',
       }
     } else {
-      const doneFmt = formatCompactCount(done ?? 0)
+      const doneFmt = done !== null ? formatCompactCount(done) : null
       const awaitFmt = awaiting !== null ? formatCompactCount(awaiting) : null
       const rejected = shell.data.scorecard.verifications_rejected_24h ?? 0
       const secParts: string[] = []
-      secParts.push(awaitFmt !== null ? `검증 대기 ${awaitFmt.short}` : '검증 대기 없음')
+      secParts.push(awaitFmt !== null ? `검증 대기 ${awaitFmt.short}` : '검증 대기 미확인')
       if (rejected > 0) secParts.push(`거절 ${rejected}`)
       tasksKpi = {
         id: 'tasks_24h',
         label: 'Tasks Done/24h & Verify',
-        value: observedValue(doneFmt.short),
-        exactTooltip: `24h 완료 ${doneFmt.exact}건${awaitFmt ? ` · 검증 대기 ${awaitFmt.exact}건` : ''}${rejected > 0 ? ` · 24h 거절 ${rejected}건` : ''}`,
+        value: doneFmt !== null ? observedValue(doneFmt.short) : observedUnreported(),
+        exactTooltip: doneFmt !== null
+          ? `24h 완료 ${doneFmt.exact}건${awaitFmt ? ` · 검증 대기 ${awaitFmt.exact}건` : ''}${rejected > 0 ? ` · 24h 거절 ${rejected}건` : ''}`
+          : (awaitFmt !== null ? `검증 대기 ${awaitFmt.exact}건${rejected > 0 ? ` · 24h 거절 ${rejected}건` : ''}` : null),
         secondary: secParts.join(' · '),
-        tone: rejected > 0 ? 'bad' : (awaiting ?? 0) > 0 ? 'warn' : (done ?? 0) > 0 ? 'ok' : 'default',
+        tone: rejected > 0 ? 'bad' : awaiting !== null && awaiting > 0 ? 'warn' : done !== null && done > 0 ? 'ok' : 'default',
         route: '/work/tasks',
       }
     }

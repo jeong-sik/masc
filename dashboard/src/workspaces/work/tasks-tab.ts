@@ -2,7 +2,7 @@
  * `2 Work > Tasks & Schedules` Tab (`tasks-tab.ts`)
  *
  * - `MasterDetail` + `VirtualList` (bounded DOM even with hundreds of tasks).
- * - 7 status filter chips (`All | Active | AwaitingVerify | Todo | Unlinked | Done | Schedules`)
+ * - 8 status filter chips (`All | Active | AwaitingVerify | Todo | Unlinked | Done | Cancelled | Schedules`)
  *   with exact reconciled counts (`Active = Claimed + InProgress`, fixing `#7`!).
  * - Full CRUD: Create Task (`masc_add_task`), Claim/Transition (`masc_transition`),
  *   Goal-link (`POST /api/v1/tasks/:id/link-goal` — strictly goalless tasks only per `constitution.xml`),
@@ -823,7 +823,8 @@ export function TasksTab(props: WorkspaceViewProps) {
     { id: 'awaiting_verify', label: 'AwaitingVerify', count: taskCountLabel(counts.awaiting_verify) },
     { id: 'todo', label: 'Todo', count: taskCountLabel(counts.todo) },
     { id: 'unlinked', label: 'Unlinked', count: taskCountLabel(counts.unlinked) },
-    { id: 'done', label: 'Done', count: taskCountLabel(counts.done + counts.cancelled) },
+    { id: 'done', label: 'Done', count: taskCountLabel(counts.done) },
+    { id: 'cancelled', label: 'Cancelled', count: taskCountLabel(counts.cancelled) },
     { id: 'schedules', label: 'Schedules', count: scheduleCountLabel },
   ]
 

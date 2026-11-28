@@ -149,7 +149,7 @@ export function MemoryTab(_props: WorkspaceViewProps) {
   const [actTurnLog, setActTurnLog] = useState('')
   const [actLine, setActLine] = useState('0')
   const [actStore, setActStore] = useState('')
-  const [actAt, setActAt] = useState('0')
+  const [actAt, setActAt] = useState('')
   const [actOffset, setActOffset] = useState('0')
   const [actBusy, setActBusy] = useState<string | null>(null)
   const [actFeedback, setActFeedback] = useState<{ kind: 'err' | 'warn'; message: string } | null>(null)
@@ -186,10 +186,10 @@ export function MemoryTab(_props: WorkspaceViewProps) {
       action: kind,
       observed: override?.observed ?? actObserved,
       turnLog: override?.turnLog ?? actTurnLog,
-      line: override?.line ?? Number(actLine),
+      line: override?.line ?? actLine,
       store: override?.store ?? actStore,
-      at: override?.at ?? (actStore.trim() ? Number(actAt) : undefined),
-      offset: override?.offset ?? Number(actOffset),
+      at: override?.at ?? actAt,
+      offset: override?.offset ?? actOffset,
     })
     if (!payloadRes.ok) {
       setActFeedback({ kind: 'err', message: payloadRes.error })
@@ -313,7 +313,7 @@ export function MemoryTab(_props: WorkspaceViewProps) {
     },
     {
       id: 'recovery',
-      header: 'Recovery Acts',
+      header: '메모리 복구',
       cell: (r) => canAdminRecovery
         ? html`
             <div class="kn-actions">
@@ -345,7 +345,7 @@ export function MemoryTab(_props: WorkspaceViewProps) {
                   setActTurnLog('')
                   setActLine('0')
                   setActStore('')
-                  setActAt('0')
+                  setActAt('')
                   setActOffset('0')
                 }}
               >
@@ -602,7 +602,7 @@ export function MemoryTab(_props: WorkspaceViewProps) {
         ${world && visibleSection === 'writers' && html`
           <section class="kn-section" aria-label="Librarian Writers 상태 및 복구">
             <div class="kn-section-head">
-              <h3 class="kn-section-title">Librarian Writers Status & 1-Click Recovery Acts</h3>
+              <h3 class="kn-section-title">Librarian Writer 상태 · 메모리 복구</h3>
               <div class="kn-chips">
                 <span class=${`kn-badge ${world.writersMode === 'running' ? 'kn-badge--ok' : 'kn-badge--idle'}`}>
                   ${world.writersMode}
@@ -633,7 +633,7 @@ export function MemoryTab(_props: WorkspaceViewProps) {
                 }}
               >
                 <div class="kn-section-head">
-                  <strong>Recovery Act — ${actKeeper} (POST /api/v1/keepers/${actKeeper}/memory/act)</strong>
+                  <strong>Librarian 메모리 복구 — ${actKeeper}</strong>
                   <button type="button" class="btn-ghost" onClick=${() => setActKeeper(null)}>닫기</button>
                 </div>
                 <div class="kn-grid-auto">
@@ -641,7 +641,7 @@ export function MemoryTab(_props: WorkspaceViewProps) {
                     class="kn-select"
                     value=${actKind}
                     onChange=${(e: Event) => setActKind((e.target as HTMLSelectElement).value as RecoveryActKind)}
-                    aria-label="복구 액션 선택"
+                    aria-label="메모리 복구 작업 선택"
                   >
                     <option value="resume">resume</option>
                     <option value="adopt">adopt (snapshot sha256)</option>

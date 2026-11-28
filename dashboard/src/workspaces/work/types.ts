@@ -855,6 +855,7 @@ export type TaskFilterChip =
   | 'todo'
   | 'unlinked'
   | 'done'
+  | 'cancelled'
   | 'schedules'
 
 export interface TaskItem {
@@ -983,7 +984,9 @@ export function filterTasksByChip(tasks: readonly TaskItem[], chip: TaskFilterCh
     case 'unlinked':
       return tasks.filter((t) => t.goalId === null && t.status !== 'Done' && t.status !== 'Cancelled')
     case 'done':
-      return tasks.filter((t) => t.status === 'Done' || t.status === 'Cancelled')
+      return tasks.filter((t) => t.status === 'Done')
+    case 'cancelled':
+      return tasks.filter((t) => t.status === 'Cancelled')
     case 'schedules':
       return []
   }

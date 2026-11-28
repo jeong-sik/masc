@@ -1,3 +1,4 @@
+import { buildMemoryRecoveryPayload } from '../../lib/memory-recovery'
 /**
  * Entity Tab 2: `Memory` (`/keepers/:name/memory`)
  *
@@ -34,7 +35,7 @@ import {
   postKeeperMemoryAct,
   postKeeperMemoryRetractions,
 } from './keepers-api'
-import type { MemoryActPayload, OrdinaryMemoryFact, SourceBoundMemoryFact } from './types'
+import type { OrdinaryMemoryFact, SourceBoundMemoryFact } from './types'
 
 export interface KeeperMemoryTabProps {
   readonly keeperName: string
@@ -123,6 +124,8 @@ function KeeperMemoryView(props: KeeperMemoryTabProps) {
   const [actKind, setActKind] = useState<'resume' | 'adopt' | 'restart_reading' | 'skip_line' | 'skip_item'>('resume')
   const [actObserved, setActObserved] = useState('')
   const [actOffset, setActOffset] = useState('0')
+  const [actStore, setActStore] = useState('')
+  const [actAt, setActAt] = useState('')
   const [actFeedback, setActFeedback] = useState<MemoryActionState | null>(null)
 
   // memory/retractions cleanup controls
@@ -235,25 +238,20 @@ function KeeperMemoryView(props: KeeperMemoryTabProps) {
     const cur = authSession.peek()
     if (cur.kind !== 'single_user_local' || isAdminLockedForSession('admin', cur)) return
     if (actRequest.current) return
-    let payload: MemoryActPayload
-    if (actKind === 'resume') {
-      payload = { action: 'resume' }
-    } else if (actKind === 'adopt') {
-      payload = { action: 'adopt', observed: actObserved.trim() }
-    } else if (actKind === 'restart_reading') {
-      payload = { action: 'restart_reading', observed: actObserved.trim() }
-    } else if (actKind === 'skip_line') {
-      payload = { action: 'skip_line', offset: Math.max(0, Number.parseInt(actOffset, 10) || 0) }
-    } else {
-      payload = {
-        action: 'skip_item',
-        target: {
-          kind: 'unreadable_unit',
-          turn_log: actObserved.trim(),
-          line: Math.max(0, Number.parseInt(actOffset, 10) || 0),
-        },
-      }
+    const parsedPayload = buildMemoryRecoveryPayload({
+      action: actKind,
+      observed: actObserved,
+      turnLog: actObserved,
+      line: actOffset,
+      offset: actOffset,
+      store: actStore,
+      at: actAt,
+    })
+    if (!parsedPayload.ok) {
+      setActFeedback({ kind: 'error', text: parsedPayload.error })
+      return
     }
+    const payload = parsedPayload.value
     const epoch = currentSessionEpoch()
     const controller = new AbortController()
     actRequest.current = controller
@@ -488,13 +486,13 @@ function KeeperMemoryView(props: KeeperMemoryTabProps) {
         </summary>
         <div class="ap-disclosure-body">
           <div class="kp-grid-2">
-            <section class="kp-card" aria-label="Librarian memory/act 복구">
+            <section class="kp-card" aria-label="Librarian 메모리 복구">
               <div class="kp-card-head">
-                <h3>Librarian Recovery (POST /memory/act)</h3>
+                <h3>Librarian 메모리 복구</h3>
               </div>
               <select
                 class="kp-input"
-                aria-label="memory/act 선택"
+                aria-label="메모리 복구 작업 선택"
                 value=${actKind}
                 onChange=${(e: Event) => setActKind((e.currentTarget as HTMLSelectElement).value as typeof actKind)}
               >
@@ -522,13 +520,17 @@ function KeeperMemoryView(props: KeeperMemoryTabProps) {
                   onInput=${(e: Event) => setActOffset((e.currentTarget as HTMLInputElement).value)}
                 />
               `}
+              ${actKind === 'skip_item' && html`
+                <input type="text" class="kp-input" placeholder="store (head_item일 때)" aria-label="store" value=${actStore} onInput=${(e: Event) => setActStore((e.currentTarget as HTMLInputElement).value)} />
+                ${(actStore.trim() || actAt.trim()) && html`<input type="number" min="0" class="kp-input" placeholder="항목 인덱스" aria-label="항목 인덱스" value=${actAt} onInput=${(e: Event) => setActAt((e.currentTarget as HTMLInputElement).value)} />`}
+              `}
               <button
                 type="button"
                 class="btn-primary"
                 disabled=${actFeedback?.kind === 'pending'}
                 onClick=${() => void handleRunAct()}
               >
-                ${actFeedback?.kind === 'pending' ? html`<${InlineSpinner} size="xs" /> 복구 적용 중…` : 'memory/act 적용'}
+                ${actFeedback?.kind === 'pending' ? html`<${InlineSpinner} size="xs" /> 복구 적용 중…` : '메모리 복구 적용'}
               </button>
               <${MemoryActionNotice} state=${actFeedback} pending="메모리 복구 적용 중…" />
             </section>

@@ -10,8 +10,9 @@
 //
 // Returns a `signal` (callers `.value` it from render) and a `use()`
 // hook (callers call it from a component to participate in refcounting).
-// Behaviour is byte-for-byte the same as the prior hand-rolled versions:
-// SSR no-op, lazy start, refcount can never go negative.
+// SSR no-op, lazy start, refcount can never go negative. The value is read
+// again when the interval starts, so a consumer that mounts after an idle
+// stretch does not render the moment the last consumer left.
 
 import { signal, type Signal } from '@preact/signals'
 import { useEffect } from 'preact/hooks'
@@ -32,6 +33,8 @@ export function createSharedTicker(
   function start(): void {
     if (timerId != null) return
     if (typeof window === 'undefined') return
+    // The value stood still while nothing was mounted. Read the clock now, or
+    // the first consumer shows that old moment until the first tick.
     sig.value = initialValue()
     timerId = window.setInterval(() => {
       sig.value = initialValue()

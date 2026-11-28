@@ -33,7 +33,6 @@ let input_capacity_refusal =
 let with_invalid_output evidence =
   { evidence with invalid_output = true; non_capacity_execution_failure = true }
 let without_measured_cli_capacity evidence = { evidence with measured_cli_capacity = None }
-let shows_range_size evidence = not evidence.invalid_output && evidence.historical_range_size
 let refuses_input_capacity evidence = not evidence.invalid_output && evidence.named_input_capacity
 let input_capacity_only evidence =
   refuses_input_capacity evidence && not evidence.non_capacity_execution_failure

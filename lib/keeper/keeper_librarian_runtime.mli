@@ -43,16 +43,6 @@ type served_slot =
 
 val served_slot_id : served_slot -> string
 
-type input_capacity_evidence =
-  | No_input_capacity_refusal
-  | Input_capacity_refused
-
-type message_descent =
-  | No_descent_evidence
-  | Smaller_input_may_help
-  | Invalid_output_blocks_descent
-  | Unsettled_native_blocks_descent
-
 type failure_kind =
   | Prompt_render_failure
   | Execution_clock_unavailable
@@ -63,19 +53,8 @@ type failure_kind =
   | Lane_cancelled
   | Unhandled_exception
 
-type not_committed =
-  { input_capacity_evidence : input_capacity_evidence
-  ; input_capacity_only : bool
-  ; message_descent : message_descent
-  ; provider_input_refusals : Keeper_exact_input_refusal.t list
-  ; detail : string
-  }
-
-val not_committed_of_failure : detail:string -> Keeper_exact_walk_failure.t -> not_committed
-
 val run_best_effort
   :  ?on_cli_input_limit:(Keeper_lane_cli_oneshot.input_capacity -> unit)
-  -> ?on_not_committed:(not_committed -> unit)
   -> ?on_context_committed:(Keeper_librarian_context.version -> unit)
        (** The working-context version this pass wrote, observed right after
            that write succeeds. Must only update caller-owned in-memory state,
@@ -94,10 +73,6 @@ module For_testing : sig
   val cause_input_refusals
     :  Agent_core.Exact_output.execution_error_cause
     -> Keeper_exact_input_refusal.t list
-
-  val cause_shows_size : Agent_core.Exact_output.execution_error_cause -> bool
-  val cli_failure_shows_size : Keeper_lane_cli_oneshot.failure -> bool
-  val disposition_shows_size : Agent_core.Exact_output.candidate_rejection_disposition -> bool
 
   type classified_error
 

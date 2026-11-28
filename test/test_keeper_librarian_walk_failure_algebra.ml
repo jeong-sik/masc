@@ -103,9 +103,7 @@ let test_combine_keeps_larger_cli_limit () =
 let test_invalid_output_poisons_size () =
   let evidence = S.combine (named EO.Context_overflow) S.invalid_output in
   Alcotest.(check bool) "invalid output blocks the size verdict" false
-    (S.refuses_input_capacity evidence);
-  Alcotest.(check bool) "invalid output blocks a smaller range" false
-    (S.shows_range_size evidence)
+    (S.refuses_input_capacity evidence)
 
 let test_capacity_only_keeps_all_non_capacity_visits () =
   let capacity = S.of_cause (EO.Provider_response_refused
@@ -113,8 +111,6 @@ let test_capacity_only_keeps_all_non_capacity_visits () =
   Alcotest.(check bool) "one actual body refusal is capacity-only" true
     (S.input_capacity_only capacity);
   let historical_mix = S.combine capacity (S.of_cause EO.Output_limit_reached) in
-  Alcotest.(check bool) "historical range sizing keeps its original evidence" true
-    (S.shows_range_size historical_mix);
   Alcotest.(check bool) "historical output failure does not become a partition-independent failure" false
     historical_mix.S.size_independent_execution_failure;
   List.iter (fun cause ->
@@ -235,8 +231,6 @@ let test_after_cli_fallback_drops_prior_limit () =
   let evidence = S.after_cli_fallback ~prior [ fallback ] in
   Alcotest.(check bool) "the prior measured limit is dropped" true
     (match evidence.S.measured_cli_capacity with None -> true | Some _ -> false);
-  Alcotest.(check bool) "the fallback walk still reads less" true
-    (S.shows_range_size evidence);
   Alcotest.(check bool) "named refusals survive the fallback" true
     (S.refuses_input_capacity evidence)
 

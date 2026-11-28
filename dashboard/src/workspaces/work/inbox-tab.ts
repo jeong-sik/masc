@@ -31,6 +31,7 @@ import {
   subscribeObserverReconnect,
   subscribeObserverResync,
 } from '../../core/observer'
+import { useLateRead } from '../../core/late-read'
 import { resourceCache, type FetchReason, type Observed } from '../../core/resource-cache'
 import { apiGet, apiMutate } from '../../core/transport'
 import { refreshPendingHitl } from '../../shell/shell-state'
@@ -344,13 +345,14 @@ function renderSourceAlert(label: string, observation: Observed<unknown>, proble
   return null
 }
 
-function renderSourceSyncPill(sources: readonly { label: string; observation: Observed<unknown>; problem?: string | null }[]) {
+/** Each source's `late` is `useLateRead` of its observation. */
+function renderSourceSyncPill(sources: readonly { label: string; observation: Observed<unknown>; late: boolean; problem?: string | null }[]) {
   const loadingLabels: string[] = []
   const staleLabels: string[] = []
   for (const s of sources) {
     if (s.observation.kind === 'loading') {
       loadingLabels.push(s.label)
-    } else if (s.observation.kind === 'value' && s.observation.stale && s.problem == null) {
+    } else if (s.late && s.problem == null) {
       staleLabels.push(s.label)
     }
   }
@@ -394,6 +396,12 @@ export function InboxTab(props: WorkspaceViewProps) {
   const gateObs = resourceCache.observe<ReturnType<typeof decodeGatePayload>>(inboxReads.channel_gate.key).value
   const goalsObs = resourceCache.observe<ReturnType<typeof decodeAwaitingGoals>>(inboxReads.goal_confirmation.key).value
   const observations = { tool_approval: approvalsObs, keeper_ask: asksObs, channel_gate: gateObs, goal_confirmation: goalsObs }
+  const lateReads = {
+    tool_approval: useLateRead(approvalsObs),
+    keeper_ask: useLateRead(asksObs),
+    channel_gate: useLateRead(gateObs),
+    goal_confirmation: useLateRead(goalsObs),
+  }
   const gate = !multiAccount && gateObs.kind === 'value' ? gateObs.data : null
   const approvals = !multiAccount && approvalsObs.kind === 'value' ? approvalsObs.data : emptyRows
   const asks = !multiAccount && asksObs.kind === 'value' ? asksObs.data : emptyRows
@@ -913,7 +921,7 @@ export function InboxTab(props: WorkspaceViewProps) {
 
   if (filter === 'audit') {
     const auditSyncPill = renderSourceSyncPill([
-      { label: 'Channel Gate 결정 이력', observation: gateObs, problem: gate?.auditError },
+      { label: 'Channel Gate 결정 이력', observation: gateObs, late: lateReads.channel_gate, problem: gate?.auditError },
     ])
     return html`
       <div class="wk-scroll-body">
@@ -948,6 +956,7 @@ export function InboxTab(props: WorkspaceViewProps) {
     shownSources.map((source) => ({
       label: inboxReads[source].label,
       observation: observations[source],
+      late: lateReads[source],
       problem: source === 'channel_gate' ? gate?.queueError : null,
     })),
   )

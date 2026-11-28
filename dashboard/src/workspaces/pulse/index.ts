@@ -31,6 +31,7 @@ import {
   type TimeWindow,
 } from '../../core/time-window'
 import { currentSessionEpoch, sessionEpoch } from '../../core/auth'
+import { useLateRead } from '../../core/late-read'
 import { KeeperBadge } from '../../components/keeper-badge'
 import { RefreshButton } from '../../components/primitives/refresh-button'
 import { UPlotChart, type UPlotSeriesSpec } from '../../components/primitives/uplot-chart'
@@ -189,6 +190,15 @@ export function PulseWorkspace(props: WorkspaceViewProps) {
   const win: TimeWindow = timeWindow.value
   const epoch = sessionEpoch.value
   const bundle = readPulseBundle(win)
+  // A re-read marks each source stale for as long as it is out; "지연됨" is
+  // for a source that stays that way.
+  const late = {
+    approvals: useLateRead(bundle.approvals),
+    asks: useLateRead(bundle.asks),
+    keepers: useLateRead(bundle.keepers),
+    board: useLateRead(bundle.board),
+    goals: useLateRead(bundle.goals),
+  }
   const [observedAtSec, setObservedAtSec] = useState<number>(() => Math.floor(Date.now() / 1000))
   const [openSparklines, setOpenSparklines] = useState<ReadonlySet<string>>(() => new Set())
   const mountedRef = useRef(true)
@@ -342,10 +352,7 @@ export function PulseWorkspace(props: WorkspaceViewProps) {
   }
   const attentionLoading =
     bundle.approvals.kind === 'loading' || bundle.asks.kind === 'loading' || bundle.keepers.kind === 'loading'
-  const attentionStale =
-    (bundle.approvals.kind === 'value' && bundle.approvals.stale)
-    || (bundle.asks.kind === 'value' && bundle.asks.stale)
-    || (bundle.keepers.kind === 'value' && bundle.keepers.stale)
+  const attentionStale = late.approvals || late.asks || late.keepers
   const attentionPillTone: 'bad' | 'warn' | 'info' | 'ok' =
     attentionErrors.length > 0
       ? 'bad'
@@ -412,7 +419,7 @@ export function PulseWorkspace(props: WorkspaceViewProps) {
             <div class="pulse-card-head">
               <div class="pulse-card-title-group">
                 <h2>Company Fleet · 24h Activity</h2>
-                <span class="pulse-pill" data-tone="warn" data-stale=${bundle.keepers.kind === 'value' && bundle.keepers.stale ? 'true' : 'false'} aria-hidden=${bundle.keepers.kind === 'value' && bundle.keepers.stale ? undefined : 'true'}>지연됨</span>
+                <span class="pulse-pill" data-tone="warn" data-stale=${late.keepers ? 'true' : 'false'} aria-hidden=${late.keepers ? undefined : 'true'}>지연됨</span>
               </div>
               <button type="button" class="btn-ghost" onClick=${() => props.onNavigate('/keepers')}>
                 전체 Keeper →
@@ -576,7 +583,7 @@ export function PulseWorkspace(props: WorkspaceViewProps) {
             <div class="pulse-card-head">
               <div class="pulse-card-title-group">
                 <h2>Team Handoff & Succession Pulse</h2>
-                <span class="pulse-pill" data-tone="warn" data-stale=${bundle.board.kind === 'value' && bundle.board.stale ? 'true' : 'false'} aria-hidden=${bundle.board.kind === 'value' && bundle.board.stale ? undefined : 'true'}>지연됨</span>
+                <span class="pulse-pill" data-tone="warn" data-stale=${late.board ? 'true' : 'false'} aria-hidden=${late.board ? undefined : 'true'}>지연됨</span>
               </div>
               <button type="button" class="btn-ghost" onClick=${() => props.onNavigate('/knowledge/board')}>
                 Board 열기 →
@@ -711,7 +718,7 @@ export function PulseWorkspace(props: WorkspaceViewProps) {
             <div class="pulse-card-head">
               <div class="pulse-card-title-group">
                 <h2>Active Goals</h2>
-                <span class="pulse-pill" data-tone="warn" data-stale=${bundle.goals.kind === 'value' && bundle.goals.stale ? 'true' : 'false'} aria-hidden=${bundle.goals.kind === 'value' && bundle.goals.stale ? undefined : 'true'}>지연됨</span>
+                <span class="pulse-pill" data-tone="warn" data-stale=${late.goals ? 'true' : 'false'} aria-hidden=${late.goals ? undefined : 'true'}>지연됨</span>
               </div>
               <div class="pulse-header-meta">
                 ${goalsSnapshot?.state === 'approval_queue_unavailable' && html`

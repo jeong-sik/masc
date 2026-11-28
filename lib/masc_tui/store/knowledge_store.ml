@@ -2157,6 +2157,23 @@ let wiki_page_links t (detail : Wire_knowledge.wiki_page_detail) =
 (* Rows a retained image takes under its label, as in the chat transcript. *)
 let wiki_image_rows = 6
 
+(* An embed without its own label is named by the artifact's title. A missing
+   artifact is not in the list, so its title cannot be read there. *)
+let wiki_page_names_artifacts_by_title (detail : Wire_knowledge.wiki_page_detail) =
+  List.exists
+    (fun (embed : Wire_knowledge.wiki_embed) ->
+      match (embed.target, embed.label) with
+      | Wire_knowledge.Embed_artifact { exists = Some true | None; _ }, None -> true
+      | Wire_knowledge.Embed_artifact { exists = Some false; _ }, None
+      | Wire_knowledge.Embed_artifact _, Some _
+      | ( ( Wire_knowledge.Embed_wiki _
+          | Wire_knowledge.Embed_media _
+          | Wire_knowledge.Embed_invalid
+          | Wire_knowledge.Embed_unsupported ),
+          (Some _ | None) ) ->
+          false)
+    detail.embeds
+
 let wiki_markdown_embeds ~lang t (detail : Wire_knowledge.wiki_page_detail) =
   let say ~ko ~en = Say.resolve lang (Say.make ~ko ~en) in
   let named ~ko ~en name = Printf.sprintf "%s: %s" (say ~ko ~en) name in
@@ -2166,6 +2183,13 @@ let wiki_markdown_embeds ~lang t (detail : Wire_knowledge.wiki_page_detail) =
           (fun (p : Wire_knowledge.wiki_page_summary) ->
             if String.equal p.slug slug then Some p.title else None)
           idx.pages)
+  in
+  let artifact_title_of id =
+    Option.bind (Observed.to_option t.artifacts) (fun entries ->
+        List.find_map
+          (fun (entry : Wire_knowledge.artifact_entry) ->
+            if String.equal entry.id id then Some entry.title else None)
+          entries)
   in
   let graphics =
     match (Masc_tui_term.Probe.current_observation ()).graphics with
@@ -2188,7 +2212,11 @@ let wiki_markdown_embeds ~lang t (detail : Wire_knowledge.wiki_page_detail) =
               (Embed_note
                  (named ~ko:"없는 쪽" ~en:"Missing page" (Option.value embed.label ~default:slug)))
         | Wire_knowledge.Embed_artifact { id; exists } ->
-            let name = Option.value embed.label ~default:id in
+            let name =
+              match embed.label with
+              | Some label -> label
+              | None -> Option.value (artifact_title_of id) ~default:id
+            in
             Some
               (Embed_note
                  (match exists with

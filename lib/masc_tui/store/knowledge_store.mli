@@ -664,12 +664,19 @@ val wiki_page_links : t -> Wire_knowledge.wiki_page_detail -> (string * string) 
     the hyperlink the Markdown renderer gives the link. A page embed of such a
     page counts too, as the link {!wiki_markdown_embeds} draws for it. *)
 
+val wiki_page_names_artifacts_by_title : Wire_knowledge.wiki_page_detail -> bool
+(** The page embeds an artifact without its own label that the store did not
+    report missing. {!wiki_markdown_embeds} names it by its title, which only
+    the artifact list carries. *)
+
 val wiki_markdown_embeds :
   lang:Say.lang -> t -> Wire_knowledge.wiki_page_detail -> Masc_tui_ui.Markdown.embed list
 (** How the page body shows the embeds the server found. A page embed of a
     listed page is a link; an image is a retained image when the terminal draws
-    graphics, and its label otherwise; other embeds are muted notes. Embeds the
-    server could not parse are left as written. *)
+    graphics, and its label otherwise; other embeds are muted notes. An
+    artifact embed without a label is named by its title from the artifact
+    list, or by its id until that list is read. Embeds the server could not
+    parse are left as written. *)
 
 val selected_wiki_link : slug:string -> t -> string option
 (** The selected body link of wiki page [slug]. *)

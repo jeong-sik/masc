@@ -253,6 +253,16 @@ let resolve_reasoning_effort ~enable_thinking ~reasoning_effort =
 let measure_message_bytes message = String.length (encode_history_message message)
 ;;
 
+(* The envelope reads the message alone, so a Keeper's sizes under it hold
+   from one turn to the next. Every official-client runtime measures its
+   Start range with it, and this one encoder gives them one table per Keeper
+   ([Keeper_message_measurement_memo]). *)
+let history_measurement =
+  Keeper_message_measurement_memo.encoder
+    ~max_retained_bytes:Keeper_message_measurement_memo.per_keeper_retained_bytes
+    (fun () -> measure_message_bytes)
+;;
+
 (* What opens a range when the writer's read end does not: the four starts a
    lane takes on its own. A read end behind them still sends its working
    state ([Past_librarian_point]), so the range names its opener and the
@@ -1003,7 +1013,7 @@ type selected_start_range =
    Resume may compose per-turn context here, but send no history and must
    omit [argument_projection]. *)
 let start_range_projection ~input_source ?argument_projection
-    ~measure_message_bytes ~capacity_bytes ~unbounded_capacity_bytes
+    ~capacity_bytes ~unbounded_capacity_bytes
     ~reserved_bytes ?on_model_input_window_observation ?carried_front_seed
     ?librarian_front ?on_carried_front ~turn_start ~keeper_name ~runtime_id
     ~finish messages =
@@ -1011,6 +1021,11 @@ let start_range_projection ~input_source ?argument_projection
   match input_source with
   | Keeper_request_source.Completion_review -> finish messages
   | Keeper_request_source.Keeper_history _ ->
+  (* One walk of [keeper_name]'s table per Start projection: the plan, the
+     capacity cut and the range's bytes below all measure through it. *)
+  let measure_message_bytes =
+    Keeper_message_measurement_memo.measurer ~keeper_name history_measurement
+  in
   let librarian_front =
     Option.value librarian_front ~default:Keeper_turn_driver_try_provider.No_read_end
   in

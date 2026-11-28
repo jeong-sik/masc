@@ -698,7 +698,6 @@ val argument_projection :
 val start_range_projection :
   input_source:Keeper_request_source.t ->
   ?argument_projection:argument_projection ->
-  measure_message_bytes:(Agent_core.Types.message -> int) ->
   capacity_bytes:int ->
   unbounded_capacity_bytes:int ->
   reserved_bytes:int ->
@@ -728,6 +727,11 @@ val start_range_projection :
     refused input publishes no range. Both keep the range's durable-history
     coordinates: what [finish] appends, such as a Gate replay reference,
     never becomes a front. A [Completion_review] input is [finish] alone.
+
+    A [Keeper_history] input measures its messages with
+    {!measure_message_bytes} through [keeper_name]'s table
+    ({!Keeper_message_measurement_memo}), so a message an earlier projection
+    of that Keeper measured is not encoded again.
 
     With [argument_projection], verified closed raw-seed arguments and
     finished-turn tool results are planned before measuring capacity. A result

@@ -2847,7 +2847,6 @@ let run_without_lifecycle
         ?argument_projection:
           (Option.bind argument_source (fun source ->
              Host.argument_projection source ~tools:prepared.tools ~history_prefix:[]))
-        ~measure_message_bytes:Host.measure_message_bytes
         ~capacity_bytes
         ~unbounded_capacity_bytes
         ~reserved_bytes

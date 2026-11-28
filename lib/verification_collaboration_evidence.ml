@@ -49,8 +49,9 @@ let required_id args field =
   | Some value when value <> "" -> Ok value
   | Some _ | None -> Error (Invalid_request (field ^ " is required for an exact source lookup"))
 
-(* The comment arguments select one page of a submitted Board thread. *)
-let comment_argument_names = ["comment_offset"; "comment_limit"; "comment_tail"; "after_comment_id"]
+(* The comment arguments select one page of a submitted Board thread. Their
+   names come from the module that reads them. *)
+let comment_argument_names = Board.Comment_page.argument_names
 
 let comment_arguments = function
   | `Assoc fields -> `Assoc (List.filter (fun (name, _) -> List.mem name comment_argument_names) fields)

@@ -144,10 +144,11 @@ let artifact_reader_schema (keeper : Keeper_tool_descriptor.t) =
 
 (* A cursor continues the exact source page it names. A Board thread's page
    was selected by comment arguments, so its cursor carries them as [select]
-   and a continuation repeats nothing but the source id. The selection's
-   properties are the descriptor's own comment arguments, chosen by the names
-   the source reader selects with, so the schema and the reader cannot drift;
-   their descriptions are left out, as a cursor is copied and not written. *)
+   and a continuation repeats nothing but the source id. [select] offers the
+   descriptor's own comment arguments, under the names the source reader
+   reads a page selection with, so the schema and the reader name the same
+   members. Their descriptions are left out, as a cursor is copied and not
+   written. *)
 let cursor_description =
   "Continue with next_cursor from a source_json_page: pass this cursor object \
    as cursor and keep the same source id. Concatenate content until \

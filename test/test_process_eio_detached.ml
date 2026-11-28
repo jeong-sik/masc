@@ -136,7 +136,7 @@ let test_tree_kill_sigterm () =
       check bool "pgroup dead after tree_kill" true dead;
       Unix.close h.stdout_fd; Unix.close h.stderr_fd
 
-let test_tree_kill_escalates_to_sigkill () =
+let check_tree_kill_escalates_to_sigkill ~terminate =
   (* Publish readiness after installing SIG_IGN, then retain it across exec.
      There is one reapable PID, not an orphaned shell child whose zombie can
      keep kill(-pgid, 0) true after successful SIGKILL delivery. *)
@@ -177,7 +177,7 @@ let test_tree_kill_escalates_to_sigkill () =
           in
           check int "readiness byte received" 1 (read_marker ());
           check string "TERM handler installed" "R" (Bytes.to_string marker);
-          P.tree_kill ~pgid:h.pgid ~signal:Sys.sigterm ~grace_sec:0.5;
+          terminate h.pgid;
           let status = ref None in
           let exited = wait_until ~timeout_s:2.0 (fun () ->
             match reap [Unix.WNOHANG] with
@@ -186,6 +186,54 @@ let test_tree_kill_escalates_to_sigkill () =
           check bool "child exited after escalation" true exited;
           check bool "waitpid proves SIGKILL reached the TERM-ignoring process" true
             (!status = Some (Unix.WSIGNALED Sys.sigkill)))
+
+let test_tree_kill_escalates_to_sigkill () =
+  check_tree_kill_escalates_to_sigkill ~terminate:(fun pgid ->
+    P.tree_kill ~pgid ~signal:Sys.sigterm ~grace_sec:0.5)
+
+let test_tree_kill_escalates_on_cancel () =
+  check_tree_kill_escalates_to_sigkill ~terminate:(fun pgid ->
+    Eio_main.run @@ fun _env ->
+    match
+      Eio.Cancel.sub (fun context ->
+        Eio.Cancel.cancel context Exit;
+        P.tree_kill ~pgid ~signal:Sys.sigterm ~grace_sec:0.5)
+    with
+    | () -> fail "tree_kill swallowed cancellation"
+    | exception Eio.Cancel.Cancelled Exit -> ())
+
+let test_tree_kill_rejects_unsafe_group_ids () =
+  List.iter (fun pgid ->
+    check bool "unsafe group is not alive" false (P.is_pgid_alive ~pgid);
+    (* Signal zero is nondestructive even if the admission guard regresses. *)
+    P.tree_kill ~pgid ~signal:0 ~grace_sec:0.0)
+    [ 0; 1; -1; -Unix.getpid () ]
+
+let test_held_open_stdin_drains_both_outputs () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let clock = Eio.Stdenv.clock env in
+  let byte_count = 1 lsl 20 in
+  let stdout = Exec_buffer.create ~head_cap:0 ~tail_cap:64 in
+  let stderr = Exec_buffer.create ~head_cap:0 ~tail_cap:64 in
+  (* Fill both output pipes before reading stdin. Serial writing would
+     deadlock because the requested input is also larger than a pipe. *)
+  let script = Printf.sprintf
+    "head -c %d /dev/zero; head -c %d /dev/zero >&2; head -c %d | wc -c"
+    byte_count byte_count byte_count in
+  let status = Eio.Time.with_timeout_exn clock 10.0 (fun () ->
+    Eio_process_capture.spawn_and_drain_both_with_stdin_held_open
+      ~sw (Eio.Stdenv.process_mgr env) ~cwd:(Eio.Stdenv.cwd env)
+      ~stdin_content:(String.make byte_count 'x') ~clock
+      [ "/bin/sh"; "-ec"; script ] stdout stderr) in
+  check bool "process exited successfully" true (status = Unix.WEXITED 0);
+  check int "stderr drained before stdin" byte_count (Exec_buffer.total_bytes stderr);
+  let stdout_tail = Exec_buffer.tail stdout in
+  let count_and_newline = string_of_int byte_count ^ "\n" in
+  check bool "child consumed the entire stdin payload" true
+    (String.ends_with ~suffix:count_and_newline stdout_tail);
+  check bool "stdout payload also drained" true
+    (Exec_buffer.total_bytes stdout >= byte_count + String.length count_and_newline)
 
 (* No grandchild reach test.  A naive
    [sh -c 'sleep 30 & wait'] keeps the shell as a zombie after
@@ -272,8 +320,13 @@ let () =
           test_case "missing binary handled" `Quick
             test_missing_binary_reports_error;
         ] );
+      ( "pipe capture",
+        [ test_case "drains stdout and stderr while writing held-open stdin" `Quick
+            test_held_open_stdin_drains_both_outputs ] );
       ( "tree_kill",
         [
+          test_case "unsafe group IDs are rejected" `Quick test_tree_kill_rejects_unsafe_group_ids;
+          test_case "cancelled grace still escalates" `Quick test_tree_kill_escalates_on_cancel;
           test_case "SIGTERM kills pgroup" `Quick test_tree_kill_sigterm;
           test_case "SIGKILL escalation after grace" `Quick
             test_tree_kill_escalates_to_sigkill;

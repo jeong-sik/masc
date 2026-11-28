@@ -87,7 +87,10 @@ val try_with_mutex : string -> (unit -> 'a) -> 'a option
     cooperative cross-context mutex and an OS-level flock on the canonical
     parent's [<basename>.lock] sidecar (leaf symlinks are not dereferenced and
     lock their own [<leaf>.lock] sidecar). The flock uses non-blocking F_TLOCK
-    retries — max 200 attempts, ~2s total with default sleeps. *)
+    retries — max 200 attempts, ~2s total with default sleeps. A symbolic
+    link at the sidecar path is rejected with [ELOOP]. If the opened inode
+    repeatedly stops matching the sidecar, {!Flock_timeout} identifies
+    the retry exhaustion with caller [File_lock_eio.stale_inode]. *)
 val with_lock :
   ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
   string ->

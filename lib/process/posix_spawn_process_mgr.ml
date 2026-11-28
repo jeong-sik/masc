@@ -63,17 +63,20 @@ let signal t signal =
 ;;
 
 let reap t set_exit_status =
+  let rec waitpid_nohang () =
+    try Unix.waitpid [ WNOHANG ] t.pid with
+    | Unix.Unix_error (Unix.EINTR, _, _) -> waitpid_nohang ()
+  in
   Eio.Condition.loop_no_mutex Eio_unix.Process.sigchld (fun () ->
-    Stdlib.Mutex.lock t.lock;
-    match Unix.waitpid [ WNOHANG ] t.pid with
-    | 0, _ ->
-      Stdlib.Mutex.unlock t.lock;
-      None
-    | reaped, status ->
-      assert (reaped = t.pid);
-      Promise.resolve_ok set_exit_status status;
-      Stdlib.Mutex.unlock t.lock;
-      Some ())
+    locked t (fun () ->
+      if Promise.is_resolved t.exit_status then Some ()
+      else
+        match waitpid_nohang () with
+        | 0, _ -> None
+        | reaped, status ->
+          assert (reaped = t.pid);
+          Promise.resolve_ok set_exit_status status;
+          Some ()))
 ;;
 
 (* How often a TERM grace looks again at its group. A grandchild's exit

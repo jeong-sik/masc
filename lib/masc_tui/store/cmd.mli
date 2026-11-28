@@ -88,6 +88,7 @@ type get_request =
     }
   | Get_keeper_cache_outcome of { keeper : string; turn_ref : string }
   | Get_keeper_next_request of { keeper : string }
+  | Get_keeper_last_prompt of { keeper : string }
   | Get_keeper_turn_transcript of { keeper : string; turn_ref : string }
   | Get_keeper_tool_stats of { keeper : string; window_hours : int option }
   | Get_keeper_tool_calls of {

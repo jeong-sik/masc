@@ -82,6 +82,7 @@ type get_request =
     }
   | Get_keeper_cache_outcome of { keeper : string; turn_ref : string }
   | Get_keeper_next_request of { keeper : string }
+  | Get_keeper_last_prompt of { keeper : string }
   | Get_keeper_turn_transcript of { keeper : string; turn_ref : string }
   | Get_keeper_tool_stats of { keeper : string; window_hours : int option }
   | Get_keeper_tool_calls of {
@@ -804,6 +805,8 @@ let get_request_path = function
       Wire_keeper_context.keeper_cache_outcome_path ~keeper ~turn_ref
   | Get_keeper_next_request { keeper } ->
       Wire_keeper_context.keeper_next_request_path ~keeper
+  | Get_keeper_last_prompt { keeper } ->
+      Wire_keeper_context.keeper_last_prompt_path ~keeper
   | Get_keeper_turn_transcript { keeper; turn_ref } ->
       Wire_keeper_context.keeper_turn_transcript_path ~keeper ~turn_ref
   | Get_keeper_tool_stats { keeper; window_hours } ->

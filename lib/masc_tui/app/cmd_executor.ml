@@ -185,6 +185,7 @@ let timeout_sec_for_get : Cmd.get_request -> float = function
   | Cmd.Get_keeper_provider_input_part _
   | Cmd.Get_keeper_cache_outcome _
   | Cmd.Get_keeper_next_request _
+  | Cmd.Get_keeper_last_prompt _
   | Cmd.Get_keeper_turn_transcript _
   | Cmd.Get_keeper_tool_stats _
   | Cmd.Get_keeper_tool_calls _
@@ -1221,6 +1222,7 @@ let get_request_keys ~epoch ~path ~requested_at (req : Cmd.get_request) =
   | Cmd.Get_keeper_provider_input_part _
   | Cmd.Get_keeper_cache_outcome _
   | Cmd.Get_keeper_next_request _
+  | Cmd.Get_keeper_last_prompt _
   | Cmd.Get_keeper_turn_transcript _
   | Cmd.Get_keeper_tool_stats _
   | Cmd.Get_keeper_tool_result _
@@ -1864,6 +1866,17 @@ let rec execute_get t ~epoch req =
                   result =
                     fetch_and_decode_get t ~path
                       ~decode:Wire_keeper_context.decode_next_request_forecast;
+                }
+            in
+            Msg.Http_reply { epoch; reply }
+        | Cmd.Get_keeper_last_prompt { keeper } ->
+            let reply =
+              Msg.Reply_keeper_last_prompt
+                {
+                  keeper;
+                  result =
+                    fetch_and_decode_get t ~path
+                      ~decode:Wire_keeper_context.decode_last_prompt_capture;
                 }
             in
             Msg.Http_reply { epoch; reply }

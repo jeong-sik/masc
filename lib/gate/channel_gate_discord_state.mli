@@ -222,6 +222,24 @@ val send_files :
     messages. Returns the id of the message that carries the files. A failure
     after an earlier chunk was sent leaves that chunk in the channel. *)
 
+val send_voice_message :
+  channel_id:string ->
+  content:string ->
+  ?reply_to_message_id:string ->
+  ?mention_user_ids:string list ->
+  clip:Discord_rest_client.voice_clip ->
+  unit ->
+  (string, send_error) result
+(** Post [content] as {!send_message} does, then [clip] as a voice message
+    of its own: Discord allows no content on a voice message. The reply
+    reference goes on the first text chunk. Returns the voice message's id.
+    A failure after the text was sent leaves the text in the channel. *)
+
+type post_attachments =
+  | Uploads of Discord_rest_client.upload * Discord_rest_client.upload list
+  | Voice of Discord_rest_client.voice_clip
+(** What a Keeper's Discord post carries besides its text. *)
+
 val edit_message :
   channel_id:string ->
   message_id:string ->

@@ -421,7 +421,7 @@ let test_replay_connector_post_preserves_discord_and_slack_coordinates () =
            ; channel_id = "discord-thread-9"
            ; content = "reply in discord thread"
            ; mention_user_ids = []
-           ; attachment_ids = []
+           ; files = SP.Text_only
            }
        in
        let discord_result =
@@ -429,8 +429,8 @@ let test_replay_connector_post_preserves_discord_and_slack_coordinates () =
            ~config
            ~meta
            ~continuation_channel:discord_cont
-           ~discord_send:(fun ~channel_id:_ ~content:_ ~mention_user_ids:_ ~files ->
-             check bool "text-only post sends no files" true (Option.is_none files);
+           ~discord_send:(fun ~channel_id:_ ~content:_ ~mention_user_ids:_ ~attachments ->
+             check bool "text-only post sends no files" true (Option.is_none attachments);
              Ok "discord-msg-1")
            discord_replay
        in
@@ -452,30 +452,33 @@ let test_replay_connector_post_preserves_discord_and_slack_coordinates () =
        let midi_id =
          stored ~filename:"riff.mid" ~declared_mime:"audio/midi" tiny_midi
        in
-       let file_replay attachment_ids =
+       let file_replay files =
          Masc.Keeper_tool_in_process_runtime.Replay_discord_post
            { input =
                Masc.Keeper_connector_post_replay.connector_post_gate_input
                  ~connector:"discord" ~channel_id:"discord-thread-9"
-                 ~content:"악보와 그림이에요" ~mention_user_ids:[] ~attachment_ids ()
+                 ~content:"악보와 그림이에요" ~mention_user_ids:[]
+                 ~discord_files:files ()
            ; channel_id = "discord-thread-9"
            ; content = "악보와 그림이에요"
            ; mention_user_ids = []
-           ; attachment_ids
+           ; files
            }
        in
        let sent_names = ref None in
        let file_result =
          Masc.Keeper_tool_in_process_runtime.For_testing.replay_connector_post_with_senders
            ~config ~meta ~continuation_channel:discord_cont
-           ~discord_send:(fun ~channel_id:_ ~content:_ ~mention_user_ids:_ ~files ->
-             sent_names :=
-               Option.map
-                 (fun (first, rest) ->
-                    List.map Discord_rest_client.upload_filename (first :: rest))
-                 files;
+           ~discord_send:(fun ~channel_id:_ ~content:_ ~mention_user_ids:_ ~attachments ->
+             (match attachments with
+              | Some (Channel_gate_discord_state.Uploads (first, rest)) ->
+                sent_names :=
+                  Some (List.map Discord_rest_client.upload_filename (first :: rest))
+              | Some (Channel_gate_discord_state.Voice _) ->
+                fail "a file post was sent as a voice message"
+              | None -> fail "a file post was sent without its files");
              Ok "discord-msg-2")
-           (file_replay [ png_id; midi_id ])
+           (file_replay (SP.Files (png_id, [ midi_id ])))
        in
        check bool "file post completed" true
          (file_result.disposition = Tool_result.Completed ());
@@ -485,16 +488,29 @@ let test_replay_connector_post_preserves_discord_and_slack_coordinates () =
        let missing_result =
          Masc.Keeper_tool_in_process_runtime.For_testing.replay_connector_post_with_senders
            ~config ~meta ~continuation_channel:discord_cont
-           ~discord_send:(fun ~channel_id:_ ~content:_ ~mention_user_ids:_ ~files:_ ->
+           ~discord_send:(fun ~channel_id:_ ~content:_ ~mention_user_ids:_ ~attachments:_ ->
              fail "a post naming a missing file reached Discord")
-           (file_replay [ png_id; missing_id ])
+           (file_replay (SP.Files (png_id, [ missing_id ])))
+       in
+       let failed_before_effect (result : Masc.Keeper_tool_execution.t) =
+         match result.disposition with
+         | Tool_result.Failed _ ->
+           result.failure_effect_disposition = Tool_result.Proven_pre_effect
+         | Tool_result.Completed () | Tool_result.Deferred () -> false
        in
        check bool "missing file fails before any effect" true
-         (match missing_result.disposition with
-          | Tool_result.Failed _ ->
-            missing_result.failure_effect_disposition
-            = Tool_result.Proven_pre_effect
-          | Tool_result.Completed () | Tool_result.Deferred () -> false);
+         (failed_before_effect missing_result);
+       (* MIDI is notes, not sound: a voice message naming it stops before
+          ffmpeg runs or anything is sent. *)
+       let midi_voice_result =
+         Masc.Keeper_tool_in_process_runtime.For_testing.replay_connector_post_with_senders
+           ~config ~meta ~continuation_channel:discord_cont
+           ~discord_send:(fun ~channel_id:_ ~content:_ ~mention_user_ids:_ ~attachments:_ ->
+             fail "a MIDI voice message reached Discord")
+           (file_replay (SP.Voice_message midi_id))
+       in
+       check bool "MIDI voice message fails before any effect" true
+         (failed_before_effect midi_voice_result);
        Channel_gate_slack_state.record_workspace_id "T-SLACK-99";
        let slack_cont =
          Keeper_continuation_channel.slack
@@ -739,33 +755,43 @@ let test_thread_ts_args_decode () =
   | Error _ -> ()
   | Ok _ -> fail "non-string thread_ts was accepted"
 
-let test_attachment_ids_args_decode () =
+let test_discord_files_args_decode () =
   let id c = "att_" ^ String.make 64 c in
-  let decode surface value =
-    SP.attachment_ids_of_args ~surface (`Assoc [ ("attachment_ids", value) ])
-  in
-  check bool "absent decodes to no files" true
-    (SP.attachment_ids_of_args ~surface:"discord" (`Assoc []) = Ok []);
+  let decode ?(surface = "discord") fields = SP.discord_files_of_args ~surface (`Assoc fields) in
+  let ids values = ("attachment_ids", `List (List.map (fun v -> `String v) values)) in
+  check bool "absent decodes to text only" true (decode [] = Ok SP.Text_only);
   check bool "ids keep their order" true
-    (decode "discord" (`List [ `String (id 'b'); `String (id 'a') ])
-     = Ok [ id 'b'; id 'a' ]);
+    (decode [ ids [ id 'b'; id 'a' ] ] = Ok (SP.Files (id 'b', [ id 'a' ])));
+  check bool "as_voice_message false is files" true
+    (decode [ ids [ id 'a' ]; ("as_voice_message", `Bool false) ]
+     = Ok (SP.Files (id 'a', [])));
+  check bool "one id as a voice message" true
+    (decode [ ids [ id 'a' ]; ("as_voice_message", `Bool true) ]
+     = Ok (SP.Voice_message (id 'a')));
   let refused label = function
     | Error (_ : string) -> ()
     | Ok _ -> fail (label ^ " was accepted")
   in
-  refused "files on Slack" (decode "slack" (`List [ `String (id 'a') ]));
-  refused "files on the dashboard" (decode "dashboard" (`List [ `String (id 'a') ]));
-  refused "empty array" (decode "discord" (`List []));
-  refused "repeated id" (decode "discord" (`List [ `String (id 'a'); `String (id 'a') ]));
-  refused "malformed id" (decode "discord" (`List [ `String "att_xyz" ]));
-  refused "non-string id" (decode "discord" (`List [ `Int 1 ]));
-  refused "non-array" (decode "discord" (`String (id 'a')));
-  let distinct n =
-    `List (List.init n (fun i -> `String ("att_" ^ Printf.sprintf "%064x" i)))
-  in
+  refused "files on Slack" (decode ~surface:"slack" [ ids [ id 'a' ] ]);
+  refused "files on the dashboard" (decode ~surface:"dashboard" [ ids [ id 'a' ] ]);
+  refused "a voice flag on Slack" (decode ~surface:"slack" [ ("as_voice_message", `Bool false) ]);
+  refused "empty array" (decode [ ("attachment_ids", `List []) ]);
+  refused "repeated id" (decode [ ids [ id 'a'; id 'a' ] ]);
+  refused "malformed id" (decode [ ids [ "att_xyz" ] ]);
+  refused "non-string id" (decode [ ("attachment_ids", `List [ `Int 1 ]) ]);
+  refused "non-array" (decode [ ("attachment_ids", `String (id 'a')) ]);
+  refused "repeated attachment_ids" (decode [ ids [ id 'a' ]; ids [ id 'b' ] ]);
+  refused "a voice message without a file" (decode [ ("as_voice_message", `Bool true) ]);
+  refused "a voice message with two files"
+    (decode [ ids [ id 'a'; id 'b' ]; ("as_voice_message", `Bool true) ]);
+  refused "a non-boolean voice flag"
+    (decode [ ids [ id 'a' ]; ("as_voice_message", `String "true") ]);
+  let distinct n = ids (List.init n (fun i -> "att_" ^ Printf.sprintf "%064x" i)) in
   check bool "ten files fit one Discord message" true
-    (match decode "discord" (distinct 10) with Ok ids -> List.length ids = 10 | Error _ -> false);
-  refused "an eleventh file" (decode "discord" (distinct 11))
+    (match decode [ distinct 10 ] with
+     | Ok (SP.Files (_, rest)) -> List.length rest = 9
+     | Ok (SP.Text_only | SP.Voice_message _) | Error _ -> false);
+  refused "an eleventh file" (decode [ distinct 11 ])
 
 (* Before approval a post may name only files its Keeper may read, and each
    becomes durable, so the Keeper's later ephemeral files cannot evict it while
@@ -789,8 +815,13 @@ let test_discord_attachments_held_before_approval () =
          | Error error -> fail (Attachment_store.put_error_to_string error)
        in
        let held keeper ids =
-         Masc.Keeper_tool_in_process_runtime.For_testing.discord_attachments_held
-           ~base_path ~keeper ids
+         let files =
+           match ids with
+           | first :: rest -> SP.Files (first, rest)
+           | [] -> SP.Text_only
+         in
+         Masc.Keeper_tool_in_process_runtime.For_testing.discord_files_held
+           ~base_path ~keeper files
        in
        let retention () =
          match Attachment_store.get_meta store ~id:ephemeral_id with
@@ -808,30 +839,52 @@ let test_discord_attachments_held_before_approval () =
         | Ok () -> ()
         | Error detail -> fail detail);
        check bool "the owner's file is now durable" true
-         (retention () = Attachment_store.Durable))
+         (retention () = Attachment_store.Durable);
+       (* A voice message must be sound MASC can transcode. *)
+       let midi_id =
+         match
+           Attachment_store.put ~declared_mime:"audio/midi" ~filename:"riff.mid"
+             ~origin:Attachment_store.Model_generated ~created_by:"alice"
+             ~retention:Attachment_store.Durable store ~bytes:tiny_midi
+         with
+         | Ok (meta : Attachment_store.meta) -> meta.id
+         | Error error -> fail (Attachment_store.put_error_to_string error)
+       in
+       let voice id =
+         Masc.Keeper_tool_in_process_runtime.For_testing.discord_files_held
+           ~base_path ~keeper:"alice" (SP.Voice_message id)
+       in
+       check bool "a MIDI voice message is refused" true (Result.is_error (voice midi_id));
+       check bool "an image voice message is refused" true
+         (Result.is_error (voice ephemeral_id)))
 
 (* The approved input is what the replay sends after approval: the files a
-   post names survive it in order, and a text-only post's input has no
-   attachment_ids key at all. *)
-let test_approved_discord_input_carries_attachment_ids () =
+   post names survive it in order, a voice message stays a voice message, and
+   a text-only post's input has no file keys at all. *)
+let test_approved_discord_input_carries_files () =
   let id c = "att_" ^ String.make 64 c in
-  let input attachment_ids =
+  let input files =
     Masc.Keeper_connector_post_replay.connector_post_gate_input
       ~connector:"discord" ~channel_id:"123" ~content:"그림이에요"
-      ~mention_user_ids:[] ~attachment_ids ()
+      ~mention_user_ids:[] ~discord_files:files ()
   in
-  (match
-     Masc.Keeper_connector_post_replay.connector_post_replay_of_gate_input
-       (input [ id 'b'; id 'a' ])
-   with
-   | Ok (Masc.Keeper_connector_post_replay.Replay_discord_post { attachment_ids; _ }) ->
-     check (list string) "approved files" [ id 'b'; id 'a' ] attachment_ids
-   | Ok _ -> fail "a Discord post decoded as another connector"
-   | Error detail -> fail detail);
-  (match input [] with
+  let round_trip files =
+    match
+      Masc.Keeper_connector_post_replay.connector_post_replay_of_gate_input
+        (input files)
+    with
+    | Ok (Masc.Keeper_connector_post_replay.Replay_discord_post { files; _ }) -> files
+    | Ok _ -> fail "a Discord post decoded as another connector"
+    | Error detail -> fail detail
+  in
+  check bool "approved files keep their order" true
+    (round_trip (SP.Files (id 'b', [ id 'a' ])) = SP.Files (id 'b', [ id 'a' ]));
+  check bool "an approved voice message stays one" true
+    (round_trip (SP.Voice_message (id 'c')) = SP.Voice_message (id 'c'));
+  (match input SP.Text_only with
    | `Assoc fields ->
      check bool "text-only input names no files" false
-       (List.mem_assoc "attachment_ids" fields)
+       (List.mem_assoc "attachment_ids" fields || List.mem_assoc "as_voice_message" fields)
    | _ -> fail "approved input is not an object");
   match
     Masc.Keeper_connector_post_replay.connector_post_replay_of_gate_input
@@ -1019,10 +1072,10 @@ let () =
             test_thread_ts_args_decode;
           test_case "blocks decode closes its domain" `Quick
             test_blocks_args_decode;
-          test_case "attachment_ids decode closes its domain" `Quick
-            test_attachment_ids_args_decode;
-          test_case "approved Discord input carries attachment_ids" `Quick
-            test_approved_discord_input_carries_attachment_ids;
+          test_case "attachment_ids and as_voice_message decode closes its domain" `Quick
+            test_discord_files_args_decode;
+          test_case "approved Discord input carries files and voice" `Quick
+            test_approved_discord_input_carries_files;
           test_case "attachments are held before approval" `Quick
             test_discord_attachments_held_before_approval;
           test_case "explicit thread_ts wins over continuation" `Quick

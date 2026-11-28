@@ -1,5 +1,5 @@
 let connector_post_gate_input ~connector ~channel_id ~content ~mention_user_ids
-    ?thread_ts ?blocks ?(attachment_ids = []) () =
+    ?thread_ts ?blocks ?(discord_files = Keeper_surface_post.Text_only) () =
   let thread_ts_fields =
     match thread_ts with
     | None -> []
@@ -10,13 +10,9 @@ let connector_post_gate_input ~connector ~channel_id ~content ~mention_user_ids
     | None -> []
     | Some blocks -> [ "blocks", `List blocks ]
   in
-  (* Absent rather than [] for a text-only post, so its approved input is
-     the one it was before files existed. *)
-  let attachment_fields =
-    match attachment_ids with
-    | [] -> []
-    | ids -> [ "attachment_ids", Json_util.json_string_list ids ]
-  in
+  (* No fields for a text-only post, so its approved input is the one it was
+     before files existed. *)
+  let attachment_fields = Keeper_surface_post.discord_files_to_fields discord_files in
   `Assoc
     ([ "connector", `String connector
      ; "channel_id", `String channel_id
@@ -36,9 +32,7 @@ type connector_post_replay =
       ; channel_id : string
       ; content : string
       ; mention_user_ids : string list
-      ; attachment_ids : string list
-        (** Canonical attachment ids uploaded with the post, in order;
-            [[]] for a text-only post. *)
+      ; files : Keeper_surface_post.discord_files
       }
   | Replay_slack_post of
       { input : Yojson.Safe.t
@@ -164,21 +158,17 @@ let connector_post_replay_of_gate_input input =
         reject_unknown
           ~allowed:
             [ "connector"; "channel_id"; "content"; "mention_user_ids"
-            ; "attachment_ids"
+            ; "attachment_ids"; "as_voice_message"
             ]
           fields
       in
-      let* attachment_ids =
-        match List.filter (fun (name, _) -> name = "attachment_ids") fields with
-        | [] -> Ok []
-        | [ (_, value) ] ->
-          Keeper_surface_post.attachment_ids_of_json value
-          |> Result.map_error (fun detail -> "approved connector_post " ^ detail)
-        | _ -> Error "approved connector_post repeats attachment_ids"
+      let* files =
+        Keeper_surface_post.discord_files_of_fields fields
+        |> Result.map_error (fun detail -> "approved connector_post " ^ detail)
       in
       Ok
         (Replay_discord_post
-           { input; channel_id; content; mention_user_ids; attachment_ids }))
+           { input; channel_id; content; mention_user_ids; files }))
     else if String.equal connector Keeper_surface_post.slack_label
     then (
       let* () =
@@ -240,12 +230,14 @@ let connector_post_call_summary replay =
   | Replay_native_post {route;content;_} ->
     line ~connector:(Keeper_native_origin_reply.connector route)
       ~channel_id:(Keeper_native_origin_reply.destination_id route) ~content
-  | Replay_discord_post { channel_id; content; attachment_ids; _ } ->
+  | Replay_discord_post { channel_id; content; files; _ } ->
     let files =
-      match List.length attachment_ids with
-      | 0 -> ""
-      | 1 -> " (+1 file)"
-      | count -> Printf.sprintf " (+%d files)" count
+      match files with
+      | Keeper_surface_post.Text_only -> ""
+      | Keeper_surface_post.Files (_, []) -> " (+1 file)"
+      | Keeper_surface_post.Files (_, rest) ->
+        Printf.sprintf " (+%d files)" (1 + List.length rest)
+      | Keeper_surface_post.Voice_message _ -> " (+voice message)"
     in
     Option.map
       (fun summary -> summary ^ files)

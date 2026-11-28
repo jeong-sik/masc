@@ -1166,9 +1166,7 @@ type connector_post_replay = Keeper_connector_post_replay.connector_post_replay 
       ; channel_id : string
       ; content : string
       ; mention_user_ids : string list
-      ; attachment_ids : string list
-        (** Canonical attachment ids uploaded with the post, in order;
-            [[]] for a text-only post. *)
+      ; files : Keeper_surface_post.discord_files
       }
   | Replay_slack_post of
       { input : Yojson.Safe.t
@@ -1551,21 +1549,69 @@ let discord_upload_of_attachment store id =
     Discord_rest_client.upload ~filename ~media_type:meta.mime_type bytes
     |> Result.map_error (Printf.sprintf "attachment %s: %s" id)
 
-let discord_uploads ~base_path = function
-  | [] -> Ok None
-  | first :: rest ->
-    let store = Attachment_store.create ~base_path in
-    let open Result.Syntax in
-    let* first = discord_upload_of_attachment store first in
-    let* rest =
-      List.fold_right
-        (fun id acc ->
-           let* acc = acc in
-           let* upload = discord_upload_of_attachment store id in
-           Ok (upload :: acc))
-        rest (Ok [])
+let discord_uploads store (first, rest) =
+  let open Result.Syntax in
+  let* first = discord_upload_of_attachment store first in
+  let* rest =
+    List.fold_right
+      (fun id acc ->
+         let* acc = acc in
+         let* upload = discord_upload_of_attachment store id in
+         Ok (upload :: acc))
+      rest (Ok [])
+  in
+  Ok (first, rest)
+
+let stored_bytes store id =
+  match Attachment_store.get_bytes store ~id with
+  | Ok (Some bytes) -> Ok bytes
+  | Ok None -> Error (Printf.sprintf "attachment %s is not in the attachment store" id)
+  | Error error ->
+    Error
+      (Printf.sprintf "attachment %s: %s" id (Attachment_store.get_error_to_string error))
+
+(* A voice message is sound, so its source is read by what its bytes are,
+   not by the name or type it was stored under. *)
+let voice_source_format id bytes =
+  match Attachment_store.sniff_mime bytes with
+  | Some Attachment_store.Audio_mpeg -> Ok Discord_voice_clip.Mp3
+  | Some Attachment_store.Audio_wav -> Ok Discord_voice_clip.Wav
+  | Some Attachment_store.Audio_ogg -> Ok Discord_voice_clip.Ogg
+  | Some Attachment_store.Audio_mp4 -> Ok Discord_voice_clip.Mp4
+  | Some Attachment_store.Audio_webm -> Ok Discord_voice_clip.Webm
+  | Some Attachment_store.Audio_midi ->
+    Error
+      (Printf.sprintf
+         "attachment %s is MIDI: it holds notes, not sound, so it cannot be a \
+          voice message; attach it as a file"
+         id)
+  | Some
+      ( Attachment_store.Image_png | Attachment_store.Image_jpeg
+      | Attachment_store.Image_webp | Attachment_store.Image_gif
+      | Attachment_store.Application_pdf | Attachment_store.Video_mp4
+      | Attachment_store.Video_webm | Attachment_store.Video_quicktime ) ->
+    Error (Printf.sprintf "attachment %s is not audio, so it cannot be a voice message" id)
+  | None ->
+    Error (Printf.sprintf "attachment %s is not an audio format MASC reads" id)
+
+(* After approval: what the post carries besides its text, read and made
+   ready now. Any failure here comes before anything is sent. *)
+let discord_post_attachments ~base_path files =
+  let store = Attachment_store.create ~base_path in
+  let open Result.Syntax in
+  match files with
+  | Keeper_surface_post.Text_only -> Ok None
+  | Keeper_surface_post.Files (first, rest) ->
+    let* first, rest = discord_uploads store (first, rest) in
+    Ok (Some (Channel_gate_discord_state.Uploads (first, rest)))
+  | Keeper_surface_post.Voice_message id ->
+    let* bytes = stored_bytes store id in
+    let* format = voice_source_format id bytes in
+    let* clip =
+      Discord_voice_clip.of_audio format bytes
+      |> Result.map_error (Printf.sprintf "attachment %s: %s" id)
     in
-    Ok (Some (first, rest))
+    Ok (Some (Channel_gate_discord_state.Voice clip))
 
 (* Before approval: every named attachment must be one this Keeper may read,
    and it is promoted to durable. An ephemeral attachment can otherwise be
@@ -1598,6 +1644,16 @@ let discord_attachments_held ~base_path ~keeper attachment_ids =
             | Ok None -> Error (not_held id)
             | Error error -> Error (store_error id error))))
     (Ok ()) attachment_ids
+
+let discord_files_held ~base_path ~keeper = function
+  | Keeper_surface_post.Text_only -> Ok ()
+  | Keeper_surface_post.Files (first, rest) ->
+    discord_attachments_held ~base_path ~keeper (first :: rest)
+  | Keeper_surface_post.Voice_message id ->
+    Result.bind (discord_attachments_held ~base_path ~keeper [ id ]) (fun () ->
+      let store = Attachment_store.create ~base_path in
+      Result.bind (stored_bytes store id) (fun bytes ->
+        Result.map ignore (voice_source_format id bytes)))
 
 let replay_connector_post_with_senders
       ~config
@@ -1662,7 +1718,7 @@ let replay_connector_post_with_senders
                ("message sent, but local chat persistence failed: " ^ detail)
            | Ok () -> succeed (Keeper_native_origin_reply.connector route) ())
   | Replay_discord_post
-      { input; channel_id; content; mention_user_ids; attachment_ids } ->
+      { input; channel_id; content; mention_user_ids; files } ->
     with_connector_post_gate_execution
       ~config
       ~meta
@@ -1673,21 +1729,25 @@ let replay_connector_post_with_senders
       ~call_summary:(connector_post_call_summary replay)
     @@ fun () ->
     (* Read after approval: the bytes sent are the bytes stored now. A
-       missing or unreadable file stops the post before anything is sent. *)
-    (match discord_uploads ~base_path:config.Workspace.base_path attachment_ids with
+       missing or unreadable file, or audio that does not transcode, stops
+       the post before anything is sent. *)
+    (match discord_post_attachments ~base_path:config.Workspace.base_path files with
     | Error detail ->
       fail Keeper_surface_post.discord_label
         ~effect_disposition:Tool_result.Proven_pre_effect detail
-    | Ok files ->
+    | Ok attachments ->
     let send_result =
-      match discord_send, files with
-      | Some send, _ -> send ~channel_id ~content ~mention_user_ids ~files
+      match discord_send, attachments with
+      | Some send, _ -> send ~channel_id ~content ~mention_user_ids ~attachments
       | None, None ->
         Channel_gate_discord_state.send_message ~channel_id ~content
           ~mention_user_ids ()
-      | None, Some files ->
+      | None, Some (Channel_gate_discord_state.Uploads (first, rest)) ->
         Channel_gate_discord_state.send_files ~channel_id ~content
-          ~mention_user_ids ~files ()
+          ~mention_user_ids ~files:(first, rest) ()
+      | None, Some (Channel_gate_discord_state.Voice clip) ->
+        Channel_gate_discord_state.send_voice_message ~channel_id ~content
+          ~mention_user_ids ~clip ()
     in
     (match send_result with
      | Error send_error ->
@@ -1882,18 +1942,19 @@ let handle_surface_post_with_outcome
         (List.map (Keeper_secret_redaction.redact_json redaction))
         requested_blocks
     in
-    match Keeper_surface_post.attachment_ids_of_args ~surface args with
+    match Keeper_surface_post.discord_files_of_args ~surface args with
     | Error message ->
       fail
         ~class_:Tool_result.Policy_rejection
         ~effect_disposition:Tool_result.Proven_pre_effect
         (Keeper_surface_post.error_json message)
-    | Ok attachment_ids ->
-    (* Checked before approval so a post naming a file that is not there
-       fails here, not after an operator approved it. *)
+    | Ok discord_files ->
+    (* Checked before approval so a post naming a file that is not there, or
+       a voice message that is not audio, fails here, not after an operator
+       approved it. *)
     match
-      discord_attachments_held ~base_path:config.Workspace.base_path
-        ~keeper:meta.name attachment_ids
+      discord_files_held ~base_path:config.Workspace.base_path
+        ~keeper:meta.name discord_files
     with
     | Error message ->
       fail
@@ -2046,7 +2107,7 @@ let handle_surface_post_with_outcome
           ~channel_id
           ~content:safe_content
           ~mention_user_ids
-          ~attachment_ids
+          ~discord_files
           ()
       in
       replay_connector_post_with_outcome
@@ -2061,7 +2122,7 @@ let handle_surface_post_with_outcome
            ; channel_id
            ; content = safe_content
            ; mention_user_ids
-           ; attachment_ids
+           ; files = discord_files
            })
       |> Keeper_tool_execution.with_surface_post_receipt target
          | Keeper_surface_post.To_slack { channel_id; thread_ts; blocks } ->
@@ -2752,7 +2813,7 @@ let handle_masc_keeper_with_outcome
 ;;
 
 module For_testing = struct
-  let discord_attachments_held = discord_attachments_held
+  let discord_files_held = discord_files_held
 
   let replay_connector_post_with_senders
         ~config

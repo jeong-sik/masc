@@ -591,6 +591,34 @@ let send_files ~channel_id ~content ?reply_to_message_id
     in
     send true (message_chunks_with_mentions ~limit ~content ~mention_user_ids)
 
+let send_voice_message ~channel_id ~content ?reply_to_message_id
+    ?(mention_user_ids = []) ~clip () =
+  match bot_token_opt () with
+  | None -> Error Missing_token
+  | Some token ->
+    let limit = Discord_rest_client.message_content_limit in
+    let rec send_text first = function
+      | [] -> Ok ()
+      | message :: rest ->
+        (match
+           Discord_rest_client.send_message ~token ~channel_id
+             ~content:message.content
+             ?reply_to_message_id:(if first then reply_to_message_id else None)
+             ~allowed_user_mentions:message.allowed_user_mentions ()
+         with
+         | Ok _ -> send_text false rest
+         | Error e -> Error (Rest_error e))
+    in
+    (match send_text true (message_chunks_with_mentions ~limit ~content ~mention_user_ids) with
+     | Error error -> Error error
+     | Ok () ->
+       Discord_rest_client.send_voice_message ~token ~channel_id ~clip ()
+       |> Result.map_error (fun e -> Rest_error e))
+
+type post_attachments =
+  | Uploads of Discord_rest_client.upload * Discord_rest_client.upload list
+  | Voice of Discord_rest_client.voice_clip
+
 let edit_message ~channel_id ~message_id ~content () =
   match bot_token_opt () with
   | None -> Error Missing_token

@@ -139,33 +139,81 @@ let attachment_ids_of_json = function
     Error
       (Printf.sprintf "attachment_ids names %d files; a Discord post carries at most %d"
          (List.length items) Discord_rest_client.max_files_per_message)
-  | `List items ->
-    let rec decode seen acc index = function
-      | [] -> Ok (List.rev acc)
-      | `String id :: rest ->
+  | `List (first_item :: rest_items) ->
+    let decode_id seen index = function
+      | `String id ->
         (match Attachment_store.parse_id id with
-         | Error detail ->
-           Error (Printf.sprintf "attachment_ids[%d] %s" index detail)
+         | Error detail -> Error (Printf.sprintf "attachment_ids[%d] %s" index detail)
          | Ok _ when List.mem id seen ->
            Error (Printf.sprintf "attachment_ids[%d] repeats %s" index id)
-         | Ok _ -> decode (id :: seen) (id :: acc) (index + 1) rest)
-      | _ :: _ ->
-        Error (Printf.sprintf "attachment_ids[%d] must be a string" index)
+         | Ok _ -> Ok id)
+      | _ -> Error (Printf.sprintf "attachment_ids[%d] must be a string" index)
     in
-    decode [] [] 0 items
+    let rec decode seen acc index = function
+      | [] -> Ok (List.rev acc)
+      | item :: rest ->
+        Result.bind (decode_id seen index item) (fun id ->
+          decode (id :: seen) (id :: acc) (index + 1) rest)
+    in
+    Result.bind (decode_id [] 0 first_item) (fun first ->
+      Result.map (fun rest -> (first, rest)) (decode [ first ] [] 1 rest_items))
   | _ -> Error "attachment_ids must be an array of attachment ids"
 
-let attachment_ids_of_args ~surface args =
+type discord_files =
+  | Text_only
+  | Files of string * string list
+  | Voice_message of string
+
+let discord_file_keys = [ "attachment_ids"; "as_voice_message" ]
+
+let discord_files_of_fields fields =
+  let open Result.Syntax in
+  let only name =
+    match List.filter (fun (field, _) -> String.equal field name) fields with
+    | [] -> Ok None
+    | [ (_, value) ] -> Ok (Some value)
+    | _ :: _ :: _ -> Error (name ^ " must not be repeated")
+  in
+  let* ids = only "attachment_ids" in
+  let* voice =
+    match only "as_voice_message" with
+    | Error _ as error -> error
+    | Ok (None | Some (`Bool false)) -> Ok false
+    | Ok (Some (`Bool true)) -> Ok true
+    | Ok (Some _) -> Error "as_voice_message must be a boolean"
+  in
+  match ids, voice with
+  | None, false -> Ok Text_only
+  | None, true -> Error "as_voice_message needs attachment_ids naming one audio file"
+  | Some value, false ->
+    let* first, rest = attachment_ids_of_json value in
+    Ok (Files (first, rest))
+  | Some value, true ->
+    let* ids = attachment_ids_of_json value in
+    (match ids with
+     | id, [] -> Ok (Voice_message id)
+     | _, _ :: _ -> Error "a voice message carries exactly one attachment")
+
+let discord_files_of_args ~surface args =
   match args with
   | `Assoc fields ->
-    (match List.filter (fun (name, _) -> name = "attachment_ids") fields with
-     | [] -> Ok []
-     | [ (_, value) ] ->
-       if not (String.equal surface discord_label) then
-         Error "attachment_ids is supported only for Discord posts"
-       else attachment_ids_of_json value
-     | _ -> Error "attachment_ids must not be repeated")
+    (match
+       List.filter (fun (name, _) -> List.mem name discord_file_keys) fields
+     with
+     | [] -> Ok Text_only
+     | _ :: _ when not (String.equal surface discord_label) ->
+       Error "attachment_ids and as_voice_message are supported only for Discord posts"
+     | _ :: _ -> discord_files_of_fields fields)
   | _ -> Error "keeper_surface_post arguments must be an object"
+
+let discord_files_to_fields = function
+  | Text_only -> []
+  | Files (first, rest) ->
+    [ "attachment_ids", Json_util.json_string_list (first :: rest) ]
+  | Voice_message id ->
+    [ "attachment_ids", Json_util.json_string_list [ id ]
+    ; "as_voice_message", `Bool true
+    ]
 
 let blocks_of_args ~surface args =
   match args with

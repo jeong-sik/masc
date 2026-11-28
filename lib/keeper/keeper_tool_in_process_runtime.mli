@@ -63,9 +63,7 @@ type connector_post_replay = Keeper_connector_post_replay.connector_post_replay 
       ; channel_id : string
       ; content : string
       ; mention_user_ids : string list
-      ; attachment_ids : string list
-        (** Canonical attachment ids uploaded with the post, in order;
-            [[]] for a text-only post. *)
+      ; files : Keeper_surface_post.discord_files
       }
   | Replay_slack_post of
       { input : Yojson.Safe.t
@@ -440,10 +438,12 @@ val handle_masc_local_runtime_with_outcome
   -> Keeper_tool_execution.t
 
 module For_testing : sig
-  val discord_attachments_held :
-    base_path:string -> keeper:string -> string list -> (unit, string) result
-  (** The check a Discord post's attachment_ids pass before approval: each id
-      is readable by [keeper] and is promoted to durable. *)
+  val discord_files_held :
+    base_path:string -> keeper:string -> Keeper_surface_post.discord_files ->
+    (unit, string) result
+  (** The check a Discord post's files pass before approval: each id is
+      readable by [keeper] and is promoted to durable, and a voice message's
+      bytes are audio MASC can transcode. *)
 
   val replay_connector_post_with_senders :
     config:Workspace.config ->
@@ -454,7 +454,7 @@ module For_testing : sig
       (channel_id:string ->
        content:string ->
        mention_user_ids:string list ->
-       files:(Discord_rest_client.upload * Discord_rest_client.upload list) option ->
+       attachments:Channel_gate_discord_state.post_attachments option ->
        (string, Channel_gate_discord_state.send_error) result) ->
     ?slack_send:
       (thread_ts:string option ->

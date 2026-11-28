@@ -367,7 +367,9 @@ selection = "latest_completed"
 
 (* lane.host.toml runs the same output-statistics worker as a host process.
    Both manifests must declare one package: a revision, port or binding change
-   to one of them fails here until the other follows. *)
+   to one of them fails here until the other follows. The packages are compared
+   through [package_to_json], the value a declaration revision reads, so a
+   failure prints the fields that differ. *)
 let output_statistics_host_manifest_differs_only_in_execution () =
   let load name =
     match Lane_addon_manifest.load ~path:(repo_file ("addons/output-statistics/" ^ name)) with
@@ -379,8 +381,9 @@ let output_statistics_host_manifest_differs_only_in_execution () =
    | Lane_addon_types.Container _ -> fail "lane.host.toml declares a container");
   check int "both manifests bound a reply the same"
     (Lane_addon_types.max_reply_bytes container) (Lane_addon_types.max_reply_bytes host);
-  check bool "the host manifest keeps every package field but execution" true
-    ({ host with execution = container.execution } = container)
+  let render package = Yojson.Safe.pretty_to_string (Lane_addon_types.package_to_json package) in
+  check string "the host manifest keeps every package field but execution"
+    (render container) (render { host with execution = container.execution })
 
 (* The shipped operator quiz: the example declaration loads with the package's
    own manifest, its record grants parse as operator-owned grants, and the

@@ -504,12 +504,16 @@ let first_request ~keeper_name ~trace_id ~runtime_id reads =
         Keeper_turn_driver_try_provider.input_limit_of_runtime
           (Runtime.get_runtime_by_id runtime_id)
       in
+      (* Whether the turn before goes as markers is the driver's choice, made
+         from the Keeper's tools, which this read has none of. It is read as
+         what this ledger's last request did. *)
+      let finished_turn = ledger.Keeper_model_input_ledger.last.finished_turn in
       ( front
       , front
       , ledger.Keeper_model_input_ledger.total_tokens
-      , Keeper_turn_driver_try_provider.past_max_context ~input_limit
+      , Keeper_turn_driver_try_provider.past_max_context ~input_limit ~finished_turn
           ~continuity:(Some reads.continuity) ~history_digest_at:reads.digest_at ~turn_boundary:reads.turn_start (Some ledger)
-      , Keeper_turn_driver_try_provider.held_window ~opens_turn:true ~input_limit
+      , Keeper_turn_driver_try_provider.held_window ~opens_turn:true ~input_limit ~finished_turn
           ~history_digest_at:reads.digest_at (Some ledger) )
     | Some _ | None -> None, Lazy.force reads.seed, None, None, None
   in

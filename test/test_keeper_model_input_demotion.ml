@@ -2904,8 +2904,11 @@ let finished_turns_stay_verbatim_unless_they_can_be_read_back () =
    write them to. *)
 let the_ledger_reads_a_turn_as_markers_only_when_they_are_written () =
   let left ~finished_turn_results ~base_path turn_boundary =
-    Try_provider.finished_turn_for_ledger ~finished_turn_results ~base_path ~turn_boundary
-    = Masc.Keeper_model_input_ledger.Left_as_markers
+    match
+      Try_provider.finished_turn_for_ledger ~finished_turn_results ~base_path ~turn_boundary
+    with
+    | Masc.Keeper_model_input_ledger.Left_as_markers -> true
+    | Masc.Keeper_model_input_ledger.Carried_whole -> false
   in
   let known = finished_turns_through 4 in
   let unknown = Masc.Keeper_carried_front.Turn_boundary_unknown { reason = "unreadable" } in

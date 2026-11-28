@@ -770,6 +770,9 @@ type finished_turn_results =
           request sent as markers, and nothing else is demoted. *)
 
 val finished_turn_results_for : reader_available:bool -> finished_turn_results
+(** {!Finished_turns_as_markers} for a Keeper that can read markers back
+    ([reader_available]); {!Finished_turns_verbatim} for a Keeper without the
+    reader. *)
 
 val finished_turn_for_ledger :
   finished_turn_results:finished_turn_results ->
@@ -780,9 +783,6 @@ val finished_turn_for_ledger :
     reads it. [Left_as_markers] when the caller asks for markers, the dispatch
     names the turn boundary and [base_path] is a store the markers are
     written to; [Carried_whole] otherwise. *)
-(** {!Finished_turns_as_markers} for a Keeper that can read markers back
-    ([reader_available]); {!Finished_turns_verbatim} for a Keeper without the
-    reader. *)
 
 val aged_result_min_bytes : int
 (** The least text, in bytes, of a result of an ended turn that goes as its

@@ -329,7 +329,25 @@ describe('Runtime → Prompts → 프리셋', () => {
     const listingReads = server.reads('/api/v1/presets')
     click('[data-testid="preset-restore-go"]')
     await vi.waitFor(() => expect(container.querySelector('[data-testid="preset-refusal"]')?.textContent).toContain('결과를 알 수 없어요'))
-    await vi.waitFor(() => expect(server.reads('/api/v1/presets')).toBeGreaterThan(listingReads))
+    expect(server.reads('/api/v1/presets')).toBeGreaterThan(listingReads)
+    expect(container.querySelector('[data-testid="preset-refusal"]')?.textContent).toContain('목록을 다시 읽었어요')
+  })
+
+  it('says the list could not be read either when the read after an unknown outcome fails', async () => {
+    serve(() => { throw new TypeError('Failed to fetch') })
+    const served = globalThis.fetch
+    let wrote = false
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === 'POST') wrote = true
+      if (wrote && String(input) === '/api/v1/presets') throw new TypeError('Failed to fetch')
+      return served(input, init)
+    }) as typeof fetch
+    await open('default')
+    click('[data-testid="preset-restore"]')
+    await flushUi()
+    click('[data-testid="preset-restore-go"]')
+    await vi.waitFor(() => expect(container.querySelector('[data-testid="preset-refusal"]')?.textContent).toContain('목록도 다시 읽지 못했어요'))
+    expect(shellToasts.value.at(-1)?.message).toContain('결과를 알 수 없어요')
   })
 
   it('restores only after the confirm, reports each surface and reads the prompts again', async () => {

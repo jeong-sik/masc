@@ -5,6 +5,8 @@
  * - One write may be in flight even when its form or the whole tab is gone,
  *   so the outcome lives in a module signal and `PresetFeedback` shows it
  *   in either view of Runtime → Prompts.
+ * - A write ends when the lists read after it do. What the operator is told
+ *   says whether that read succeeded (`endUnsettled`).
  * - A new write replaces what the last one left: its refusal, its taken
  *   name, and its restore report. An old report next to a new failure would
  *   read as the new result.
@@ -61,6 +63,32 @@ export function beginWrite(epoch: number, active: PresetWrite): boolean {
 export function finishWrite(epoch: number, result: Partial<Pick<WriteFeedback, 'refusal' | 'taken' | 'report'>> = {}): void {
   if (epoch !== sessionEpoch.peek()) return
   writeFeedback.value = { ...writeFeedback.peek(), ...result, active: null }
+}
+
+/** How a write ended: done with its answer, done with an answer that did not decode, refused, or not known. */
+export type Settled<T> =
+  | { readonly kind: 'done'; readonly value: T }
+  | { readonly kind: 'unreadable'; readonly why: string }
+  | { readonly kind: 'refused'; readonly why: string }
+  | { readonly kind: 'unknown'; readonly why: string }
+
+/**
+ * Ends a write that did not come back done. A refusal and an unknown outcome
+ * stay on screen until dismissed; an unreadable answer was applied, so it is
+ * only told.
+ */
+export function endUnsettled(epoch: number, write: PresetWrite, out: Exclude<Settled<unknown>, { readonly kind: 'done' }>): void {
+  const message = `${write.target} ${write.action}: ${out.why}`
+  switch (out.kind) {
+    case 'unreadable':
+      finishWrite(epoch)
+      pushShellToast(message, 'warning')
+      return
+    case 'refused':
+    case 'unknown':
+      finishWrite(epoch, { refusal: message })
+      pushShellToast(message, out.kind === 'refused' ? 'error' : 'warning')
+  }
 }
 
 function dismiss(field: 'refusal' | 'taken' | 'report', epoch: number): void {

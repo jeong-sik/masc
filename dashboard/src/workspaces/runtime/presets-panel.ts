@@ -39,11 +39,12 @@ import { restoreSummary } from './preset-restore-report'
 import {
   beginWrite,
   dismissTaken,
+  endUnsettled,
   finishWrite,
   markShownPreset,
   presetWriteState,
   shownPreset,
-  type PresetWrite,
+  type Settled,
   type TakenName,
 } from './preset-writes'
 import { promptEditsFor } from './prompt-edits'
@@ -73,12 +74,6 @@ function loadPresetListing(reason: 'mount' | 'manual') {
   )
 }
 
-/** How a write ended: done with its answer, done with an answer that did not decode, refused, or not known. */
-type Settled<T> =
-  | { readonly kind: 'done'; readonly value: T }
-  | { readonly kind: 'unreadable' }
-  | { readonly kind: 'refused'; readonly why: string }
-  | { readonly kind: 'unknown'; readonly why: string }
 
 export interface PresetsPanelProps {
   readonly canEdit: boolean
@@ -113,38 +108,34 @@ export function PresetsPanel({ canEdit, catalog, onPromptsChanged }: PresetsPane
   const trimmed = name.trim()
   const nameOk = isValidPresetName(trimmed)
 
-  const reread = (alsoPrompts: boolean): Promise<unknown> => {
+  /** Resolves to whether the preset list could be read again. */
+  const reread = async (alsoPrompts: boolean): Promise<boolean> => {
     resourceCache.invalidateTopic('presets')
     const shown = shownPreset()
-    return Promise.all([
-      loadPresetListing('manual'),
+    const [listingRead] = await Promise.all([
+      // A read that a later one replaced answers with the cache; join the later one.
+      loadPresetListing('manual').then(read => (read.kind === 'value' && read.stale ? loadPresetListing('mount') : read)),
       shown === null ? null : loadPresetShow(shown, 'manual'),
       alsoPrompts ? onPromptsChanged() : null,
     ])
+    return listingRead.kind === 'value'
   }
 
-  const settle = <T,>(res: Result<T, ApiError>, what: string, alsoPrompts: boolean): Settled<T> => {
-    if (res.ok) {
-      void reread(alsoPrompts)
-      return { kind: 'done', value: res.value }
-    }
+  /** A write ends when the lists read after it do, and says whether that read succeeded. */
+  const settle = async <T,>(res: Result<T, ApiError>, alsoPrompts: boolean): Promise<Settled<T>> => {
+    const failure = res.ok ? null : failureOutcome(res.error.kind)
+    // A refusal changed nothing; any other answer may have.
+    const read = failure === 'refused' ? null : await reread(alsoPrompts)
+    const readNote = read === true ? '목록을 다시 읽었어요.' : '목록도 다시 읽지 못했어요.'
+    if (res.ok) return { kind: 'done', value: res.value }
     switch (failureOutcome(res.error.kind)) {
       case 'refused':
         return { kind: 'refused', why: `하지 못했어요: ${res.error.message}` }
       case 'applied':
-        void reread(alsoPrompts)
-        pushShellToast(`${what}: 서버가 요청을 받았지만 답을 읽지 못했어요 (${res.error.message}). 목록을 다시 읽어요.`, 'warning')
-        return { kind: 'unreadable' }
+        return { kind: 'unreadable', why: `서버가 요청을 받았지만 답을 읽지 못했어요 (${res.error.message}). ${readNote}` }
       case 'unknown':
-        void reread(alsoPrompts)
-        return { kind: 'unknown', why: `결과를 알 수 없어요 (${res.error.message}). 목록을 다시 읽었어요.` }
+        return { kind: 'unknown', why: `결과를 알 수 없어요 (${res.error.message}). ${readNote}` }
     }
-  }
-
-  const refuse = (target: string, action: PresetWrite['action'], out: Extract<Settled<unknown>, { kind: 'refused' | 'unknown' }>) => {
-    const message = `${target} ${action}: ${out.why}`
-    finishWrite(epoch, { refusal: message })
-    pushShellToast(message, out.kind === 'refused' ? 'error' : 'warning')
   }
 
   const save = async (target: TakenName, replace: boolean) => {
@@ -156,13 +147,15 @@ export function PresetsPanel({ canEdit, catalog, onPromptsChanged }: PresetsPane
       pushShellToast(`${target.name} 프리셋이 이미 있어서 저장하지 않았어요. 「프리셋」에서 덮어쓸지 골라 주세요.`, 'warning')
       return
     }
-    const out = settle(res, `${target.name} 저장`, false)
-    if (out.kind === 'refused' || out.kind === 'unknown') {
-      refuse(target.name, '저장', out)
-      return
+    const out = await settle(res, false)
+    if (epoch !== sessionEpoch.peek()) return
+    if (out.kind === 'done') {
+      finishWrite(epoch)
+      pushShellToast(`${out.value.preset.name} 프리셋에 지금 상태를 ${replace ? '덮어썼어요' : '저장했어요'}.`, 'success')
+    } else {
+      endUnsettled(epoch, { target: target.name, action: '저장' }, out)
+      if (out.kind !== 'unreadable') return
     }
-    finishWrite(epoch)
-    if (out.kind === 'done') pushShellToast(`${out.value.preset.name} 프리셋에 지금 상태를 ${replace ? '덮어썼어요' : '저장했어요'}.`, 'success')
     setName('')
     setDescription('')
     setSelected(target.name)
@@ -173,17 +166,16 @@ export function PresetsPanel({ canEdit, catalog, onPromptsChanged }: PresetsPane
     if (!beginWrite(epoch, { target, action: '복원' })) return
     const res = await apiMutate<PresetRestored>('POST', '/api/v1/presets/restore', { name: target }, { decode: decodePresetRestored })
     if (epoch !== sessionEpoch.peek()) return
-    const out = settle(res, `${target} 복원`, true)
-    if (out.kind === 'refused' || out.kind === 'unknown') {
-      refuse(target, '복원', out)
+    const out = await settle(res, true)
+    if (epoch !== sessionEpoch.peek()) return
+    if (out.kind !== 'done') {
+      endUnsettled(epoch, { target, action: '복원' }, out)
       return
     }
-    if (out.kind === 'done') {
-      const report = out.value.report
-      finishWrite(epoch, { report })
-      const summary = restoreSummary(report)
-      pushShellToast(`${report.restored}: ${summary.text}. 이전 상태는 ${report.autosave} 에 있어요.`, summary.tone)
-    } else finishWrite(epoch)
+    const report = out.value.report
+    finishWrite(epoch, { report })
+    const summary = restoreSummary(report)
+    pushShellToast(`${report.restored}: ${summary.text}. 이전 상태는 ${report.autosave} 에 있어요.`, summary.tone)
   }
 
   const remove = async (target: string) => {
@@ -191,13 +183,15 @@ export function PresetsPanel({ canEdit, catalog, onPromptsChanged }: PresetsPane
     const res = await apiMutate<PresetDeleted>('POST', '/api/v1/presets/delete', { name: target }, { decode: decodePresetDeleted })
     if (epoch !== sessionEpoch.peek()) return
     setUnreadableDelete(null)
-    const out = settle(res, `${target} 삭제`, false)
-    if (out.kind === 'refused' || out.kind === 'unknown') {
-      refuse(target, '삭제', out)
-      return
+    const out = await settle(res, false)
+    if (epoch !== sessionEpoch.peek()) return
+    if (out.kind === 'done') {
+      finishWrite(epoch)
+      pushShellToast(`${out.value.deleted} 프리셋을 지웠어요.`, 'success')
+    } else {
+      endUnsettled(epoch, { target, action: '삭제' }, out)
+      if (out.kind !== 'unreadable') return
     }
-    finishWrite(epoch)
-    if (out.kind === 'done') pushShellToast(`${out.value.deleted} 프리셋을 지웠어요.`, 'success')
     setSelected(current => (current === target ? null : current))
   }
 

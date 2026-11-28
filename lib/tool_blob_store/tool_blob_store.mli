@@ -39,15 +39,22 @@ val root_dir : t -> string
 val preview_max : int
 (** Hard ceiling on the smart head+tail preview length {!put} produces (4 KiB).
 
-    Callers measuring a string body's marker use {!make_preview} so planning
-    and addressing share the exact sanitized head+tail bytes. Nothing outside
-    this module should restate the ceiling; {!Tool_output.make_artifact_ref}
-    does not enforce it, so it is a property of {!put}, not of
-    {!Tool_output.artifact_ref}. *)
+    A caller measuring the marker {!put} will write uses {!make_preview}, so
+    planning and addressing share the exact sanitized head+tail bytes. Nothing
+    outside this module should restate this ceiling;
+    {!Tool_output.make_artifact_ref} does not enforce it, so it is a property
+    of {!put}, not of {!Tool_output.artifact_ref}. A writer whose marker
+    carries another preview passes its own bound to {!make_head_preview}. *)
 
 val make_preview : string -> string
 (** Exact sanitized 4 KiB head+tail preview used by blob addressing. Pure;
     callers may use it to measure a marker before storing its original bytes. *)
+
+val make_head_preview : max_bytes:int -> string -> string
+(** The sanitized first [max_bytes] bytes of a body, never longer than
+    [max_bytes]; the empty string when [max_bytes] is zero or negative. Pure.
+    For a writer whose marker carries a preview shorter than {!make_preview}'s
+    and names its own bound. {!put} and {!address} keep {!make_preview}. *)
 
 val put : t -> bytes:string -> mime:string -> Tool_output.t
 (** Store [bytes] under its sha256 digest. {!address} then {!put_addressed},
@@ -55,15 +62,18 @@ val put : t -> bytes:string -> mime:string -> Tool_output.t
     a caller holding many, not because this one is going away.
 
     Returns [Tool_output.Stored {sha256; bytes; preview; mime}] where
-    [preview] is the leading sanitized run of [bytes], at most
-    {!preview_max} bytes. Valid Unicode is preserved; malformed UTF-8 sequences
+    [preview] is {!make_preview} of [bytes]: the whole sanitized body when
+    it is at most {!preview_max} bytes, and otherwise its head and tail
+    around a note of how many bytes are left out, at most {!preview_max}
+    bytes in all. Valid Unicode is preserved; malformed UTF-8 sequences
     (including a sequence cut at the prefix boundary) and control bytes are
     replaced with [?], and newline, carriage return and tab become spaces.
 
     Idempotent: the same bytes always yield the same content address. The
     first put of an address in this process writes it atomically, repairing
     any corrupt prior bytes without a duplicate read/hash. A later put of an
-    address this process wrote with [put] does not write again, because
+    address this process remembers writing with [put] (its 4,096 most recent)
+    does not write again, because
     maintenance deletes only from the offline helper under the BasePath
     process lease. If {!fetch} or {!fetch_range} then fails to return
     validated bytes for it (missing, digest mismatch, or a read error), it

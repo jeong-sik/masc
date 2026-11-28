@@ -738,6 +738,29 @@ let structured_bodies_are_stored_and_replayed () = with_demotion_store @@ fun st
      = outcome.Demotion.messages)
 ;;
 
+(* A result's marker previews the body's first 200 bytes: what the plan
+   measured and what [materialize] wrote. The blob store's own preview would
+   be the body's head and tail, up to 4 KiB. *)
+let a_result_marker_previews_its_first_200_bytes () = with_demotion_store @@ fun store ->
+  let body = String.make 150 'h' ^ String.make 3_000 'm' ^ String.make 150 't' in
+  let messages = closed_cycle ~id:"previewed" body in
+  let planned = Demotion.plan ~measure_wire_bytes:stored_wire_bytes ~measure_message_bytes ~demote_before:1 messages in
+  let outcome = Demotion.materialize ~store ~addresses:(Demotion.create_address_memo ())
+      ~pending:planned.pending planned.messages in
+  let preview_of text =
+    match Tool_output.decode_from_agent_core text with
+    | Tool_output.Decoded reference -> reference.Tool_output.preview
+    | Tool_output.Not_marker | Tool_output.Invalid_marker _ -> Alcotest.fail "a marker is expected" in
+  let expected = String.sub body 0 200 in
+  Alcotest.(check string) "the preview is the first 200 bytes" expected (Demotion.result_marker_preview body);
+  Alcotest.(check (list string)) "the planned marker carries it" [expected]
+    (List.map preview_of (markers planned.messages));
+  Alcotest.(check (list string)) "the written marker carries it" [expected]
+    (List.map preview_of (markers outcome.messages));
+  Alcotest.(check (list string)) "the marker opens the whole body" [body]
+    (List.map (fetch_body store) (markers outcome.messages))
+;;
+
 let repeated_id_bodies () =
   let prefix = String.make Tool_blob_store.preview_max 'p' in
   [prefix ^ String.make 4000 'a'; prefix ^ String.make 4000 'b']
@@ -853,6 +876,20 @@ let long_arguments suffix =
           "path", `String "/tmp/argument-example"; "flags", `List [`Bool true; `Int 7]]
 ;;
 
+(* Call arguments keep the blob store's preview. An argument that preview
+   holds whole is no smaller as a reference, so it stays as the model wrote
+   it; with a 200-byte preview it would leave as a [_blob] input, the shape
+   models then sent as the input of new calls (#55372). *)
+let an_argument_the_store_preview_holds_stays_as_written () =
+  let input = `Assoc ["command", `String (String.make 3_000 'c')] in
+  let seed = argument_cycle ~id:"written" input in
+  let completed_arguments = bind_arguments ~completed_before:1 ~seed seed in
+  let planned = Demotion.plan ~measure_wire_bytes:stored_wire_bytes ~completed_arguments
+      ~measure_message_bytes ~demote_before:0 seed in
+  Alcotest.(check int) "nothing is planned" 0 (List.length planned.pending);
+  Alcotest.(check bool) "the argument is sent as written" true (argument_inputs planned.messages = [input])
+;;
+
 let completed_arguments_restore_through_reader () =
   let base_path = Filename.temp_dir "demote-arguments" "" in
   Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base_path) @@ fun () ->
@@ -893,6 +930,10 @@ let completed_arguments_restore_through_reader () =
           pages page.next_offset chunks (count + 1)) in
     let bytes, count = pages 0 [] 0 in
     Alcotest.(check bool) "large argument uses actual reader paging" true (count > 1);
+    (* A result's marker previews 200 bytes; an argument's recorded reference
+       keeps the store's own preview. *)
+    Alcotest.(check string) "the recorded reference carries the store's preview"
+      (Tool_blob_store.make_preview bytes) reference.preview;
     Yojson.Safe.from_string bytes in
   let restored = List.map read (argument_inputs outcome.messages) in
   Alcotest.(check bool) "each repeated ID restores its exact argument JSON" true (restored = inputs);
@@ -2406,6 +2447,15 @@ let without_preamble messages =
   List.filter (fun message -> not (Window.is_synthetic_preamble message)) messages
 ;;
 
+(* An argument several times the blob store's preview. A reference carries
+   that preview, so an argument the preview holds whole is no smaller as a
+   reference and stays as the model wrote it. *)
+let large_argument_bytes = 4 * Tool_blob_store.preview_max
+
+let large_command fill =
+  `Assoc [ "command", `String (String.make large_argument_bytes fill) ]
+;;
+
 let call_with_input ~id input : Types.message =
   { origin = Llm_provider.Types.Conversation;  role = Types.Assistant
   ; content = [ Types.ToolUse { id; name = "read_file"; input } ]
@@ -2508,8 +2558,8 @@ let rec shared_prefix first second =
 (* An ended turn's arguments and results are recoverable without carrying
    their bodies into the next request. This turn's calls stay verbatim. *)
 let finished_turn_results_leave_as_markers () =
-  let big_input = `Assoc [ "command", `String (String.make 4_000 'h') ] in
-  let current_input = `Assoc [ "command", `String (String.make 4_000 'n') ] in
+  let big_input = large_command 'h' in
+  let current_input = large_command 'n' in
   let earlier_bodies = [ String.make 20_000 'e'; String.make 21_000 'f' ] in
   let earlier =
     List.concat
@@ -2796,7 +2846,7 @@ let a_window_that_stays_keeps_the_markers_it_sent () =
    sent go as references. *)
 let a_window_that_stays_keeps_its_arguments () =
   let cycle ~id fill body =
-    [ call_with_input ~id (`Assoc [ "command", `String (String.make 4_000 fill) ])
+    [ call_with_input ~id (large_command fill)
     ; tool_message ~id body
     ]
   in
@@ -3290,7 +3340,11 @@ let () =
             signed_prefix_replays_the_first_mixed_storage_outcome
         ] )
     ; ( "materialize"
-      , [ Alcotest.test_case "reused IDs retain distinct exact payloads" `Quick
+      , [ Alcotest.test_case "a result marker previews its first 200 bytes" `Quick
+            a_result_marker_previews_its_first_200_bytes
+        ; Alcotest.test_case "an argument the store preview holds stays as written" `Quick
+            an_argument_the_store_preview_holds_stays_as_written
+        ; Alcotest.test_case "reused IDs retain distinct exact payloads" `Quick
             repeated_ids_keep_distinct_payloads
         ; Alcotest.test_case "cut stores only the retained repeated-ID payload" `Quick
             cut_repeated_id_stores_only_retained_payload

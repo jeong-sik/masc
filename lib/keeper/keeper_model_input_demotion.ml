@@ -473,11 +473,56 @@ let with_reference kind (block : Agent_core.Types.content_block) reference =
      | Agent_core.Types.Document _ | Agent_core.Types.Audio _ -> None)
 ;;
 
-(* Addressing and planning use the same preview, MIME and byte count. Fixed
-   width hex digits give the planned reference the real address's wire size. *)
+(* A result's marker carries a short preview, its first 200 B. The blob
+   store's own preview holds up to 4 KiB of head and tail, so a marker
+   carrying it is no smaller than a result under that bound, and no result
+   of that size left the request (#55296).
+
+   A result of an ended turn is one the model received whole in the turn
+   that produced it: the preview says which result it was and the address
+   reads it again. The age-out RFC measured how often it is read again with
+   this preview (1.32% of aged markers, 2026-11-08..10). The one resend that
+   answers a size refusal also sends as markers the results of the refused
+   request, which the model has not read; it does so for the request to fit,
+   and their first 200 B is what the model has of them until it reads the
+   address.
+
+   200 B is the preview these markers had until #54361. With it a marker is
+   at most about 1,730 B on a lane that escapes it twice (a preview of quote
+   characters: [%S] doubles each byte and each JSON encoder doubles it
+   again), below the 2,048 B the request assembly demotes from. *)
+let result_marker_preview_max_bytes = 200
+
+let result_marker_preview bytes =
+  Tool_blob_store.make_head_preview ~max_bytes:result_marker_preview_max_bytes bytes
+;;
+
+(* Call arguments keep the blob store's preview, as they have since #54361.
+   [plan] replaces the bound arguments of a message together, when the
+   message is shorter with the references than without. A message of one
+   call therefore keeps an argument the preview holds whole; a message of
+   several calls replaces a small argument beside a large one. A short
+   preview makes the references win for arguments of a few hundred bytes, so
+   a request holds many more [_blob] inputs. While requests held 19 to 108
+   of them each (2026-11-17..21), models sent the reference as the input of
+   a new call 32 to 1,433 times a day; at 0.6 and 0.9 per request it was 9
+   and 13 calls a day (2026-11-23, 24), and at 0.1 to 0.2 none
+   (2026-11-25..27). #55372 decides whether arguments are replaced at
+   all. *)
+let demoted_preview kind bytes =
+  match kind with
+  | Result_body | Result_text_block _ -> result_marker_preview bytes
+  | Call_arguments -> Tool_blob_store.make_preview bytes
+;;
+
+(* The plan measures this reference and [materialize] writes the stored one
+   with the same preview, so the marker sent is the size that was measured.
+   Fixed width hex digits give the planned reference the real address's wire
+   size. *)
 let planned_reference ~kind ~sha256 ~bytes =
   Tool_output.make_artifact_ref ~sha256 ~bytes:(String.length bytes)
-    ~preview:(Tool_blob_store.make_preview bytes) ~mime:(payload_mime kind)
+    ~preview:(demoted_preview kind bytes)
+    ~mime:(payload_mime kind)
   |> Result.to_option
 ;;
 
@@ -799,7 +844,15 @@ let materialize ~store ~addresses ~pending messages =
                            current
                          | Some address ->
                            (match Tool_blob_store.put_addressed address with
-                            | Tool_output.Stored reference -> written entry current reference
+                            | Tool_output.Stored stored ->
+                              (* The store answers with its own preview. The
+                                 marker carries the one the plan measured. *)
+                              written
+                                entry
+                                current
+                                (Tool_output.with_preview
+                                   stored
+                                   (demoted_preview entry.kind entry.bytes))
                             | exception Sys_error _ ->
                               incr reverted;
                               current))

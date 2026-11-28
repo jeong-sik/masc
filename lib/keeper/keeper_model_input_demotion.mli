@@ -27,7 +27,7 @@
     transmitted list is rebuilt from durable state every turn, so demoting
     everything eagerly would re-store thousands of blobs per turn. Instead
     the unmodified history first chooses the authoritative window cut. {!plan}
-    substitutes a marker with the store's exact preview below the caller's boundary (the
+    substitutes a marker (a result's previews its first 200 bytes) below the caller's boundary (the
     keeper's assembly uses the refused request's end, see {!plan}), the window cuts
     again against the smaller messages, and {!materialize} stores only the
     messages that survived. The real marker is never larger than the
@@ -116,6 +116,13 @@ val preview_fallback_closed_tool_bodies :
     message is rewritten only when [measure_message_bytes] strictly shrinks.
     Returns [(messages, changed)]. *)
 
+val result_marker_preview : string -> string
+(** The preview a result's marker carries: the body's sanitized first 200
+    bytes. {!plan} measures a result's marker with it and {!materialize}
+    writes it. A marker carrying the blob store's preview of up to 4 KiB is
+    no smaller than a result under that bound, so such a result never left
+    the request (#55296). *)
+
 type plan_result =
   { messages : Agent_core.Types.message list
         (** [messages] with each planned demotion replaced by a saturating
@@ -175,13 +182,18 @@ val plan
       only.
     - the placeholder message measures strictly smaller under
       [measure_message_bytes] than the message does now, so the window's
-      count of it never grows. The encoded marker runs from about 125 bytes
-      to 1,154 under one JSON escape and to about 1,530 under two, depending
-      on the preview's bytes, because {!Tool_output.encode_for_agent_core}
-      escapes the preview with [%S] before any JSON encoder escapes it again;
-      a fixed floor cannot stand in for either. [min_result_bytes] is a floor
-      on what the caller wants to trade for a marker, checked in addition to
-      these rules.
+      count of it never grows. A result's encoded marker runs from about 125
+      bytes to 1,154 under one JSON escape and to about 1,730 under two,
+      depending on the bytes of its 200-byte preview ({!result_marker_preview}),
+      because {!Tool_output.encode_for_agent_core} escapes the preview with
+      [%S] before any JSON encoder escapes it again; a fixed floor cannot
+      stand in for either. [min_result_bytes] is a floor on what the caller
+      wants to trade for a marker, checked in addition to these rules. An
+      argument's reference keeps the blob store's preview of up to 4 KiB, and
+      the bound arguments of one message are replaced together or not at
+      all: a message of one call keeps an argument that preview holds whole,
+      and a message of several calls replaces a small argument beside a
+      large one.
 
     [measure_message_bytes] must be the encoder the window will use. The bound
     is obtained by measuring a real placeholder message through it rather than
@@ -250,9 +262,9 @@ val materialize
     through the process CPU pool ({!Tool_blob_store.address}). Only the writes
     run on the calling fiber.
 
-    Both matter because the store skips writing an address this process already
-    wrote, so on a long-lived keeper the sha256 over every aged body is the
-    whole cost of this call. The attempt runs 62 to 83 provider requests and
+    Both matter because the store skips writing an address it remembers
+    writing (the 4,096 most recent in this process), so on a long-lived keeper
+    the sha256 over every aged body is most of the cost of this call. The attempt runs 62 to 83 provider requests and
     each one repeated it, and doing it on the calling fiber held the main Eio
     domain for one uninterrupted run of 0.7 to 1.6 seconds (rtev, 2026-09-16).
 
@@ -271,7 +283,7 @@ val materialize
     BasePath process lease, which the running server holds, and it chooses
     what to delete from candidate sets rather than file ages. The first put of
     an address in a server process writes it; later puts of that address skip
-    the write (see {!Tool_blob_store.put}). A blob removed from outside the
+    the write while the store remembers it (see {!Tool_blob_store.put}). A blob removed from outside the
     store is written again after a read of it fails, and a new process starts
     by writing every address it puts. The body is still verbatim in the
     checkpoint, so the blob is derived data that a later put restores. Nothing

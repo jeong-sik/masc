@@ -128,9 +128,12 @@ let test_host_response_names_each_payload () = with_workspace (fun base_path ->
    | _ -> fail "two media blocks are expected");
   check string "a body shorter than its marker stays inline" "small"
     (member "content" media |> to_string);
-  let long = String.make 3000 'x' in
+  (* Several times the blob store's preview: a marker carries that preview,
+     so it is shorter only than a body the preview does not hold whole. *)
+  let long = String.make (4 * Tool_blob_store.preview_max) 'x' in
   check string "a result under the floor stays inline" long
-    (respond ~min_result_bytes:4096 long None |> member "content" |> to_string);
+    (respond ~min_result_bytes:(String.length long + 1) long None
+     |> member "content" |> to_string);
   let shared = respond ~min_result_bytes:0 long (Some [Llm_provider.Types.Text long]) in
   let content = member "content" shared |> to_string in
   check (option string) "the marker names the exact body" (Some long)

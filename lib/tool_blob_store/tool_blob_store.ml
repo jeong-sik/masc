@@ -208,11 +208,13 @@ let fetch_error_to_string = function
         expected
         actual
 
-(* Shared smart 4 KiB head+tail preview byte ceiling. Planning and storage both
-   call [make_preview] so reference size estimates use the exact sanitized
-   head+tail bytes, eliminating multi-turn artifact-read loops for typical
-   command/build outputs while preserving both beginning context and trailing
-   errors/summaries. *)
+(* Smart 4 KiB head+tail preview byte ceiling of a stored result. [put],
+   [address] and a caller that measures the marker [put] will write all call
+   [make_preview], so the estimate uses the exact sanitized head+tail bytes.
+   The size spares a reader that has never seen the body a multi-turn
+   artifact-read loop for typical command/build outputs, keeping both the
+   beginning and the trailing errors/summaries. A marker with a shorter
+   preview takes [make_head_preview]. *)
 let preview_max = 4096
 
 let sanitize_utf8_slice slice =
@@ -274,6 +276,13 @@ let make_preview bytes =
     let head = String.sub bytes 0 half in
     let tail = String.sub bytes (total_bytes - half) half in
     make_head_tail_preview ~total_bytes ~head ~tail
+
+(* The first [max_bytes] bytes of a body, sanitized as [make_preview] does. A
+   sequence the cut splits becomes one ASCII byte, so the result is never
+   longer than the cut. A bound of zero or less gives the empty string. *)
+let make_head_preview ~max_bytes bytes =
+  let length = min (String.length bytes) (max 0 max_bytes) in
+  sanitize_utf8_slice (String.sub bytes 0 length)
 
 let dirname = "tool_blobs"
 

@@ -1,6 +1,7 @@
 /**
- * What a failed write says about the server's state. Runtime → Prompts reads
- * every failed override answer through this one function.
+ * What a failed write says about the server's state. Both views of Runtime →
+ * Prompts read every failed override and preset answer through this one
+ * function.
  */
 
 import type { ApiErrorKind } from '../../core'

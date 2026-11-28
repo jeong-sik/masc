@@ -206,6 +206,110 @@ describe('Runtime → Prompts → 프리셋', () => {
     expect(server.posts[1]).toEqual({ url: '/api/v1/presets', body: { name: 'default', description: 'night shift' } })
   })
 
+  it('closes the replace offer when the description changes after a 409', async () => {
+    const server = serve(() => jsonResponse({ ok: false, error: 'preset default already exists' }, 409))
+    mount()
+    await vi.waitFor(() => expect(container.querySelector('[data-testid="preset-save-form"]')).not.toBeNull())
+    await typeInto('새 프리셋 이름', 'default')
+    await typeInto('새 프리셋 설명', 'night shift')
+    click('[data-testid="preset-save"]')
+    await vi.waitFor(() => expect(container.querySelector('[data-testid="preset-taken"]')).not.toBeNull())
+    await typeInto('새 프리셋 설명', 'EDITED AFTER 409')
+    expect(container.querySelector('[data-testid="preset-taken"]')).toBeNull()
+    expect(server.posts).toHaveLength(1)
+  })
+
+  it('tells the operator, without naming the preset, that a session change lost the answer of a write in flight', async () => {
+    serve(() => new Promise<Response>(() => {}))
+    await open('default')
+    click('[data-testid="preset-restore"]')
+    await flushUi()
+    click('[data-testid="preset-restore-go"]')
+    await flushUi()
+    bumpSessionEpoch()
+    await vi.waitFor(() => expect(shellToasts.value.at(-1)?.message).toContain('세션이 바뀌어서'))
+    expect(shellToasts.value.at(-1)?.tone).toBe('warning')
+    expect(shellToasts.value.at(-1)?.message).not.toContain('default')
+  })
+
+  it('closes a refusal, and drops the last restore report when a new write starts', async () => {
+    serve((url) => url === '/api/v1/presets/restore'
+      ? jsonResponse(restored('default'))
+      : jsonResponse({ ok: false, error: 'preset default not found' }, 404))
+    await open('default')
+    click('[data-testid="preset-restore"]')
+    await flushUi()
+    click('[data-testid="preset-restore-go"]')
+    await vi.waitFor(() => expect(container.querySelector('[data-testid="preset-restore-report"]')).not.toBeNull())
+    click('[data-testid="preset-delete"]')
+    await flushUi()
+    click('[data-testid="preset-delete-go"]')
+    await vi.waitFor(() => expect(container.querySelector('[data-testid="preset-refusal"]')?.textContent).toContain('preset default not found'))
+    expect(container.querySelector('[data-testid="preset-restore-report"]')).toBeNull()
+    click('[data-testid="preset-refusal-dismiss"]')
+    await vi.waitFor(() => expect(container.querySelector('[data-testid="preset-refusal"]')).toBeNull())
+  })
+
+  it('reads the preset picked after returning to the Presets view when an earlier write answers', async () => {
+    let release: (r: Response) => void = () => {}
+    const server = serve(() => new Promise<Response>(resolve => { release = resolve }))
+    await open('default')
+    click('[data-testid="preset-restore"]')
+    await flushUi()
+    click('[data-testid="preset-restore-go"]')
+    await flushUi()
+    click('[data-section="prompts"]')
+    await flushUi()
+    click('[data-section="presets"]')
+    await pick('night')
+    // The detail's own first read runs after paint; count from after it.
+    await vi.waitFor(() => expect(container.querySelector('[data-testid="preset-override"]')).not.toBeNull())
+    await flushUi(150)
+    const nightReads = server.reads('/api/v1/presets/show?name=night')
+    release(jsonResponse(restored('default')))
+    await vi.waitFor(() => expect(server.reads('/api/v1/presets/show?name=night')).toBeGreaterThan(nightReads))
+  })
+
+  it('says it cannot tell what a restore clears while the prompt catalog is unread', async () => {
+    serve({ answer: () => jsonResponse({}), catalog: { unexpected: true } })
+    await open('default')
+    expect(container.querySelector('[data-testid="preset-clears-unknown"]')).not.toBeNull()
+    expect(container.querySelector('[data-testid="preset-clears"]')).toBeNull()
+  })
+
+  it('reads the list, the preset on screen and the prompt catalog again on refresh, and the preset when its row is clicked again', async () => {
+    const server = serve(() => jsonResponse({}))
+    await open('default')
+    const before = [server.reads('/api/v1/presets'), server.reads(SHOW_DEFAULT), server.reads('/api/v1/prompts')]
+    const refresh = Array.from(container.querySelectorAll<HTMLButtonElement>('.refresh-btn'))
+      .find(b => b.closest('.wka-card')?.querySelector('[aria-label="프리셋 목록"]') != null)
+    expect(refresh).toBeDefined()
+    refresh!.click()
+    await vi.waitFor(() => expect([server.reads('/api/v1/presets'), server.reads(SHOW_DEFAULT), server.reads('/api/v1/prompts')]
+      .every((n, i) => n > before[i]!)).toBe(true))
+    const showReads = server.reads(SHOW_DEFAULT)
+    await pick('default')
+    await vi.waitFor(() => expect(server.reads(SHOW_DEFAULT)).toBeGreaterThan(showReads))
+  })
+
+  it('names the Prompts view drafts the restore leaves, in its confirm', async () => {
+    serve(() => jsonResponse({}))
+    render(html`<${RuntimeWorkspace} subroute="prompts" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
+    await pick('keeper.worldview')
+    click('[data-view="edit"]')
+    await flushUi()
+    const area = container.querySelector<HTMLTextAreaElement>('textarea')!
+    area.value = '<world>unsaved</world>'
+    area.dispatchEvent(new Event('input', { bubbles: true }))
+    await flushUi()
+    click('[data-section="presets"]')
+    await pick('default')
+    await vi.waitFor(() => expect(container.querySelector('[data-testid="preset-restore"]')?.hasAttribute('disabled')).toBe(false))
+    click('[data-testid="preset-restore"]')
+    await flushUi()
+    expect(container.querySelector('[data-testid="preset-restore-drafts"]')?.textContent).toContain('keeper.worldview')
+  })
+
   it('reads the lists again when a save answers 2xx without the preset', async () => {
     const server = serve(() => jsonResponse({ ok: true }))
     mount()

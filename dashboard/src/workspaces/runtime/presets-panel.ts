@@ -17,21 +17,37 @@
  *   told the answer was unreadable, not that the change failed. When no
  *   answer came back (network, timeout, a 5xx), the outcome is unknown: the
  *   lists are read again and the operator is told so.
- * - After any write the preset on screen is read again, so the detail never
- *   shows what a save or restore just replaced.
+ * - After any write the preset on screen when the answer arrives is read
+ *   again, so the detail never shows what a save or restore just replaced.
+ *   Refresh reads the list, that preset and the prompt catalog again, and
+ *   clicking the selected row reads its preset again.
+ * - The write in flight and what it left live in `preset-writes.ts`, outside
+ *   this view. Failed answers are read by `failureOutcome`, the same function
+ *   the Prompts view uses.
  */
 
 import { html } from 'htm/preact'
-import { signal } from '@preact/signals'
-import { useEffect, useRef, useState } from 'preact/hooks'
-import { apiGet, apiMutate, resourceCache, sessionEpoch, type ApiError, type ApiErrorKind } from '../../core'
+import { useEffect, useLayoutEffect, useState } from 'preact/hooks'
+import { apiGet, apiMutate, resourceCache, sessionEpoch, type ApiError } from '../../core'
 import type { Result } from '../../lib/result'
 import { MasterDetail } from '../../components/primitives/master-detail'
 import { RefreshButton } from '../../components/primitives'
 import { pushShellToast } from '../../shell/shell-state'
 import { Chip } from './prompt-chip'
 import { loadPresetShow, PresetDetail } from './preset-detail'
-import { restoreSummary, RestoreReportView } from './preset-restore-report'
+import { restoreSummary } from './preset-restore-report'
+import {
+  beginWrite,
+  dismissTaken,
+  finishWrite,
+  markShownPreset,
+  presetWriteState,
+  shownPreset,
+  type PresetWrite,
+  type TakenName,
+} from './preset-writes'
+import { promptEditsFor } from './prompt-edits'
+import { fieldStyle } from './prompt-styles'
 import {
   AUTOSAVE_PRESET,
   decodePresetDeleted,
@@ -43,9 +59,9 @@ import {
   type PresetListing,
   type PresetRestored,
   type PresetSaved,
-  type RestoreReport,
 } from './presets-wire'
 import type { PromptCatalog } from './prompts-wire'
+import { failureOutcome } from './write-outcome'
 
 export const PRESET_LISTING_CACHE_KEY = 'runtime:presets'
 
@@ -64,105 +80,12 @@ type Settled<T> =
   | { readonly kind: 'refused'; readonly why: string }
   | { readonly kind: 'unknown'; readonly why: string }
 
-/** What a failed write says about the server's state. */
-function failureOutcome(kind: ApiErrorKind): 'applied' | 'refused' | 'unknown' {
-  switch (kind) {
-    // Transport decodes only a 2xx answer.
-    case 'decode':
-      return 'applied'
-    // The server answered that it did not do it.
-    case 'unauthorized':
-    case 'forbidden':
-    case 'csrf_rejected':
-    case 'not_found':
-    case 'conflict_cas':
-    case 'validation':
-      return 'refused'
-    // No answer, or a 5xx that a proxy may have written: the server may have done it.
-    case 'server':
-    case 'network':
-    case 'timeout':
-    case 'aborted':
-    case 'epoch_stale':
-      return 'unknown'
-  }
-}
-
-type PresetWrite = { readonly target: string; readonly action: '저장' | '복원' | '삭제' }
-
-/** A save the server refused because the name exists: what to send if the operator replaces it. */
-type TakenName = { readonly name: string; readonly description: string }
-
-type WriteFeedback = {
-  readonly epoch: number
-  readonly active: PresetWrite | null
-  readonly refusal: string | null
-  readonly taken: TakenName | null
-  readonly report: RestoreReport | null
-}
-
-const idleFeedback = (epoch: number): WriteFeedback => ({ epoch, active: null, refusal: null, taken: null, report: null })
-
-const writeFeedback = signal<WriteFeedback>(idleFeedback(sessionEpoch.peek()))
-sessionEpoch.subscribe(epoch => {
-  if (writeFeedback.peek().epoch !== epoch) {
-    writeFeedback.value = idleFeedback(epoch)
-  }
-})
-
-// One write may be in flight even when its originating form or the whole tab is gone.
-function beginWrite(epoch: number, active: PresetWrite): boolean {
-  const before = writeFeedback.peek()
-  if (epoch !== sessionEpoch.peek() || (before.epoch === epoch && before.active !== null)) return false
-  writeFeedback.value = { epoch, active, refusal: null, taken: null, report: before.epoch === epoch ? before.report : null }
-  return true
-}
-
-function finishWrite(epoch: number, result: Partial<Pick<WriteFeedback, 'refusal' | 'taken' | 'report'>> = {}) {
-  if (epoch !== sessionEpoch.peek()) return
-  writeFeedback.value = { ...writeFeedback.peek(), ...result, active: null }
-}
-
-function dismissTaken(epoch: number) {
-  const current = writeFeedback.peek()
-  if (current.epoch === epoch && current.taken !== null) writeFeedback.value = { ...current, taken: null }
-}
-
-export function PresetFeedback() {
-  const state = writeFeedback.value
-  if (state.epoch !== sessionEpoch.value) return null
-  return html`
-    ${state.active !== null && html`
-      <div class="wka-card" role="status" data-testid="preset-write-pending">
-        ${state.active.target} 프리셋 ${state.active.action} 중…
-      </div>
-    `}
-    ${state.refusal !== null && html`
-      <div role="alert" class="ap-error" data-testid="preset-refusal">${state.refusal}</div>
-    `}
-    ${state.report !== null && html`
-      <${RestoreReportView} report=${state.report} onDismiss=${() => {
-        const current = writeFeedback.peek()
-        if (current.epoch === sessionEpoch.peek()) writeFeedback.value = { ...current, report: null }
-      }} />
-    `}
-  `
-}
-
 export interface PresetsPanelProps {
   readonly canEdit: boolean
   readonly catalog: PromptCatalog | null
-  /** Reads the prompt catalog again after a restore changed overrides. */
-  readonly onPromptsChanged: () => void
+  /** Reads the prompt catalog again, after a restore changed overrides or on refresh. */
+  readonly onPromptsChanged: () => Promise<unknown>
 }
-
-const fieldStyle = {
-  padding: 'var(--sp-1) var(--sp-2)',
-  background: 'var(--input-bg)',
-  border: '1px solid var(--input-border)',
-  borderRadius: 'var(--radius-sm)',
-  minWidth: 0,
-} as const
 
 export function PresetsPanel({ canEdit, catalog, onPromptsChanged }: PresetsPanelProps) {
   const epoch = sessionEpoch.value
@@ -171,45 +94,49 @@ export function PresetsPanel({ canEdit, catalog, onPromptsChanged }: PresetsPane
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
   const [unreadableDelete, setUnreadableDelete] = useState<string | null>(null)
-  const feedback = writeFeedback.value
-  const busy = feedback.epoch === epoch && feedback.active !== null
   // Kept outside this component: the answer can arrive after the operator
   // left the Presets view, and the form's own fields are gone by then.
-  const taken = feedback.epoch === epoch ? feedback.taken : null
-  // The selection when an answer arrives, not when the request left.
-  const selectedRef = useRef<string | null>(selected)
-  selectedRef.current = selected
+  const { busy, taken } = presetWriteState(epoch)
+  const promptDrafts = [...promptEditsFor(epoch).drafts.keys()]
 
   useEffect(() => {
     void loadPresetListing('mount')
   }, [epoch])
 
+  // An answer reads the preset on screen then, not the one when it left.
+  useLayoutEffect(() => {
+    markShownPreset(selected)
+    return () => markShownPreset(null)
+  }, [selected])
+
   const listing = obs.kind === 'value' ? obs.data : null
   const trimmed = name.trim()
   const nameOk = isValidPresetName(trimmed)
 
-  const reread = (alsoPrompts: boolean) => {
+  const reread = (alsoPrompts: boolean): Promise<unknown> => {
     resourceCache.invalidateTopic('presets')
-    void loadPresetListing('manual')
-    const shown = selectedRef.current
-    if (shown !== null) void loadPresetShow(shown, 'manual')
-    if (alsoPrompts) onPromptsChanged()
+    const shown = shownPreset()
+    return Promise.all([
+      loadPresetListing('manual'),
+      shown === null ? null : loadPresetShow(shown, 'manual'),
+      alsoPrompts ? onPromptsChanged() : null,
+    ])
   }
 
   const settle = <T,>(res: Result<T, ApiError>, what: string, alsoPrompts: boolean): Settled<T> => {
     if (res.ok) {
-      reread(alsoPrompts)
+      void reread(alsoPrompts)
       return { kind: 'done', value: res.value }
     }
     switch (failureOutcome(res.error.kind)) {
       case 'refused':
         return { kind: 'refused', why: `하지 못했어요: ${res.error.message}` }
       case 'applied':
-        reread(alsoPrompts)
+        void reread(alsoPrompts)
         pushShellToast(`${what}: 서버가 요청을 받았지만 답을 읽지 못했어요 (${res.error.message}). 목록을 다시 읽어요.`, 'warning')
         return { kind: 'unreadable' }
       case 'unknown':
-        reread(alsoPrompts)
+        void reread(alsoPrompts)
         return { kind: 'unknown', why: `결과를 알 수 없어요 (${res.error.message}). 목록을 다시 읽었어요.` }
     }
   }
@@ -278,7 +205,7 @@ export function PresetsPanel({ canEdit, catalog, onPromptsChanged }: PresetsPane
     <div class="wka-card" style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-2)', height: '100%', minHeight: 0 }}>
       <div class="wka-h">
         <h3>프리셋 (${listing === null ? '—' : listing.presets.length})</h3>
-        <${RefreshButton} onRefresh=${() => loadPresetListing('manual')} />
+        <${RefreshButton} onRefresh=${() => reread(true)} />
       </div>
       <div style=${{ fontSize: 'var(--fs-12)', color: 'var(--fg-2)' }}>
         프롬프트 override, Keeper instructions, Runtime 배정과 exact-output lane 을 한 이름으로 저장하고 되돌려요.
@@ -292,10 +219,10 @@ export function PresetsPanel({ canEdit, catalog, onPromptsChanged }: PresetsPane
           <div style=${{ display: 'flex', gap: 'var(--sp-1)', flexWrap: 'wrap' }}>
             <input aria-label="새 프리셋 이름" placeholder="이름 (A-Z a-z 0-9 . _ -)" value=${name} disabled=${busy}
               onInput=${(e: Event) => { setName((e.currentTarget as HTMLInputElement).value); dismissTaken(epoch) }}
-              style=${{ ...fieldStyle, flex: '1 1 8rem' }} />
+              style=${{ ...fieldStyle, minWidth: 0, flex: '1 1 8rem' }} />
             <input aria-label="새 프리셋 설명" placeholder="설명 (선택)" value=${description} disabled=${busy}
-              onInput=${(e: Event) => setDescription((e.currentTarget as HTMLInputElement).value)}
-              style=${{ ...fieldStyle, flex: '2 1 12rem' }} />
+              onInput=${(e: Event) => { setDescription((e.currentTarget as HTMLInputElement).value); dismissTaken(epoch) }}
+              style=${{ ...fieldStyle, minWidth: 0, flex: '2 1 12rem' }} />
             <button type="submit" class="btn-primary" data-testid="preset-save" disabled=${busy || !nameOk}>지금 상태 저장</button>
           </div>
           ${trimmed !== '' && !nameOk && html`<div style=${{ fontSize: 'var(--fs-11)', color: 'var(--warn-fg)' }}>이름에는 영문, 숫자, 점, 밑줄, 하이픈만 쓸 수 있어요.</div>`}
@@ -335,7 +262,7 @@ export function PresetsPanel({ canEdit, catalog, onPromptsChanged }: PresetsPane
             : listing.presets.map(p => html`
               <div key=${p.name} role="listitem">
                 <button type="button" class="btn-ghost" aria-current=${p.name === selected ? 'true' : undefined}
-                  onClick=${() => setSelected(p.name)}
+                  onClick=${() => (p.name === selected ? void loadPresetShow(p.name, 'manual') : setSelected(p.name))}
                   style=${{ display: 'flex', flexDirection: 'column', alignItems: 'stretch', gap: 'var(--sp-0)', width: '100%', textAlign: 'left', background: p.name === selected ? 'var(--bg-4)' : undefined }}>
                   <span style=${{ display: 'flex', gap: 'var(--sp-1)', alignItems: 'center', flexWrap: 'wrap' }}>
                     <span class="mono" style=${{ fontSize: 'var(--fs-12)', overflowWrap: 'anywhere' }}>${p.name}</span>
@@ -355,7 +282,7 @@ export function PresetsPanel({ canEdit, catalog, onPromptsChanged }: PresetsPane
   const detail = selected === null
     ? null
     : html`
-      <${PresetDetail} key=${selected} name=${selected} catalog=${catalog} canEdit=${canEdit} busy=${busy} onRestore=${restore} onDelete=${remove} />
+      <${PresetDetail} key=${selected} name=${selected} catalog=${catalog} promptDrafts=${promptDrafts} canEdit=${canEdit} busy=${busy} onRestore=${restore} onDelete=${remove} />
     `
 
   return html`

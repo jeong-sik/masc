@@ -44,15 +44,17 @@ import {
   finishPromptWrite,
   isPromptShown,
   promptEditsFor,
+  appliedToast,
   setPromptDraft,
   writeEndText,
   type PromptWriteEnd,
 } from './prompt-edits'
-import { PresetFeedback, PresetsPanel } from './presets-panel'
+import { PresetsPanel } from './presets-panel'
+import { PresetFeedback } from './preset-writes'
+import { fieldStyle } from './prompt-styles'
 import {
   decodeOverrideApplied,
   decodePromptCatalog,
-  type CuratorRefresh,
   type OverrideApplied,
   type PromptCatalog,
   type PromptEntry,
@@ -80,37 +82,11 @@ function loadPromptCatalog(reason: FetchReason) {
   )
 }
 
-function curatorRefreshNote(refresh: CuratorRefresh | null): string | null {
-  if (refresh === null) return null
-  switch (refresh.status) {
-    case 'queued':
-      return 'Workspace Memory 큐레이터가 새 텍스트로 다시 읽도록 대기열에 넣었어요.'
-    case 'no_owner':
-      return 'Workspace Memory 큐레이터를 맡은 Keeper 가 없어서 다시 읽기를 넣지 않았어요.'
-    case 'unavailable':
-      return `Workspace Memory 큐레이터 다시 읽기를 넣지 못했어요: ${refresh.detail}`
-  }
-}
-
-function appliedToast(request: PromptOverrideRequest, applied: OverrideApplied): string {
-  const head = request.action === 'set'
-    ? `${applied.key} override 를 저장했어요.`
-    : `${applied.key} override 를 지웠어요. 지금은 ${applied.source} 텍스트를 써요.`
-  const curator = curatorRefreshNote(applied.curator_refresh)
-  return curator === null ? head : `${head} ${curator}`
-}
-
 function matchesSearch(entry: PromptEntry, needle: string): boolean {
   if (needle === '') return true
   return entry.key.toLowerCase().includes(needle) || entry.description.toLowerCase().includes(needle)
 }
 
-const fieldStyle = {
-  padding: 'var(--sp-1) var(--sp-2)',
-  background: 'var(--input-bg)',
-  border: '1px solid var(--input-border)',
-  borderRadius: 'var(--radius-sm)',
-} as const
 
 export function PromptsTab(_props: WorkspaceViewProps) {
   const session = authSession.value
@@ -309,7 +285,7 @@ export function PromptsTab(_props: WorkspaceViewProps) {
           ? html`<${PresetsPanel}
               canEdit=${canEdit}
               catalog=${catalog}
-              onPromptsChanged=${() => { resourceCache.invalidateTopic('prompts'); void loadPromptCatalog('manual') }}
+              onPromptsChanged=${() => { resourceCache.invalidateTopic('prompts'); return loadPromptCatalog('manual') }}
             />`
           : html`<${MasterDetail}
               masterLabel="프롬프트 목록"

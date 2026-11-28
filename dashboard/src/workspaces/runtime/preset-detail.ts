@@ -4,15 +4,17 @@
  * - Each prompt override the preset holds is compared with the text in force
  *   now (the prompt catalog the Prompts view already read). A restore sets
  *   the overrides exactly, so an override in force now that the preset does
- *   not hold is listed as one the restore clears.
+ *   not hold is listed as one the restore clears. Until the catalog is read
+ *   it says it cannot tell what the restore clears.
  * - Keeper instructions, runtime assignments and exact-output lanes are listed
  *   as the preset would write them. A lane setting the preset did not record
  *   keeps its current value on restore; a recorded `null` removes it.
  * - Restore and delete ask once more inline before sending. Restore names the
  *   `_autosave` preset it overwrites, and says what restoring `_autosave`
  *   does not undo (`Prompt_preset.restore`): keeper instructions and lanes
- *   are written only for what that preset holds. Delete says it cannot be
- *   undone.
+ *   are written only for what that preset holds. It also names the Prompts
+ *   view's unsaved drafts, which outlast the restore and would overwrite what
+ *   it set if saved. Delete says it cannot be undone.
  * - A restore sets the runtime assignments to the preset's list exactly
  *   (`runtime_text_with`), so the assignments section says a keeper missing
  *   from it loses its assignment.
@@ -25,6 +27,7 @@ import { apiGet, resourceCache, sessionEpoch } from '../../core'
 import { UnifiedDiffView } from '../../components/common/unified-diff'
 import { Chip } from './prompt-chip'
 import { DefaultPromptsLine } from './preset-restore-report'
+import { noteStyle } from './prompt-styles'
 import { AUTOSAVE_PRESET, decodePresetShow, type PresetShow, type PresetSnapshot } from './presets-wire'
 import type { PromptCatalog } from './prompts-wire'
 
@@ -41,6 +44,8 @@ export function loadPresetShow(name: string, reason: 'mount' | 'manual') {
 export interface PresetDetailProps {
   readonly name: string
   readonly catalog: PromptCatalog | null
+  /** Prompts with a draft the Prompts view has not saved. */
+  readonly promptDrafts: readonly string[]
   readonly canEdit: boolean
   readonly busy: boolean
   readonly onRestore: (name: string) => Promise<void>
@@ -49,7 +54,6 @@ export interface PresetDetailProps {
 
 type Pending = 'restore' | 'delete'
 
-const noteStyle = { fontSize: 'var(--fs-12)', color: 'var(--fg-2)' } as const
 const preStyle = {
   margin: 0,
   padding: 'var(--sp-2)',
@@ -103,6 +107,11 @@ function Overrides({ preset, catalog }: { preset: PresetSnapshot; catalog: Promp
         `
       })}
     </${Section}>
+    ${catalog === null && html`
+      <div role="status" data-testid="preset-clears-unknown" style=${{ ...noteStyle, color: 'var(--warn-fg)' }}>
+        지금 쓰는 override 를 아직 읽지 못해서, 복원하면 어떤 override 가 지워지는지 알 수 없어요.
+      </div>
+    `}
     ${cleared.length > 0 && html`
       <div role="status" data-testid="preset-clears" style=${{ ...noteStyle, color: 'var(--warn-fg)' }}>
         복원하면 지금 쓰는 override ${cleared.length}개를 지우고 파일 텍스트로 돌아가요: <span class="mono">${cleared.map(p => p.key).join(', ')}</span>
@@ -162,7 +171,7 @@ function savedSettingsChip(show: PresetShow) {
   }
 }
 
-export function PresetDetail({ name, catalog, canEdit, busy, onRestore, onDelete }: PresetDetailProps) {
+export function PresetDetail({ name, catalog, promptDrafts, canEdit, busy, onRestore, onDelete }: PresetDetailProps) {
   const epoch = sessionEpoch.value
   const obs = resourceCache.observe<PresetShow>(presetShowCacheKey(name)).value
   const [pending, setPending] = useState<Pending | null>(null)
@@ -212,6 +221,9 @@ export function PresetDetail({ name, catalog, canEdit, busy, onRestore, onDelete
               지금 상태를 <span class="mono">${AUTOSAVE_PRESET}</span> 에 저장하고(이전 <span class="mono">${AUTOSAVE_PRESET}</span> 는 덮어써요) <span class="mono">${name}</span> 을 적용해요.
               프롬프트 override 와 Runtime 배정은 이 프리셋대로 맞추고, Keeper instructions 는 각 Keeper 를 다시 올릴 때 적용돼요.
               ${isAutosave && html`<br />Keeper instructions 와 lane 은 이 프리셋에 있는 것만 다시 써요. 마지막 복원이 새로 준 instructions 와 새로 더한 lane 은 남아요.`}
+              ${promptDrafts.length > 0 && html`
+                <br /><span data-testid="preset-restore-drafts">「프롬프트」 화면에서 저장하지 않은 초안 ${promptDrafts.length}개는 그대로 남아요(<span class="mono">${promptDrafts.join(', ')}</span>). 복원한 뒤 그 초안을 저장하면 복원한 override 를 덮어써요.</span>
+              `}
             </span>
             <div style=${{ display: 'flex', gap: 'var(--sp-1)' }}>
               <button type="button" class="btn-primary" data-testid="preset-restore-go" disabled=${busy} onClick=${() => void run('restore')}>복원</button>

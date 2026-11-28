@@ -10,8 +10,8 @@
 import { html } from 'htm/preact'
 import { Chip } from './prompt-chip'
 import type { DefaultPrompts, PartResult, RestoreReport, RuntimeOutcome } from './presets-wire'
+import { noteStyle } from './prompt-styles'
 
-const noteStyle = { fontSize: 'var(--fs-12)', color: 'var(--fg-2)' } as const
 
 function Skipped({ rows }: { rows: readonly { readonly key: string; readonly reason: string }[] }) {
   if (rows.length === 0) return null

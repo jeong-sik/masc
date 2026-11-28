@@ -258,6 +258,107 @@ let test_every_recorded_name_reaches_the_keeper_that_declared_it config =
     ]
 ;;
 
+(* The Keepers a Board post written to [@name] reaches: the lookup records the
+   name, then the router delivers the recorded name. *)
+let board_receivers config ~keepers name =
+  match ask config name with
+  | Ok ([ recipient ], []) ->
+    List.filter (fun keeper -> routed_to config ~keeper recipient) keepers
+  | Ok ([], [ _ ]) -> []
+  | Ok (recipients, unresolved) ->
+    fail
+      (Printf.sprintf
+         "@%s: expected one recipient or one unresolved name, got %s / %s"
+         name
+         (String.concat "," recipients)
+         (String.concat "," unresolved))
+  | Error detail -> fail (Printf.sprintf "@%s: the lookup failed: %s" name detail)
+;;
+
+(* The Keepers a workspace broadcast mentioning [@name] reaches: those whose
+   transcript holds the delivered row. An accepted mention writes exactly one
+   row and a rejected one writes none. *)
+let broadcast_receivers config ~keepers name =
+  let request_id = "wmsg-address-parity-" ^ name in
+  let content = Printf.sprintf "@%s please look" name in
+  let delivery : Workspace_broadcast.broadcast_delivery =
+    { request_id
+    ; seq = 1
+    ; rendered = content
+    ; from_agent = "carol"
+    ; content
+    ; mention = Some name
+    ; msg_type = "broadcast"
+    ; mention_delivery = Workspace_broadcast.Pending
+    ; fanout_state = Workspace_broadcast.Fanout_active
+    ; audience = Workspace_broadcast.Fleet_conversation
+    }
+  in
+  let outcome =
+    Server_bootstrap_loops.For_testing.deliver_broadcast_mention
+      ~config
+      ~base_path:config.Workspace.base_path
+      ~is_running:(fun _ -> false)
+      ~is_registered_keeper:(fun _ -> false)
+      ~wakeup:(fun _ -> ())
+      delivery
+  in
+  let receivers =
+    List.filter
+      (fun keeper ->
+         Keeper_chat_store.load_all ~base_dir:config.Workspace.base_path ~keeper_name:keeper
+         |> List.exists (fun (message : Keeper_chat_store.chat_message) ->
+           message.external_message_id = Some request_id))
+      keepers
+  in
+  (match outcome, receivers with
+   | Workspace_broadcast.Accepted, [ _ ] -> ()
+   | Workspace_broadcast.Rejected Workspace_broadcast.Target_not_configured, [] -> ()
+   | _ ->
+     fail
+       (Printf.sprintf
+          "@%s: broadcast outcome %s reached [%s]"
+          name
+          (Yojson.Safe.to_string (Workspace_broadcast.mention_delivery_to_yojson outcome))
+          (String.concat "," receivers)));
+  receivers
+;;
+
+(* A broadcast mention and a Board post written to the same name reach the same
+   Keeper. [aliased] lists only an alias, so its own name is not one of its
+   addresses: [claimer] lists that name, and both paths deliver it to
+   [claimer]. [orphan] lists only an alias and nobody lists its name, so both
+   paths leave [@orphan] undelivered. The expected Keepers are written out, so
+   the two paths agreeing on a wrong Keeper still fails. *)
+let test_a_broadcast_reaches_the_keeper_the_board_routes_to config =
+  register_keeper config "plain";
+  register_keeper config ~mention_targets:[ "listed"; "listed-alias" ] "listed";
+  register_keeper config ~mention_targets:[ "only-alias" ] "aliased";
+  register_keeper config ~mention_targets:[ "claimer"; "aliased" ] "claimer";
+  register_keeper config ~mention_targets:[ "orphan-alias" ] "orphan";
+  let keepers = [ "plain"; "listed"; "aliased"; "claimer"; "orphan" ] in
+  List.iter
+    (fun (name, expected) ->
+       check
+         (list string)
+         (Printf.sprintf "@%s on the Board" name)
+         expected
+         (board_receivers config ~keepers name);
+       check
+         (list string)
+         (Printf.sprintf "@%s in a broadcast" name)
+         expected
+         (broadcast_receivers config ~keepers name))
+    [ "plain", [ "plain" ]
+    ; "listed", [ "listed" ]
+    ; "listed-alias", [ "listed" ]
+    ; "only-alias", [ "aliased" ]
+    ; "aliased", [ "claimer" ]
+    ; "orphan", []
+    ; "nobody", []
+    ]
+;;
+
 let test_an_unknown_name_is_not_declared config =
   register_keeper config "alice";
   expect_ok "unknown" ([], [ "nobody" ]) (ask config "nobody")
@@ -496,6 +597,8 @@ let () =
             (with_workspace test_a_name_another_keeper_lists_is_declared_by_that_keeper)
         ; test_case "every recorded name reaches the Keeper that declared it" `Quick
             (with_workspace test_every_recorded_name_reaches_the_keeper_that_declared_it)
+        ; test_case "a broadcast reaches the Keeper the Board routes to" `Quick
+            (with_workspace test_a_broadcast_reaches_the_keeper_the_board_routes_to)
         ; test_case "an unknown name is not declared" `Quick
             (with_workspace test_an_unknown_name_is_not_declared)
         ; test_case "a name no Keeper can have is not declared" `Quick

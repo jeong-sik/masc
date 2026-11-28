@@ -1,9 +1,8 @@
 (* Which names a Keeper answers to is decided where the Board routes a post to a
    Keeper ([Keeper_lane_mentions.effective_target_ids]): its [mention_targets]
    when it has any, else its own name.  The lookup asks the same function, so a
-   name it declares is a name the router delivers on.  The broadcast path
-   resolves a Keeper's own name before its aliases whatever [mention_targets]
-   says; the Board does not. *)
+   name it declares is a name the router delivers on.  The broadcast path asks
+   [answers] before it takes a Keeper's own name, so it reaches the same Keeper. *)
 let answers (meta : Keeper_meta_contract.keeper_meta) id =
   List.exists
     (Keeper_identity.Keeper_id.equal id)

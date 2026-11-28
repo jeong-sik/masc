@@ -4,6 +4,8 @@ open Keeper_meta_contract
 open Keeper_types_profile
 
 val message_feed_targets : keeper_meta -> string list
+(** The names this Keeper answers to, as canonical ids:
+    {!Keeper_lane_mentions.effective_target_ids} of its effective settings. *)
 
 val self_ids : keeper_meta -> Keeper_identity.Keeper_id.t list
 (** The keeper's own identities, minted from [meta.name] and

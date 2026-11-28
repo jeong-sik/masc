@@ -1,3 +1,4 @@
+let obsidian_media_scheme = "media"
 let is_valid_media_token token = Attachment_store.is_valid_sha256 token
 
 let parse_media_token raw =
@@ -18,39 +19,50 @@ let strip_url_query url =
   | None -> url
 ;;
 
+let backtick_run_end text from =
+  let length = String.length text in
+  let stop = ref from in
+  while !stop < length && Char.equal text.[!stop] '`' do
+    incr stop
+  done;
+  !stop
+;;
+
 (* A code span is a run of backticks, its content, and a run of the same
-   length. Its bytes become spaces so a link or embed inside it is not seen.
-   An unmatched run is left alone. *)
+   length. [code_span_close text index] is [Some close] when the run at
+   [index] opens one, [close] being just past the closing run. An unmatched
+   run is [None] and stays plain text. *)
+let code_span_close text index =
+  let length = String.length text in
+  let open_stop = backtick_run_end text index in
+  let run = open_stop - index in
+  let rec closing from =
+    if from >= length
+    then None
+    else if Char.equal text.[from] '`'
+    then (
+      let stop = backtick_run_end text from in
+      if stop - from = run then Some stop else closing stop)
+    else closing (from + 1)
+  in
+  closing open_stop
+;;
+
+(* A code span's bytes become spaces so a link or embed inside it is not
+   seen. *)
 let blank_code_spans line =
   let length = String.length line in
   let bytes = Bytes.of_string line in
-  let run_end from =
-    let stop = ref from in
-    while !stop < length && Char.equal line.[!stop] '`' do
-      incr stop
-    done;
-    !stop
-  in
-  let rec closing ~run from =
-    if from >= length
-    then None
-    else if Char.equal line.[from] '`'
-    then (
-      let stop = run_end from in
-      if stop - from = run then Some stop else closing ~run stop)
-    else closing ~run (from + 1)
-  in
   let rec scan index =
     if index < length
     then
       if Char.equal line.[index] '`'
       then (
-        let stop = run_end index in
-        match closing ~run:(stop - index) stop with
+        match code_span_close line index with
         | Some close ->
           Bytes.fill bytes index (close - index) ' ';
           scan close
-        | None -> scan stop)
+        | None -> scan (backtick_run_end line index))
       else scan (index + 1)
   in
   scan 0;
@@ -218,7 +230,7 @@ let extract_obsidian_media_refs line acc =
            let target, _label = split_obsidian_inner inner in
            let acc =
              match split_obsidian_scheme_payload target with
-             | `Qualified ("media", payload) ->
+             | `Qualified (scheme, payload) when String.equal scheme obsidian_media_scheme ->
                (match parse_media_token payload with
                 | Some sha256 -> sha256 :: acc
                 | None -> acc)
@@ -323,5 +335,90 @@ let extract_markdown_media_refs content =
 
 let extract_html_media_refs content =
   extract_url_media_refs (blank_html_comments_and_scripts content) []
+  |> List.sort_uniq String.compare
+;;
+
+(* Attachment GC reads raw store bytes, while a reader resolves the decoded
+   Markdown. Inside a JSON string a line break, quote or tab is escaped, so the
+   reader's grammar (a [![[]/[]]] pair on one line, a URL end boundary) can fail
+   on the raw bytes. This scan keeps only the parts no JSON escape touches: the
+   route prefix or the scheme and colon, then the digest. *)
+let is_hex_digit = function
+  | '0' .. '9' | 'a' .. 'f' | 'A' .. 'F' -> true
+  | _ -> false
+;;
+
+let digest_at text pos =
+  let stop = pos + 64 in
+  let length = String.length text in
+  if stop <= length && (stop = length || not (is_hex_digit text.[stop]))
+  then (
+    let candidate = String.sub text pos 64 in
+    if is_valid_media_token candidate then Some candidate else None)
+  else None
+;;
+
+let is_embed_space = function
+  | ' ' | '\t' | '\r' | '\012' -> true
+  | _ -> false
+;;
+
+(* The letter after a backslash when JSON escapes an [is_embed_space] byte. *)
+let is_escaped_embed_space = function
+  | 't' | 'r' | 'f' -> true
+  | _ -> false
+;;
+
+(* The reader blanks code spans to spaces before it trims the scheme and the
+   digest, so [media:`x`<64hex>] resolves there; a whole span is skipped here
+   too. *)
+let rec skip_embed_space text pos =
+  let length = String.length text in
+  if pos < length && is_embed_space text.[pos]
+  then skip_embed_space text (pos + 1)
+  else if pos + 1 < length
+          && Char.equal text.[pos] '\\'
+          && is_escaped_embed_space text.[pos + 1]
+  then skip_embed_space text (pos + 2)
+  else if pos < length && Char.equal text.[pos] '`'
+  then (
+    match code_span_close text pos with
+    | Some close -> skip_embed_space text close
+    | None -> pos)
+  else pos
+;;
+
+let fold_after needle text f acc =
+  let needle_length = String.length needle in
+  let rec go pos acc =
+    match String_util.find_substring ~pos text needle with
+    | None -> acc
+    | Some index -> go (index + needle_length) (f (index + needle_length) acc)
+  in
+  go 0 acc
+;;
+
+let extract_bare_media_digests text =
+  let add found acc =
+    match found with
+    | Some sha256 -> sha256 :: acc
+    | None -> acc
+  in
+  let url_digests =
+    fold_after
+      Masc_network_defaults.media_path_prefix
+      text
+      (fun after acc -> add (digest_at text after) acc)
+      []
+  in
+  fold_after
+    obsidian_media_scheme
+    text
+    (fun after acc ->
+       let colon = skip_embed_space text after in
+       if colon < String.length text && Char.equal text.[colon] ':'
+       then add (digest_at text (skip_embed_space text (colon + 1))) acc
+       else acc)
+    url_digests
   |> List.sort_uniq String.compare
 ;;

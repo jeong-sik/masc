@@ -1376,6 +1376,9 @@ let test_gc_protects_wiki_tasks_goals_and_published_artifact_bodies () =
     let p_goal = make_png ~width:8 ~height:8 ~seed:23 in
     let p_artifact = make_png ~width:8 ~height:8 ~seed:24 in
     let p_orphan = make_png ~width:8 ~height:8 ~seed:25 in
+    let p_bare_embed = make_png ~width:8 ~height:8 ~seed:26 in
+    let p_bare_url = make_png ~width:8 ~height:8 ~seed:27 in
+    let p_bare_json_embed = make_png ~width:8 ~height:8 ~seed:28 in
     let put bytes =
       Att.put ~origin:Att.User_upload ~created_by:"op" ~retention:Att.Durable store ~bytes
       |> Result.get_ok
@@ -1385,6 +1388,9 @@ let test_gc_protects_wiki_tasks_goals_and_published_artifact_bodies () =
     let m_goal = put p_goal in
     let m_artifact = put p_artifact in
     let m_orphan = put p_orphan in
+    let m_bare_embed = put p_bare_embed in
+    let m_bare_url = put p_bare_url in
+    let m_bare_json_embed = put p_bare_json_embed in
     let masc_dir = Common.masc_dir_from_base_path ~base_path in
     (* 1. Wiki Markdown page referencing m_wiki *)
     let wiki_dir = Filename.concat masc_dir Config_dir_resolver.wiki_dirname in
@@ -1394,6 +1400,13 @@ let test_gc_protects_wiki_tasks_goals_and_published_artifact_bodies () =
       (Printf.sprintf
          "---\ntitle: Visual Guide\n---\n\n![Diagram](/api/v1/attachments/%s)\n"
          m_wiki.id);
+    (* 1b. Wiki page naming m_bare_embed only by the bare 64-hex Obsidian form
+       the wiki lint accepts *)
+    Fs_compat.save_file
+      (Filename.concat wiki_dir "bare-embed.md")
+      (Printf.sprintf
+         "---\ntitle: Bare Embed\n---\n\n![[media:%s|chart]]\n"
+         m_bare_embed.sha256);
     (* 2. Task JSON referencing m_task *)
     let tasks_dir = Filename.concat masc_dir Workspace_utils_paths_backend.tasks_dirname in
     Fs_compat.mkdir_p tasks_dir;
@@ -1402,6 +1415,15 @@ let test_gc_protects_wiki_tasks_goals_and_published_artifact_bodies () =
       (Printf.sprintf
          "{\"id\":\"task-1\",\"description\":\"See ![Shot](/api/v1/attachments/%s)\"}\n"
          m_task.id);
+    (* 2b. Task JSON naming two blobs only by bare forms that JSON escaping
+       hides from a line-based reader: an escaped quote right after the media
+       URL, and an escaped newline after an unclosed [![[] before the embed. *)
+    Fs_compat.save_file
+      (Filename.concat tasks_dir "task-2.json")
+      (Printf.sprintf
+         "{\"id\":\"task-2\",\"description\":\"<img src=\\\"/api/v1/media/%s\\\">\\n![[draft\\n![[media:%s]]\"}\n"
+         m_bare_url.sha256
+         m_bare_json_embed.sha256);
     (* 3. Goals file referencing m_goal *)
     Fs_compat.save_file
       (Filename.concat masc_dir Goal_store.goals_filename)
@@ -1442,7 +1464,7 @@ let test_gc_protects_wiki_tasks_goals_and_published_artifact_bodies () =
      with
      | Error err -> Alcotest.fail err
      | Ok reach ->
-       Alcotest.(check int) "total attachment blobs" 5 reach.total_blobs;
+       Alcotest.(check int) "total attachment blobs" 8 reach.total_blobs;
        Alcotest.(check bool)
          "wiki-referenced blob is live"
          true
@@ -1459,6 +1481,18 @@ let test_gc_protects_wiki_tasks_goals_and_published_artifact_bodies () =
          "published-artifact body blob is live"
          true
          (Set_util.StringSet.mem m_artifact.sha256 reach.live_sha256s);
+       Alcotest.(check bool)
+         "bare Obsidian media embed keeps its blob live"
+         true
+         (Set_util.StringSet.mem m_bare_embed.sha256 reach.live_sha256s);
+       Alcotest.(check bool)
+         "bare /api/v1/media URL before an escaped quote keeps its blob live"
+         true
+         (Set_util.StringSet.mem m_bare_url.sha256 reach.live_sha256s);
+       Alcotest.(check bool)
+         "bare embed after an escaped newline keeps its blob live"
+         true
+         (Set_util.StringSet.mem m_bare_json_embed.sha256 reach.live_sha256s);
        Alcotest.(check bool)
          "orphan blob is unreferenced"
          true
@@ -1479,7 +1513,15 @@ let test_gc_protects_wiki_tasks_goals_and_published_artifact_bodies () =
     in
     List.iter
       age_blob
-      [ m_wiki.sha256; m_task.sha256; m_goal.sha256; m_artifact.sha256; m_orphan.sha256 ];
+      [ m_wiki.sha256
+      ; m_task.sha256
+      ; m_goal.sha256
+      ; m_artifact.sha256
+      ; m_orphan.sha256
+      ; m_bare_embed.sha256
+      ; m_bare_url.sha256
+      ; m_bare_json_embed.sha256
+      ];
     (match
        Tool_blob_sweep.sweep_attachments
          ~min_age_seconds:3600.0
@@ -1498,7 +1540,19 @@ let test_gc_protects_wiki_tasks_goals_and_published_artifact_bodies () =
     Alcotest.(check bool)
       "artifact body blob survived"
       true
-      (Att.get_bytes store ~id:m_artifact.id = Ok (Some p_artifact)))
+      (Att.get_bytes store ~id:m_artifact.id = Ok (Some p_artifact));
+    Alcotest.(check bool)
+      "bare embed blob survived"
+      true
+      (Att.get_bytes store ~id:m_bare_embed.id = Ok (Some p_bare_embed));
+    Alcotest.(check bool)
+      "bare media URL blob survived"
+      true
+      (Att.get_bytes store ~id:m_bare_url.id = Ok (Some p_bare_url));
+    Alcotest.(check bool)
+      "bare JSON embed blob survived"
+      true
+      (Att.get_bytes store ~id:m_bare_json_embed.id = Ok (Some p_bare_json_embed)))
 ;;
 
 let () =

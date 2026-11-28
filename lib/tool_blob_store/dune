@@ -31,4 +31,6 @@
   ; The sweep's period is Masc_time_constants.day.
   masc.config
   masc.attachment_store
+  ; Attachment reachability reads the reader's media reference grammar.
+  masc.media_ref_scan
   masc.keeper_chat_operations))

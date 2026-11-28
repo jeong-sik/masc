@@ -1,0 +1,20 @@
+; Media_ref_scan — reads workspace media references (attachment and media
+; URLs, Obsidian media embeds) out of Markdown and HTML.
+;
+; It sits below masc so attachment GC (masc.masc_tool_blob_store) reads the
+; same grammar as the wiki and published-artifact readers in masc. A reference
+; the wiki lint accepts is then a reference the GC keeps.
+
+(include_subdirs no)
+
+(library
+ (name masc_media_ref_scan)
+ (public_name masc.media_ref_scan)
+ (wrapped false)
+ (modules media_ref_scan)
+ (flags :standard)
+ (libraries
+  masc.attachment_store
+  ; Masc_network_defaults.media_path_prefix
+  masc.config
+  masc.string_util))

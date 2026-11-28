@@ -769,10 +769,21 @@ let is_skippable_scan_name name =
   || Fs_compat.is_lock_name name
 ;;
 
+(* A scanned text keeps an attachment blob alive when it names the blob as a
+   canonical [att_<64hex>] anywhere, or by the bare [/api/v1/media/<64hex>] or
+   [![[media:<64hex>]]] form. The wiki lint accepts the bare forms and the
+   media route serves them from this store first. *)
+let referenced_attachment_sha256s text =
+  List.fold_left
+    (fun live sha256 -> String_set.add sha256 live)
+    (Attachment_store.referenced_sha256_of_json_text text)
+    (Media_ref_scan.extract_bare_media_digests text)
+;;
+
 let scan_file_for_attachments ~base_path path (live, scanned) =
   match Fs_compat.load_owned_regular_file ~ownership_root:base_path path with
   | Ok (Some payload) ->
-    let found = Attachment_store.referenced_sha256_of_json_text payload in
+    let found = referenced_attachment_sha256s payload in
     Ok (String_set.union live found, scanned + 1)
   | Ok None -> Ok (live, scanned)
   | Error err ->
@@ -837,7 +848,7 @@ let scan_blob_bodies_for_attachments ~base_path ~roots (live, scanned) =
            ~max_bytes:Tool_blob_store.max_served_bytes
        with
        | Ok (Some body) ->
-         let found = Attachment_store.referenced_sha256_of_json_text body in
+         let found = referenced_attachment_sha256s body in
          Ok (String_set.union live found, scanned + 1)
        | Ok None ->
          Error

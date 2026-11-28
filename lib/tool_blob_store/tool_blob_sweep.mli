@@ -172,7 +172,10 @@ val scan_attachment_reachability :
     [board_posts.jsonl], [board_comments.jsonl], [keepers/], etc.), config
     keeper files, and active ephemeral pins under
     [<base>/.masc/attachments/ephemeral/] for canonical [att_<64hex>]
-    references, then computes live and unreferenced digests against
+    references and for the bare [/api/v1/media/<64hex>] and
+    [![[media:<64hex>]]] forms the wiki lint accepts
+    ({!Media_ref_scan.extract_bare_media_digests}), then computes live and
+    unreferenced digests against
     [<base>/.masc/attachments/blobs/]. Fails closed with [Error _] on any
     unreadable directory, consumer file, ephemeral pin dir, or blob shard.
     Deletes nothing. *)

@@ -1,7 +1,7 @@
 name = "keeper_artifact_read"
 description = """
-Restore a [masc:blob ...] ToolResult or a normalized _blob ToolUse input \
-by its sha256. Completed tool-call arguments are stored as application/json; \
+Restore a [masc:blob ...] ToolResult, or a normalized _blob reference in a \
+ToolResult or a ToolUse input, by its sha256. Completed tool-call arguments are stored as application/json; \
 read and parse the original JSON to inspect, compare or reuse those arguments. \
 The reference's bytes field is the artifact's total size.
 
@@ -24,7 +24,7 @@ additional_properties = false
 name = "sha256"
 type = "string"
 required = true
-description = "Exact sha256 from a [masc:blob ...] ToolResult or a ToolUse input _blob reference. A marker can carry a second hash, answer_sha256=; it fingerprints the answer and names no artifact, so pass the value written sha256=."
+description = "Exact sha256 from a [masc:blob ...] ToolResult, or from a _blob reference in a ToolResult or a ToolUse input. A marker can carry a second hash, answer_sha256=; it fingerprints the answer and names no artifact, so pass the value written sha256=."
 
 [[params]]
 name = "offset"

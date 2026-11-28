@@ -246,15 +246,12 @@ let composable_output_fields ~inline_ceiling_bytes ~base_path ~stdout ~stderr ~o
   else
     try
       let store = Tool_blob_store.create ~base_path in
-      let store_stream bytes =
-        Tool_blob_store.put_durable store ~bytes ~mime:"text/plain"
-        |> Tool_output.normalized_artifact_ref_to_json
-      in
+      let store_stream bytes = Tool_blob_store.put_durable store ~bytes ~mime:"text/plain" in
       Ok
-        [ "output_artifact", store_stream output
-        ; "stdout_artifact", store_stream stdout
-        ; "stderr_artifact", store_stream stderr
-        ]
+        (Keeper_execute_output_files.stream_artifact_fields
+           ~output:(store_stream output)
+           ~stdout:(store_stream stdout)
+           ~stderr:(store_stream stderr))
     with
     | Eio.Cancel.Cancelled _ as exn -> raise exn
     | exn -> Error (Printexc.to_string exn)
@@ -1295,9 +1292,31 @@ let handle_tool_execute_typed
                   (masc#28983). Only infra failures — sandbox dispatch,
                   secret projection, output/manifest persistence — keep
                   the failure disposition. *)
+               (* An output too large to return inline leaves the payload
+                  with its exit status, where it ran and the three artifact
+                  references with their previews. That payload is small, so
+                  it goes to the model beside the manifest's reference
+                  instead of as the reference alone: the model reads whether
+                  the command succeeded without a second call. The
+                  projection falls back to the reference when the payload
+                  does not fit the lane.
+
+                  A dispatch with no trustworthy result keeps the reference
+                  alone. Its recorded output is replayed to the Keeper as the
+                  detail of a failed call ([Keeper_own_recent_actions]), a
+                  place written for a refusal's short text and not for a
+                  result payload. *)
+               let projection =
+                 match observation with
+                 | Command_result_observed ->
+                   Tool_output.Inline_with_structured_diagnostic
+                 | Command_request_not_sent | Command_effect_unknown ->
+                   Tool_output.Reference_only
+               in
                authorized
                  (match
                     Tool_bridge.attach_artifact_manifest
+                      ~projection
                       ~base_path:config.base_path
                       (let answered =
                          match transport_failure with

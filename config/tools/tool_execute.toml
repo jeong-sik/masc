@@ -22,6 +22,12 @@ A completed tool call means the command ran: read ok and status for its result. 
 For checks, prefer argv so the checked program supplies the exit status. \
 Shell pipelines normally report the last stage; use bash with -o pipefail \
 when an earlier stage's failure must survive a pipe to tail or tee. \
+Output over the inline limit, or output that is not UTF-8, comes back under \
+structured_content beside an artifact_manifest reference: ok and status as \
+usual, with output_artifact (stdout, then stderr), stdout_artifact and \
+stderr_artifact in place of output. Each names the stored bytes by sha256 \
+with a preview, and keeper_artifact_read returns the rest. A stream with the \
+same sha256 as output_artifact holds the same bytes and has an empty preview. \
 Do not repeat a write just because its output was truncated."""
 additional_properties = false
 

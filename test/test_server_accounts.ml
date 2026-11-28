@@ -888,6 +888,35 @@ let test_stops_when_a_redirect_is_not_on_the_base_url () =
           Alcotest.(check (option int)) "no port is recorded for the CLI" None (recorded_port ~base)))
 ;;
 
+(* The shell sets no base URL, and runtime.toml of the base path names one
+   (transport.http_base_url, which the loader leaves in the boot store): the
+   boot compares the redirect with the address of the file. The listener then
+   leaves that address in the variable, not the one it bound, so a reader of
+   the variable sees the same base as the comparison. *)
+let test_compares_a_redirect_with_the_base_url_of_the_file () =
+  Unix.putenv github_secret_env "secret-of-the-case";
+  with_installation
+    ~auth_config:
+      (with_github_client ~redirect_uri:https_redirect ~client_secret_env:github_secret_env)
+    (fun env { base; config = _; store = _; multi_account } ->
+      Unix.unsetenv Env_config_core.http_base_url_env_key;
+      Config_boot_overrides.set Env_config_core.http_base_url_env_key "https://other.example";
+      Fun.protect
+        ~finally:(fun () ->
+          Config_boot_overrides.reset_for_tests ();
+          Unix.putenv Env_config_core.http_base_url_env_key "")
+        (fun () ->
+          Alcotest.(check string)
+            "the boot under the base URL of the file"
+            "github redirect on https://masc.example, the base URL is on https://other.example"
+            (boot_outcome env ~port:(free_port ()) multi_account);
+          Alcotest.(check (option string))
+            "the variable holds the address of the file, not the bound one"
+            (Some "https://other.example")
+            (Sys.getenv_opt Env_config_core.http_base_url_env_key);
+          Alcotest.(check (option int)) "no port is recorded for the CLI" None (recorded_port ~base)))
+;;
+
 let test_stops_on_an_http_mode_outside_its_vocabulary () =
   with_installation (fun env { base; config = _; store; multi_account } ->
     (* The store is gone too: a boot that opened the zone before it read the
@@ -1767,6 +1796,10 @@ let () =
             "the boot stops when a redirect is not on the base URL"
             `Quick
             test_stops_when_a_redirect_is_not_on_the_base_url
+        ; Alcotest.test_case
+            "compares a redirect with the base URL of runtime.toml"
+            `Quick
+            test_compares_a_redirect_with_the_base_url_of_the_file
         ; Alcotest.test_case
             "the boot stops when the port cannot be announced"
             `Quick

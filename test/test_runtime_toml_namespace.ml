@@ -562,13 +562,18 @@ temperature = 0.25
 h2_max_concurrent_streams = 250
 https_port = 9443
 tls_cert_file = "/etc/masc/cert.pem"
+http_base_url = "https://masc-accounts.example.test/"
 |}
   in
   let path = Filename.concat cfg_dir "runtime.toml" in
   Out_channel.with_open_bin path (fun oc -> output_string oc toml);
   Config_boot_overrides.reset_for_tests ();
+  (* The file is read only where the shell sets no value of its own. *)
+  let inherited_base_url = Sys.getenv_opt Env_config_core.http_base_url_env_key in
+  Unix.unsetenv Env_config_core.http_base_url_env_key;
   Fun.protect
     ~finally:(fun () ->
+      Option.iter (Unix.putenv Env_config_core.http_base_url_env_key) inherited_base_url;
       Config_boot_overrides.reset_for_tests ();
       Fs_compat.remove_tree base_path)
     (fun () ->
@@ -606,6 +611,15 @@ tls_cert_file = "/etc/masc/cert.pem"
          Alcotest.(check (option string)) "transport.tls_cert_file consumer"
            (Some "/etc/masc/cert.pem")
            (Env_config_runtime.Transport.tls_cert_file ());
+         Alcotest.(check (option string)) "transport.http_base_url consumer"
+           (Some "https://masc-accounts.example.test")
+           (Env_config_core.masc_http_base_url_opt ());
+         (* A value of the shell is a per-launch override and wins. *)
+         Unix.putenv Env_config_core.http_base_url_env_key "https://masc.example.test";
+         Alcotest.(check (option string)) "MASC_HTTP_BASE_URL wins over the file"
+           (Some "https://masc.example.test")
+           (Env_config_core.masc_http_base_url_opt ());
+         Unix.unsetenv Env_config_core.http_base_url_env_key;
          (* Fail closed if a string consumer encounters a non-string typed boot value *)
          Config_boot_overrides.set_typed "MASC_TEST_TYPED_STRING_MISMATCH" (Config_boot_overrides.Int 7);
          Alcotest.(check bool) "get_string fails closed on typed non-string" true

@@ -4,7 +4,7 @@
 
 (library
  (name atd_native)
- (modules native_ir naming swift_gen)
+ (modules native_ir naming swift_gen kotlin_gen)
  (libraries atd))
 
 (executable

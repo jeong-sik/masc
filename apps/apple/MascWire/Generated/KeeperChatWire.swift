@@ -48,16 +48,6 @@ public struct ResponseIdentity: Decodable, Equatable, Sendable {
     }
 }
 
-public struct FrameBase: Decodable, Equatable, Sendable {
-    public let threadId: String
-    public let timestamp: Double
-
-    private enum CodingKeys: String, CodingKey {
-        case threadId = "threadId"
-        case timestamp = "timestamp"
-    }
-}
-
 public struct RunStarted: Decodable, Equatable, Sendable {
     public let threadId: String
     public let timestamp: Double
@@ -145,20 +135,6 @@ public struct TextMessageEnd: Decodable, Equatable, Sendable {
         case timestamp = "timestamp"
         case runId = "runId"
         case messageId = "messageId"
-    }
-}
-
-public struct ToolOccurrence: Decodable, Equatable, Sendable {
-    public let toolCallId: String?
-    public let toolStreamScope: Int
-    public let providerMessageId: String?
-    public let toolCallBlockIndex: Int
-
-    private enum CodingKeys: String, CodingKey {
-        case toolCallId = "toolCallId"
-        case toolStreamScope = "toolStreamScope"
-        case providerMessageId = "providerMessageId"
-        case toolCallBlockIndex = "toolCallBlockIndex"
     }
 }
 

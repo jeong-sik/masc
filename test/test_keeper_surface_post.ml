@@ -828,9 +828,9 @@ let test_discord_files_args_decode () =
   refused "an eleventh file" (decode [ distinct 11 ])
 
 (* Before approval a post may name only files its Keeper may read, and a voice
-   message only sound. A post that passes makes its files durable, so the
-   Keeper's later ephemeral files cannot evict them while the post waits for
-   an operator; a refused post leaves them ephemeral. *)
+   message only sound. The check changes no file. Promotion makes them
+   durable, so the Keeper's later ephemeral files cannot evict them while the
+   post waits for an operator. *)
 let test_discord_attachments_held_before_approval () =
   let base_path = Filename.temp_dir "surface-post-held-" "" in
   Eio_main.run @@ fun env ->
@@ -879,7 +879,15 @@ let test_discord_attachments_held_before_approval () =
        (match held "alice" [ ephemeral_id ] with
         | Ok () -> ()
         | Error detail -> fail detail);
-       check bool "the owner's file is now durable" true
+       check bool "a passed check changes no file" true (retention () = ephemeral);
+       let promoted files =
+         Masc.Keeper_tool_in_process_runtime.For_testing.discord_files_promoted ~base_path
+           files
+       in
+       (match promoted (SP.Files (ephemeral_id, [])) with
+        | Ok () -> ()
+        | Error detail -> fail detail);
+       check bool "the promoted file is durable" true
          (retention () = Attachment_store.Durable);
        (* A voice message must be sound MASC can transcode. *)
        let voice id =
@@ -897,8 +905,82 @@ let test_discord_attachments_held_before_approval () =
        (match voice wav_id with
         | Ok () -> ()
         | Error detail -> fail detail);
-       check bool "the voice message's sound is now durable" true
+       check bool "the checked sound stays ephemeral" true (retention_of wav_id = ephemeral);
+       (match promoted (SP.Voice_message wav_id) with
+        | Ok () -> ()
+        | Error detail -> fail detail);
+       check bool "the promoted sound is durable" true
          (retention_of wav_id = Attachment_store.Durable))
+
+(* The target and mention checks run after the file check. A post either of
+   them refuses leaves its files ephemeral, because promotion is the last step
+   before the gate. Each case also checks the refusal came from that check,
+   not from an earlier one that would leave the file alone anyway. *)
+let test_post_refused_after_the_file_check_keeps_its_files () =
+  let base_path = Filename.temp_dir "surface-post-refused-" "" in
+  let bindings = Filename.concat base_path "discord-bindings.json" in
+  Masc_test_deps.with_process_env Env_config_core.base_path_env_key (Some base_path)
+  @@ fun () ->
+  Masc_test_deps.with_process_env "MASC_DISCORD_BINDING_STORE_PATH" (Some bindings)
+  @@ fun () ->
+  Eio_main.run @@ fun env ->
+  Fun.protect
+    ~finally:(fun () -> Fs_compat.remove_tree base_path)
+    (fun () ->
+       if not (Fs_compat.has_fs ()) then Fs_compat.set_fs (Eio.Stdenv.fs env);
+       let config = Masc.Workspace.default_config base_path in
+       ignore (Masc.Workspace.init config ~agent_name:(Some "refused-post-test"));
+       Fs_compat.save_file bindings {|{"123456789012345678":"alice"}|};
+       let meta =
+         match
+           Masc_test_deps.meta_of_json_fixture
+             (`Assoc [ "name", `String "alice"; "always_allow", `Bool true ])
+         with
+         | Ok meta -> meta
+         | Error detail -> fail detail
+       in
+       let store = Attachment_store.create ~base_path in
+       let id =
+         match
+           Attachment_store.put ~declared_mime:"image/png" ~filename:"cat.png"
+             ~origin:Attachment_store.Model_generated ~created_by:"alice"
+             ~retention:(Attachment_store.Ephemeral { keeper = "alice" })
+             store ~bytes:tiny_png
+         with
+         | Ok (meta : Attachment_store.meta) -> meta.id
+         | Error error -> fail (Attachment_store.put_error_to_string error)
+       in
+       let refused label ~reason fields =
+         let result =
+           Masc.Keeper_tool_in_process_runtime.handle_surface_post_with_outcome ~config ~meta
+             ~args:
+               (`Assoc
+                  ([ "surface", `String "discord"
+                   ; "content", `String "그림이에요"
+                   ; "attachment_ids", `List [ `String id ]
+                   ]
+                   @ fields))
+             ()
+         in
+         (match result.disposition, result.failure_effect_disposition with
+          | Tool_result.Failed _, Tool_result.Proven_pre_effect -> ()
+          | (Tool_result.Completed () | Tool_result.Deferred () | Tool_result.Failed _), _ ->
+            failf "%s: not refused before any effect: %s" label result.raw_output);
+         check bool (label ^ ": refused by that check") true
+           (Astring.String.is_infix ~affix:reason result.raw_output);
+         match Attachment_store.get_meta store ~id with
+         | Ok (Some (stored : Attachment_store.meta)) ->
+           check bool (label ^ ": the file stays ephemeral") true
+             (stored.retention = Attachment_store.Ephemeral { keeper = "alice" })
+         | Ok None -> failf "%s: the file vanished" label
+         | Error error -> fail (Attachment_store.get_error_to_string error)
+       in
+       refused "a channel not bound to the Keeper" ~reason:"is not bound to this keeper"
+         [ "channel_id", `String "999999999999999999" ];
+       refused "a mention outside the roster" ~reason:"not in the current participant roster"
+         [ "channel_id", `String "123456789012345678"
+         ; "mention_user_ids", `List [ `String "223456789012345678" ]
+         ])
 
 (* keeper_voice_speak's clip becomes the Keeper's ephemeral attachment, and a
    voice post naming that id passes the check before approval. A clip that
@@ -1164,6 +1246,8 @@ let () =
             test_approved_discord_input_carries_files;
           test_case "attachments are held before approval" `Quick
             test_discord_attachments_held_before_approval;
+          test_case "a post refused after the file check keeps its files" `Quick
+            test_post_refused_after_the_file_check_keeps_its_files;
           test_case "a spoken clip is a voice message file" `Quick
             test_spoken_clip_is_a_voice_message_file;
           test_case "explicit thread_ts wins over continuation" `Quick

@@ -214,3 +214,56 @@ let reobserve_posts store =
                 exception_ (Printexc.get_raw_backtrace ())) in
           finish_posts_read outcome;
           require_posts_source_readable store)
+
+(* #55449: the other four sources refuse on a stale observation as posts did
+   and were read again only at startup. On 2026-11-24 every comment write was
+   refused for 123 minutes, until the restart. Each is read again by the
+   function that loads it at startup, and only when its refusal is one a fresh
+   read can clear. The check runs before persistence is taken, so two calls
+   that arrive together may each read once; either read is complete. *)
+let reloaded result =
+  result
+  |> Result.map (fun (_ : int) -> ())
+  |> Result.map_error (fun ((_ : string), exn) -> Io_error (Printexc.to_string exn))
+
+let reobserve_comments store =
+  if Board_comments_source.reobservation_due store
+  then
+    (* As at startup, and in the interval that replaces the comments: reply
+       counts are held on posts, and the vote counts of the comments just
+       loaded come from the vote ledger. *)
+    reloaded
+      (Board_votes_json.load_comments_deriving store ~derive:(fun () ->
+         recalculate_reply_counts store;
+         recalculate_vote_counts store))
+  else Ok ()
+
+let reobserve_votes store =
+  if Board_votes_source.reobservation_due store
+  then reloaded (load_persisted_votes store)
+  else Ok ()
+
+let reobserve_reactions store =
+  if Board_reactions_source.reobservation_due store
+  then reloaded (load_persisted_reactions store)
+  else Ok ()
+
+let reobserve_sub_boards store =
+  if Board_sub_boards_source.reobservation_due store
+  then reloaded (Board_core.reload_sub_boards store)
+  else Ok ()
+
+(* Startup order: comments re-derive counts held on posts, votes re-derive
+   counts held on posts and comments. *)
+let reobserve store =
+  List.filter_map
+    (fun (source, reobserve_source) ->
+       match reobserve_source store with
+       | Ok () -> None
+       | Error error -> Some (source, error))
+    [ Board_paths.Posts, reobserve_posts
+    ; Board_paths.Comments, reobserve_comments
+    ; Board_paths.Votes, reobserve_votes
+    ; Board_paths.Reactions, reobserve_reactions
+    ; Board_paths.Sub_boards, reobserve_sub_boards
+    ]

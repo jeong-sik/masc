@@ -109,7 +109,7 @@ let load_persisted_posts store =
       error failure)
 ;;
 
-let load_persisted_comments store =
+let load_comments_deriving store ~derive =
   let module Source = Board_comments_source in
   with_persist_lock store (fun () ->
     let path = Board_paths.comments_path store in
@@ -124,6 +124,7 @@ let load_persisted_comments store =
           match outcome with
           | Source.Complete { comments; _ } ->
             replace_loaded_comments store comments;
+            derive ();
             Ok (List.length comments)
           | Source.Partial { comments; errors; _ } ->
             merge_loaded_comments store comments;
@@ -162,3 +163,5 @@ let load_persisted_comments store =
        | Source.Unavailable { failure; _ } -> error failure
        | Source.Complete _ | Source.Partial _ | Source.Display_only _ -> error Comments_publication_pending))
 ;;
+
+let load_persisted_comments store = load_comments_deriving store ~derive:ignore

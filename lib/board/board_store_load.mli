@@ -23,3 +23,14 @@ val reobserve_posts : Board_types.store -> (unit, Board_types.board_error) resul
     new write observation. [Ok ()] when no reobservation was due or the source
     is readable again; [Error] names the cause and the needed action. The
     caller must not hold persistence. *)
+
+val reobserve :
+  Board_types.store -> (Board_paths.persisted_file * Board_types.board_error) list
+(** {!reobserve_posts}, then the same fresh read for the comments, votes,
+    reactions and sub-board policy sources, in the order startup loads them.
+    A source is read again only when its refusal proves its observation stale.
+    A complete read replaces that source's model as at startup and becomes its
+    new write observation. Returns the sources still unavailable afterwards,
+    each with its cause; empty when every source that was due is readable
+    again. The caller must hold neither persistence nor the state
+    lock (#55449). *)

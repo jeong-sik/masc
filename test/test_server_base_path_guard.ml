@@ -170,6 +170,7 @@ let test_enter_outlives_a_removed_launch_directory () =
   let original = Sys.getcwd () in
   Fun.protect ~finally:(fun () ->
     Sys.chdir original;
+    Config_dir_resolver.pin_working_dir "";
     Config_dir_resolver.reset ()) @@ fun () ->
   let launch = Filename.concat dir "launch" in
   let workspace = Filename.concat dir "workspace" in

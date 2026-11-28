@@ -133,10 +133,11 @@ let fallback_cwd_from_env () =
 
 let pinned_working_dir : string option Atomic.t = Atomic.make None
 
+(* The pin must equal the directory the server changed into, byte for byte,
+   so the path is kept as given. *)
 let pin_working_dir path =
-  let trimmed = String.trim path in
-  if trimmed = "" then Atomic.set pinned_working_dir None
-  else Atomic.set pinned_working_dir (Some trimmed)
+  if path = "" then Atomic.set pinned_working_dir None
+  else Atomic.set pinned_working_dir (Some path)
 
 let current_working_dir () =
   match Atomic.get pinned_working_dir with
@@ -357,9 +358,10 @@ let rec resolve () =
       then r
       else resolve ()
 
-let reset () =
-  Atomic.set cached_resolution None;
-  Atomic.set pinned_working_dir None
+(* The pinned working directory is a fact about the process (the server's
+   chdir), not a cached reading of the environment, so it survives [reset].
+   Server startup pins before its config bootstrap resets the resolution. *)
+let reset () = Atomic.set cached_resolution None
 
 let prompts_dir () =
   (resolve ()).prompts.path

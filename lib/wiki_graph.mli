@@ -6,6 +6,7 @@ type node =
   | Readable of
       { page : string  (** The page name, without [.md]. *)
       ; links : Wiki_link.link list
+      ; embeds : Wiki_link.embed list
       ; sources : Wiki_sources.t
       ; revision : int  (** The [revision] header the page carries. *)
       }
@@ -33,6 +34,10 @@ val links_of : t -> string -> Wiki_link.link list
 (** The links of one readable page, in reading order. [[]] for a page that is
     not readable or not there. *)
 
+val embeds_of : t -> string -> Wiki_link.embed list
+(** The typed embeds of one readable page, in reading order. [[]] for a page
+    that is not readable or not there. *)
+
 val sources_of : t -> string -> Wiki_sources.t option
 (** [None] for a page that is not readable or not there. *)
 
@@ -41,5 +46,6 @@ val revision_of : t -> string -> int option
     readable or not there. *)
 
 val incoming : t -> string -> int
-(** How many readable pages other than [name] itself link to it with a
-    {!Wiki_link.Page} target. A page counts once per linking page. *)
+(** How many readable pages other than [name] itself reference it with either a
+    {!Wiki_link.Page} link or a {!Wiki_link.Wiki_embed}. A page counts once per
+    referencing page. *)

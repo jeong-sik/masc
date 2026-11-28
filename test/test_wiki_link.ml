@@ -97,6 +97,165 @@ let test_title_and_angle_target () =
     (List.map (fun (l : L.link) -> l.raw) (L.extract "[a](a.md \"A title\")"))
 ;;
 
+let embed_target_to_string = function
+  | L.Media_embed sha -> "media:" ^ sha
+  | L.Wiki_embed slug -> "wiki:" ^ slug
+  | L.Artifact_embed id -> "artifact:" ^ id
+  | L.Invalid_embed { kind; raw } ->
+    "invalid:" ^ L.embed_kind_to_string kind ^ ":" ^ raw
+  | L.Unsupported_embed { scheme; raw } -> "unsupported:" ^ scheme ^ ":" ^ raw
+;;
+
+let sample_sha_a = String.make 64 'a'
+let sample_sha_b = String.make 64 'b'
+let sample_artifact = "artifact-0123456789abcdef0123456789abcdef"
+
+let test_obsidian_embeds_skipped_by_link_extract () =
+  check_targets "obsidian embeds do not emit links"
+    (Printf.sprintf
+       "![[wiki:alpha]] ![[media:%s|see [inner](inner.md)]] ![[artifact:%s]] [ok](ok.md)"
+       sample_sha_a
+       sample_artifact)
+    [ "page:ok" ]
+;;
+
+let test_classify_obsidian_embed_table () =
+  let upper_sha = String.make 64 'A' in
+  List.iter
+    (fun (raw, expected) ->
+       check string raw expected (embed_target_to_string (L.classify_obsidian_embed raw)))
+    [ "media:" ^ sample_sha_a, "media:" ^ sample_sha_a
+    ; "media:att_" ^ sample_sha_a, "media:" ^ sample_sha_a
+    ; "media:short", "invalid:media:short"
+    ; "media:" ^ upper_sha, "invalid:media:" ^ upper_sha
+    ; "media:", "invalid:media:"
+    ; "wiki:alpha-1", "wiki:alpha-1"
+    ; "alpha-1", "wiki:alpha-1"
+    ; "wiki:Bad_Name", "invalid:wiki:Bad_Name"
+    ; "wiki:index", "invalid:wiki:index"
+    ; "", "invalid:wiki:"
+    ; "artifact:" ^ sample_artifact, "artifact:" ^ sample_artifact
+    ; "artifact:not-an-id", "invalid:artifact:not-an-id"
+    ; "file:diagram.png", "unsupported:file:diagram.png"
+    ; ":leading-colon", "unsupported::leading-colon"
+    ]
+;;
+
+let test_extract_embeds_and_media_refs () =
+  let body =
+    String.concat
+      "\n"
+      [ Printf.sprintf "![[media:%s|Hero diagram]]" sample_sha_b
+      ; "![[wiki:design-notes|Design Notes]] and ![[overview]]"
+      ; Printf.sprintf "![[artifact:%s|Q4 Report]]" sample_artifact
+      ; Printf.sprintf "![Chart](/api/v1/attachments/att_%s?max_px=640 \"title\")" sample_sha_a
+      ; Printf.sprintf "![Dup](</api/v1/media/%s>)" sample_sha_b
+      ; "![Bad](/api/v1/attachments/not-an-att-id)"
+      ; "![[other:thing|lbl]]"
+      ]
+  in
+  let embeds = L.extract_embeds body in
+  check
+    (list string)
+    "embed targets in reading order"
+    [ "media:" ^ sample_sha_b
+    ; "wiki:design-notes"
+    ; "wiki:overview"
+    ; "artifact:" ^ sample_artifact
+    ; "media:" ^ sample_sha_a
+    ; "media:" ^ sample_sha_b
+    ; "invalid:media:not-an-att-id"
+    ; "unsupported:other:thing"
+    ]
+    (List.map (fun (e : L.embed) -> embed_target_to_string e.target) embeds);
+  check
+    (list (option string))
+    "labels"
+    [ Some "Hero diagram"
+    ; Some "Design Notes"
+    ; None
+    ; Some "Q4 Report"
+    ; Some "Chart"
+    ; Some "Dup"
+    ; Some "Bad"
+    ; Some "lbl"
+    ]
+    (List.map (fun (e : L.embed) -> e.label) embeds);
+  check
+    (list string)
+    "syntaxes"
+    [ "obsidian"
+    ; "obsidian"
+    ; "obsidian"
+    ; "obsidian"
+    ; "markdown_media"
+    ; "markdown_media"
+    ; "markdown_media"
+    ; "obsidian"
+    ]
+    (List.map (fun (e : L.embed) -> L.embed_syntax_to_string e.syntax) embeds);
+  check
+    (list int)
+    "lines"
+    [ 1; 2; 2; 3; 4; 5; 6; 7 ]
+    (List.map (fun (e : L.embed) -> e.line) embeds);
+  check
+    (list string)
+    "media_refs sorted and deduplicated"
+    [ sample_sha_a; sample_sha_b ]
+    (L.media_refs_of_embeds embeds)
+;;
+
+let test_embed_code_and_non_media_images_skipped () =
+  let body =
+    String.concat
+      "\n"
+      [ "```md"
+      ; Printf.sprintf "![[media:%s]]" sample_sha_a
+      ; Printf.sprintf "![x](/api/v1/media/%s)" sample_sha_a
+      ; "```"
+      ; Printf.sprintf "`![[media:%s]]` `![x](/api/v1/media/%s)`" sample_sha_a sample_sha_b
+      ; "![ext](https://example.org/api/v1/media/" ^ sample_sha_a ^ ")"
+      ; "![local](diagram.png)"
+      ; Printf.sprintf "![real](/api/v1/media/%s)" sample_sha_b
+      ]
+  in
+  check
+    (list string)
+    "only real unquoted media embed survives"
+    [ "media:" ^ sample_sha_b ]
+    (List.map (fun (e : L.embed) -> embed_target_to_string e.target) (L.extract_embeds body))
+;;
+
+let test_embed_odd_inputs_do_not_raise () =
+  List.iter
+    (fun body -> ignore (L.extract_embeds body : L.embed list))
+    [ ""; "![["; "![[]]"; "![[a|]]"; "![[a|b|c]]"; "![alt](/api/v1/media/"; "![](/api/v1/media/)" ];
+  check
+    (list string)
+    "empty obsidian embed is invalid wiki"
+    [ "invalid:wiki:" ]
+    (List.map (fun (e : L.embed) -> embed_target_to_string e.target) (L.extract_embeds "![[]]"));
+  check
+    (list string)
+    "empty media path is invalid media"
+    [ "invalid:media:" ]
+    (List.map
+       (fun (e : L.embed) -> embed_target_to_string e.target)
+       (L.extract_embeds "![](/api/v1/media/)"));
+  let sample_art = "artifact-0123456789abcdef0123456789abcdef" in
+  check
+    (list string)
+    "obsidian scheme and target whitespace trimmed identically to dashboard"
+    [ "media:" ^ sample_sha_a; "wiki:architecture"; "artifact:" ^ sample_art ]
+    (List.map
+       (fun (e : L.embed) -> embed_target_to_string e.target)
+       (L.extract_embeds
+          (Printf.sprintf
+             "![[ media : %s | trimmed ]] ![[ wiki : architecture ]] ![[ artifact : %s ]]"
+             sample_sha_a sample_art)))
+;;
+
 let () =
   run
     "wiki_link"
@@ -105,9 +264,18 @@ let () =
       , [ test_case "plain links and their lines" `Quick test_plain_links_and_lines
         ; test_case "unsupported shapes are values" `Quick test_unsupported_shapes_are_values
         ; test_case "code and images are skipped" `Quick test_code_and_images_are_skipped
+        ; test_case "obsidian embeds are skipped by link extract" `Quick
+            test_obsidian_embeds_skipped_by_link_extract
         ; test_case "odd input does not raise" `Quick
             test_unmatched_and_odd_input_does_not_raise
         ; test_case "title and angle target" `Quick test_title_and_angle_target
+        ] )
+    ; ( "embeds"
+      , [ test_case "classify obsidian embed table" `Quick test_classify_obsidian_embed_table
+        ; test_case "extract embeds and media_refs" `Quick test_extract_embeds_and_media_refs
+        ; test_case "code blocks and non-media images skipped" `Quick
+            test_embed_code_and_non_media_images_skipped
+        ; test_case "odd embed input does not raise" `Quick test_embed_odd_inputs_do_not_raise
         ] )
     ]
 ;;

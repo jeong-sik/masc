@@ -156,9 +156,13 @@ let read ~base_path ~actor ~request =
     | Error (`Artifact error) -> Response (artifact_error error)
     | Ok `Private -> Private
     | Ok (`Allowed (snapshot, artifact, selected, content)) ->
+      let media_refs =
+        Published_artifact.extract_media_refs selected.Published_artifact.format content
+      in
       Response (ok (`Assoc
         ["artifact", Published_artifact.summary_to_json ~id:artifact.id selected;
          "content", `String content;
+         "media_refs", `List (List.map (fun s -> `String s) media_refs);
          "revisions", `List (List.map Published_artifact.revision_to_json artifact.revisions);
          "shared", `Bool snapshot.shared; "share_version", `Int snapshot.version]))
 
@@ -166,10 +170,28 @@ let publish ~config ~actor ~body =
   match decode_publication_request ~config ~body with
   | Error response -> response_of_pair response
   | Ok publication ->
-    match Eio_unix.run_in_systhread (fun () -> Store.publish ~base_path:config.base_path ~author:actor publication) with
+    match
+      Eio_unix.run_in_systhread (fun () ->
+        match Store.publish ~base_path:config.base_path ~author:actor publication with
+        | Error _ as err -> err
+        | Ok (artifact, revision) ->
+          let media_refs =
+            Published_artifact.extract_media_refs
+              publication.Published_artifact.format
+              publication.Published_artifact.content
+          in
+          let missing_media_refs =
+            Workspace_media.known_missing ~base_path:config.base_path media_refs
+          in
+          Ok (artifact, revision, media_refs, missing_media_refs))
+    with
     | Error error -> artifact_error error
-    | Ok (artifact, revision) ->
-      { status = `Created; json = Published_artifact.publication_to_json ~id:artifact.id revision }
+    | Ok (artifact, revision, media_refs, missing_media_refs) ->
+      { status = `Created
+      ; json =
+          Published_artifact.publication_to_json
+            ~media_refs ~missing_media_refs ~id:artifact.id revision
+      }
 
 let list_checks ~base_path =
   match Eio_unix.run_in_systhread (fun () -> Published_artifact_check_store.list ~base_path) with

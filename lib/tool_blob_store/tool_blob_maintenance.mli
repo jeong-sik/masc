@@ -159,12 +159,22 @@ type exclusion =
   | Unpublished_write  (** An atomic write's staging file. *)
   | Writes_no_reference
       (** A store whose producer writes no tool blob reference. *)
+  | Attachment_references_only
+      (** A store that writes no tool blob markers (for example Markdown wiki
+          pages, tasks, or goals) so tool-blob JSON scanning excludes it, while
+          {!attachment_consumer_paths} includes it for attachment GC
+          reachability. *)
   | Repairable_pointer
       (** It names a blob that stores in scope own. When the blob is gone,
           its producer writes it again from another store. *)
 
 type source =
   | Tree  (** Every regular file below the entry is read. *)
+  | Tree_with_blob_bodies
+      (** Like {!Tree} for tool-blob scanning, and additionally exposed via
+          {!blob_body_consumer_paths} so attachment GC dereferences the
+          referenced {!Tool_blob_store} body blobs (for example published
+          artifact bodies that embed attachment IDs). *)
   | Payload_tree
       (** Retained raw bytes below the entry. Complete JSON is traversed;
           other payloads are scanned as text for exact tool blob markers.
@@ -250,6 +260,21 @@ val unclassified_entries :
 
 val consumer_paths : scope -> base_path:string -> string list
 (** The path of every store [scope] puts in scope. *)
+
+val attachment_consumer_paths : scope -> base_path:string -> string list
+(** All {!consumer_paths} plus stores excluded with
+    {!Attachment_references_only} (such as wiki pages, tasks, and goals), used
+    by {!Tool_blob_sweep.scan_attachment_reachability}. *)
+
+val blob_body_consumer_paths : scope -> base_path:string -> string list
+(** The paths of stores classified as {!Tree_with_blob_bodies} whose referenced
+    {!Tool_blob_store} body blobs must also be scanned for attachment IDs. *)
+
+val live_sha256s_in_tree :
+  base_path:string -> root:string -> (string list, error) result
+(** Collect every {!Tool_blob_store} SHA-256 referenced by regular JSON files
+    under [root] (using the same strict ownership-checked directory walk as
+    {!live_references}). Absent [root] returns [Ok []]. *)
 
 val candidate_snapshot_path : base_path:string -> string
 val run :

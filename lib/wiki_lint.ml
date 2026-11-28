@@ -10,6 +10,33 @@ type finding =
       ; form : string
       ; target : string
       }
+  | Broken_media_embed of
+      { page : string
+      ; line : int
+      ; target : string
+      }
+  | Broken_wiki_embed of
+      { page : string
+      ; line : int
+      ; target : string
+      }
+  | Broken_artifact_embed of
+      { page : string
+      ; line : int
+      ; target : string
+      }
+  | Invalid_embed of
+      { page : string
+      ; line : int
+      ; embed_kind : Wiki_link.embed_kind
+      ; target : string
+      }
+  | Unsupported_embed of
+      { page : string
+      ; line : int
+      ; scheme : string
+      ; target : string
+      }
   | Orphan of { page : string }
   | Orphan_unconfirmed of { page : string }
   | Missing_sources of { page : string }
@@ -31,6 +58,11 @@ type finding =
 let kind = function
   | Broken_link _ -> "broken_link"
   | Unsupported_link _ -> "unsupported_link"
+  | Broken_media_embed _ -> "broken_media_embed"
+  | Broken_wiki_embed _ -> "broken_wiki_embed"
+  | Broken_artifact_embed _ -> "broken_artifact_embed"
+  | Invalid_embed _ -> "invalid_embed"
+  | Unsupported_embed _ -> "unsupported_embed"
   | Orphan _ -> "orphan"
   | Orphan_unconfirmed _ -> "orphan_unconfirmed"
   | Missing_sources _ -> "missing_sources"
@@ -43,6 +75,11 @@ let kind = function
 let all_kinds =
   [ "broken_link"
   ; "unsupported_link"
+  ; "broken_media_embed"
+  ; "broken_wiki_embed"
+  ; "broken_artifact_embed"
+  ; "invalid_embed"
+  ; "unsupported_embed"
   ; "orphan"
   ; "orphan_unconfirmed"
   ; "missing_sources"
@@ -56,6 +93,11 @@ let all_kinds =
 let subject = function
   | Broken_link { page; _ }
   | Unsupported_link { page; _ }
+  | Broken_media_embed { page; _ }
+  | Broken_wiki_embed { page; _ }
+  | Broken_artifact_embed { page; _ }
+  | Invalid_embed { page; _ }
+  | Unsupported_embed { page; _ }
   | Orphan { page }
   | Orphan_unconfirmed { page }
   | Missing_sources { page }
@@ -66,7 +108,13 @@ let subject = function
 ;;
 
 let line_of = function
-  | Broken_link { line; _ } | Unsupported_link { line; _ } -> line
+  | Broken_link { line; _ }
+  | Unsupported_link { line; _ }
+  | Broken_media_embed { line; _ }
+  | Broken_wiki_embed { line; _ }
+  | Broken_artifact_embed { line; _ }
+  | Invalid_embed { line; _ }
+  | Unsupported_embed { line; _ } -> line
   | Orphan _
   | Orphan_unconfirmed _
   | Missing_sources _
@@ -85,6 +133,19 @@ let compare_finding_payload left right =
   | Unsupported_link l, Unsupported_link r ->
     let c = String.compare l.form r.form in
     if c <> 0 then c else String.compare l.target r.target
+  | Broken_media_embed l, Broken_media_embed r -> String.compare l.target r.target
+  | Broken_wiki_embed l, Broken_wiki_embed r -> String.compare l.target r.target
+  | Broken_artifact_embed l, Broken_artifact_embed r -> String.compare l.target r.target
+  | Invalid_embed l, Invalid_embed r ->
+    let c =
+      String.compare
+        (Wiki_link.embed_kind_to_string l.embed_kind)
+        (Wiki_link.embed_kind_to_string r.embed_kind)
+    in
+    if c <> 0 then c else String.compare l.target r.target
+  | Unsupported_embed l, Unsupported_embed r ->
+    let c = String.compare l.scheme r.scheme in
+    if c <> 0 then c else String.compare l.target r.target
   | Orphan l, Orphan r -> String.compare l.page r.page
   | Orphan_unconfirmed l, Orphan_unconfirmed r -> String.compare l.page r.page
   | Missing_sources l, Missing_sources r -> String.compare l.page r.page
@@ -96,6 +157,11 @@ let compare_finding_payload left right =
   | Revision_log_hole l, Revision_log_hole r -> Int.compare l.missing r.missing
   | ( ( Broken_link _
       | Unsupported_link _
+      | Broken_media_embed _
+      | Broken_wiki_embed _
+      | Broken_artifact_embed _
+      | Invalid_embed _
+      | Unsupported_embed _
       | Orphan _
       | Orphan_unconfirmed _
       | Missing_sources _
@@ -134,7 +200,38 @@ let link_findings graph page =
     (Wiki_graph.links_of graph page)
 ;;
 
-let page_findings graph ~has_unreadable page =
+let embed_findings ~media_exists ~artifact_exists graph page =
+  List.filter_map
+    (fun (embed : Wiki_link.embed) ->
+       match embed.target with
+       | Wiki_link.Wiki_embed slug ->
+         if Wiki_graph.file_exists graph slug
+         then None
+         else Some (Broken_wiki_embed { page; line = embed.line; target = embed.raw })
+       | Wiki_link.Media_embed sha256 ->
+         (match media_exists with
+          | None -> None
+          | Some check ->
+            (match check sha256 with
+             | Ok true | Error _ -> None
+             | Ok false ->
+               Some (Broken_media_embed { page; line = embed.line; target = embed.raw })))
+       | Wiki_link.Artifact_embed id ->
+         (match artifact_exists with
+          | None -> None
+          | Some check ->
+            (match check id with
+             | Ok true | Error _ -> None
+             | Ok false ->
+               Some (Broken_artifact_embed { page; line = embed.line; target = embed.raw })))
+       | Wiki_link.Invalid_embed { kind = embed_kind; raw = _ } ->
+         Some (Invalid_embed { page; line = embed.line; embed_kind; target = embed.raw })
+       | Wiki_link.Unsupported_embed { scheme; raw = _ } ->
+         Some (Unsupported_embed { page; line = embed.line; scheme; target = embed.raw }))
+    (Wiki_graph.embeds_of graph page)
+;;
+
+let page_findings ~media_exists ~artifact_exists graph ~has_unreadable page =
   let source_findings =
     match Wiki_graph.sources_of graph page with
     | None -> []
@@ -152,7 +249,10 @@ let page_findings graph ~has_unreadable page =
     then [ Orphan_unconfirmed { page } ]
     else [ Orphan { page } ]
   in
-  link_findings graph page @ source_findings @ orphan_findings
+  link_findings graph page
+  @ embed_findings ~media_exists ~artifact_exists graph page
+  @ source_findings
+  @ orphan_findings
 ;;
 
 (* One finding per page, not per log line: a page four revisions behind its
@@ -235,11 +335,13 @@ let log_hole_findings graph (log : Wiki_log.t) =
       [])
 ;;
 
-let run graph ~log =
+let run ?media_exists ?artifact_exists graph ~log =
   let unreadable = Wiki_graph.unreadable_files graph in
   let has_unreadable = unreadable <> [] in
   let from_pages =
-    List.concat_map (page_findings graph ~has_unreadable) (Wiki_graph.readable_pages graph)
+    List.concat_map
+      (page_findings ~media_exists ~artifact_exists graph ~has_unreadable)
+      (Wiki_graph.readable_pages graph)
   in
   let from_files =
     List.map (fun (file, reason) -> Unreadable_page { file; reason }) unreadable

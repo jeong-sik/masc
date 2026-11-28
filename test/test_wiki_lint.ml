@@ -16,7 +16,12 @@ module Sources = Masc.Wiki_sources
 
 let readable ?(revision = 1) ~page body =
   G.Readable
-    { page; links = Link.extract body; sources = Sources.of_body body; revision }
+    { page
+    ; links = Link.extract body
+    ; embeds = Link.extract_embeds body
+    ; sources = Sources.of_body body
+    ; revision
+    }
 ;;
 
 let no_log = Log.empty
@@ -29,6 +34,17 @@ let describe findings =
          Printf.sprintf "broken_link %s:%d %s" page line target
        | Lint.Unsupported_link { page; line; form; target } ->
          Printf.sprintf "unsupported_link %s:%d %s %s" page line form target
+       | Lint.Broken_media_embed { page; line; target } ->
+         Printf.sprintf "broken_media_embed %s:%d %s" page line target
+       | Lint.Broken_wiki_embed { page; line; target } ->
+         Printf.sprintf "broken_wiki_embed %s:%d %s" page line target
+       | Lint.Broken_artifact_embed { page; line; target } ->
+         Printf.sprintf "broken_artifact_embed %s:%d %s" page line target
+       | Lint.Invalid_embed { page; line; embed_kind; target } ->
+         Printf.sprintf "invalid_embed %s:%d %s %s" page line
+           (Link.embed_kind_to_string embed_kind) target
+       | Lint.Unsupported_embed { page; line; scheme; target } ->
+         Printf.sprintf "unsupported_embed %s:%d %s %s" page line scheme target
        | Lint.Orphan { page } -> "orphan " ^ page
        | Lint.Orphan_unconfirmed { page } -> "orphan_unconfirmed " ^ page
        | Lint.Missing_sources { page } -> "missing_sources " ^ page
@@ -100,6 +116,11 @@ let test_orphan_is_confirmed_without_unreadable_pages () =
   check (list (pair string int)) "counts"
     [ "broken_link", 1
     ; "unsupported_link", 1
+    ; "broken_media_embed", 0
+    ; "broken_wiki_embed", 0
+    ; "broken_artifact_embed", 0
+    ; "invalid_embed", 0
+    ; "unsupported_embed", 0
     ; "orphan", 1
     ; "orphan_unconfirmed", 0
     ; "missing_sources", 1
@@ -552,6 +573,110 @@ let test_report_says_when_a_dropped_line_turned_the_hole_check_off () =
     Yojson.Safe.Util.(to_int (member "revision_log_hole" (member "counts" clean)))
 ;;
 
+let test_wiki_embed_counts_toward_incoming_and_self_does_not () =
+  let nodes =
+    [ readable ~page:"alpha" ("![[wiki:beta|Beta]] and ![[alpha]]\n" ^ sourced)
+    ; readable ~page:"beta" ("![[alpha]]\n" ^ sourced)
+    ]
+  in
+  let graph = G.of_nodes nodes in
+  check int "alpha incoming from beta embed" 1 (G.incoming graph "alpha");
+  check int "beta incoming from alpha embed" 1 (G.incoming graph "beta");
+  check (list string) "no orphan findings" [] (describe (Lint.run graph ~log:no_log));
+  let self_only = G.of_nodes [ readable ~page:"solo" ("![[wiki:solo]]\n" ^ sourced) ] in
+  check int "self embed does not count" 0 (G.incoming self_only "solo");
+  check (list string) "self-only page is orphan" [ "orphan solo" ]
+    (describe (Lint.run self_only ~log:no_log))
+;;
+
+let test_embed_lint_findings_and_report_fields () =
+  let live_sha = String.make 64 'a' in
+  let dead_sha = String.make 64 'b' in
+  let live_art = "artifact-0123456789abcdef0123456789abcdef" in
+  let dead_art = "artifact-fedcba9876543210fedcba9876543210" in
+  let body =
+    String.concat
+      "\n"
+      [ Printf.sprintf "![ok](/api/v1/media/%s)" live_sha
+      ; Printf.sprintf "![gone](/api/v1/media/%s)" dead_sha
+      ; "![[wiki:beta]] and ![[wiki:missing-page]]"
+      ; Printf.sprintf "![[artifact:%s]] ![[artifact:%s]]" live_art dead_art
+      ; "![[media:bad-hex]] ![[custom:foo]]"
+      ; sourced
+      ]
+  in
+  let nodes =
+    [ readable ~page:"alpha" body
+    ; readable ~page:"beta" ("See [alpha](alpha.md).\n" ^ sourced)
+    ]
+  in
+  let graph = G.of_nodes nodes in
+  let findings =
+    Lint.run
+      ~media_exists:(fun sha256 -> Ok (String.equal live_sha sha256))
+      ~artifact_exists:(fun id -> Ok (String.equal live_art id))
+      graph
+      ~log:no_log
+  in
+  (* A store read error must not be misreported as a broken embed. *)
+  let findings_on_store_err =
+    Lint.run
+      ~media_exists:(fun _ -> Error "attachment metadata unreadable")
+      ~artifact_exists:(fun _ -> Error "disk read failed")
+      graph
+      ~log:no_log
+  in
+  check bool "artifact store read error does not emit broken_artifact_embed" false
+    (List.exists
+       (function Lint.Broken_artifact_embed _ -> true | _ -> false)
+       findings_on_store_err);
+  check bool "media store read error does not emit broken_media_embed" false
+    (List.exists
+       (function Lint.Broken_media_embed _ -> true | _ -> false)
+       findings_on_store_err);
+  check (list string) "embed findings"
+    [ Printf.sprintf "broken_media_embed alpha:2 /api/v1/media/%s" dead_sha
+    ; "broken_wiki_embed alpha:3 ![[wiki:missing-page]]"
+    ; Printf.sprintf "broken_artifact_embed alpha:4 ![[artifact:%s]]" dead_art
+    ; "invalid_embed alpha:5 media ![[media:bad-hex]]"
+    ; "unsupported_embed alpha:5 custom ![[custom:foo]]"
+    ]
+    (describe findings);
+  (* Omitting external predicates still checks wiki/invalid/unsupported embeds. *)
+  let pure_only = Lint.run graph ~log:no_log in
+  check (list string) "omitted external predicates"
+    [ "broken_wiki_embed alpha:3 ![[wiki:missing-page]]"
+    ; "invalid_embed alpha:5 media ![[media:bad-hex]]"
+    ; "unsupported_embed alpha:5 custom ![[custom:foo]]"
+    ]
+    (describe pure_only);
+  (* Report JSON preserves subject/page/line/target and supports kind filter. *)
+  let req : Report.request = { page = None; kind = None; limit = None; cursor = None } in
+  let report =
+    match Report.render ~pages_total:2 ~pages_unreadable:0 ~log:no_log ~findings req with
+    | Ok json -> json
+    | Error problem -> fail (Report.problem_to_string problem)
+  in
+  let rendered = Yojson.Safe.Util.(to_list (member "findings" report)) in
+  check int "five rendered embed findings" 5 (List.length rendered);
+  List.iter
+    (fun item ->
+       let open Yojson.Safe.Util in
+       check string "subject is page" "alpha" (to_string (member "subject" item));
+       check string "page is alpha" "alpha" (to_string (member "page" item));
+       check bool "line > 0" true (to_int (member "line" item) > 0);
+       check bool "target nonblank" true (String.trim (to_string (member "target" item)) <> ""))
+    rendered;
+  match
+    Report.render ~pages_total:2 ~pages_unreadable:0 ~log:no_log ~findings
+      { req with kind = Some "broken_media_embed" }
+  with
+  | Ok filtered ->
+    check int "kind filter matches broken_media_embed" 1
+      Yojson.Safe.Util.(to_int (member "matched" filtered))
+  | Error problem -> fail (Report.problem_to_string problem)
+;;
+
 let () =
   run
     "wiki_lint"
@@ -579,6 +704,10 @@ let () =
             test_links_to_an_unreadable_page_are_not_broken
         ; test_case "self link and index do not count" `Quick
             test_self_link_and_index_do_not_count
+        ; test_case "wiki embed counts toward incoming and self does not" `Quick
+            test_wiki_embed_counts_toward_incoming_and_self_does_not
+        ; test_case "embed lint findings and report fields" `Quick
+            test_embed_lint_findings_and_report_fields
         ; test_case "hearsay only" `Quick test_hearsay_only
         ; test_case "node order does not matter" `Quick
             test_node_order_does_not_change_the_findings

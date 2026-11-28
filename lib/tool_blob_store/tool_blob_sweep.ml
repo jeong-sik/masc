@@ -769,10 +769,21 @@ let is_skippable_scan_name name =
   || Fs_compat.is_lock_name name
 ;;
 
+(* A scanned text keeps an attachment blob alive when it names the blob as a
+   canonical [att_<64hex>] anywhere, or by the bare [/api/v1/media/<64hex>] or
+   [![[media:<64hex>]]] form. The wiki lint accepts the bare forms and the
+   media route serves them from this store first. *)
+let referenced_attachment_sha256s text =
+  List.fold_left
+    (fun live sha256 -> String_set.add sha256 live)
+    (Attachment_store.referenced_sha256_of_json_text text)
+    (Media_ref_scan.extract_bare_media_digests text)
+;;
+
 let scan_file_for_attachments ~base_path path (live, scanned) =
   match Fs_compat.load_owned_regular_file ~ownership_root:base_path path with
   | Ok (Some payload) ->
-    let found = Attachment_store.referenced_sha256_of_json_text payload in
+    let found = referenced_attachment_sha256s payload in
     Ok (String_set.union live found, scanned + 1)
   | Ok None -> Ok (live, scanned)
   | Error err ->
@@ -812,11 +823,53 @@ let rec walk_for_attachments ~base_path path acc =
     Ok acc
 ;;
 
+let scan_blob_bodies_for_attachments ~base_path ~roots (live, scanned) =
+  let open Result.Syntax in
+  let blob_store = Tool_blob_store.create ~base_path in
+  let* referenced_blob_sha256s =
+    List.fold_left
+      (fun acc_res root ->
+         let* acc = acc_res in
+         let* sha256s =
+           Tool_blob_maintenance.live_sha256s_in_tree ~base_path ~root
+           |> Result.map_error Tool_blob_maintenance.error_to_string
+         in
+         Ok (List.fold_left (fun s h -> String_set.add h s) acc sha256s))
+      (Ok String_set.empty)
+      roots
+  in
+  String_set.fold
+    (fun sha256 acc_res ->
+       let* live, scanned = acc_res in
+       match
+         Tool_blob_store.fetch_bounded
+           blob_store
+           ~sha256
+           ~max_bytes:Tool_blob_store.max_served_bytes
+       with
+       | Ok (Some body) ->
+         let found = referenced_attachment_sha256s body in
+         Ok (String_set.union live found, scanned + 1)
+       | Ok None ->
+         Error
+           (Printf.sprintf
+              "attachment reachability missing tool blob body %s referenced by durable records"
+              sha256)
+       | Error err ->
+         Error
+           (Printf.sprintf
+              "attachment reachability failed reading tool blob body %s: %s"
+              sha256
+              (Tool_blob_store.fetch_error_to_string err)))
+    referenced_blob_sha256s
+    (Ok (live, scanned))
+;;
+
 let scan_attachment_reachability ~base_path ~scope =
   let open Result.Syntax in
   let store = Attachment_store.create ~base_path in
   let* blobs = Attachment_store.list_all_blobs store in
-  let consumer_roots = Tool_blob_maintenance.consumer_paths scope ~base_path in
+  let consumer_roots = Tool_blob_maintenance.attachment_consumer_paths scope ~base_path in
   let config_keepers_dir = scope.Tool_blob_maintenance.config_keepers_dir ~base_path in
   let all_roots = config_keepers_dir :: consumer_roots in
   let* live_from_files, scanned_files =
@@ -826,6 +879,13 @@ let scan_attachment_reachability ~base_path ~scope =
          walk_for_attachments ~base_path root acc)
       (Ok (String_set.empty, 0))
       all_roots
+  in
+  let blob_body_roots = Tool_blob_maintenance.blob_body_consumer_paths scope ~base_path in
+  let* live_from_files, scanned_files =
+    scan_blob_bodies_for_attachments
+      ~base_path
+      ~roots:blob_body_roots
+      (live_from_files, scanned_files)
   in
   let* ephemeral_pins = Attachment_store.list_all_ephemeral_pins store in
   let live_sha256s = String_set.union live_from_files ephemeral_pins in

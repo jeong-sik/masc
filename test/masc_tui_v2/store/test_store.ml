@@ -18416,6 +18416,48 @@ let test_timeout_detail_retryable_and_update_parity () =
         "Response timed out (30.0s · /api/v1/infra/sandboxes/probe)"
         (Say.resolve Say.Lang_en toast.message))
 
+(* A turn record keeps a block's sha256; the capture keeps the last
+   assembly's text. A block reads the captured text only when both the id
+   and the digest match. *)
+let test_prompt_block_text_joins_by_digest () =
+  let capture =
+    match
+      Wire_keeper_context.decode_last_prompt_capture
+        (Yojson.Safe.from_string
+           {|{"keeper":"k","captured_at":1.0,"trace_id":"t","absolute_turn":3,
+              "blocks":[{"id":"keeper_instructions","bytes":5,"text":"hello"}]}|})
+    with
+    | Ok capture -> capture
+    | Error e -> Alcotest.fail e
+  in
+  let hello = "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824" in
+  let block id digest : Turn_record.prompt_block =
+    { block = id; bytes = 5; digest }
+  in
+  (match
+     Keeper_context_store.block_text_in_capture capture
+       (block Prompt_block_id.Keeper_instructions hello)
+   with
+  | Keeper_context_store.Block_text "hello" -> ()
+  | Keeper_context_store.Block_text _ | Keeper_context_store.Block_text_differs
+  | Keeper_context_store.Block_text_not_captured ->
+      Alcotest.fail "the same id and digest read the captured text");
+  (match
+     Keeper_context_store.block_text_in_capture capture
+       (block Prompt_block_id.Keeper_instructions (String.make 64 'a'))
+   with
+  | Keeper_context_store.Block_text_differs -> ()
+  | Keeper_context_store.Block_text _
+  | Keeper_context_store.Block_text_not_captured ->
+      Alcotest.fail "another digest never reads this text");
+  match
+    Keeper_context_store.block_text_in_capture capture
+      (block Prompt_block_id.Dynamic_context hello)
+  with
+  | Keeper_context_store.Block_text_not_captured -> ()
+  | Keeper_context_store.Block_text _ | Keeper_context_store.Block_text_differs ->
+      Alcotest.fail "a block the capture lacks is not captured"
+
 let test_lazy_keeper_context_fetches_and_sidebar_workspace_discovery () =
   let keeper = "alpha" in
   let tr_json =
@@ -18547,6 +18589,18 @@ let test_lazy_keeper_context_fetches_and_sidebar_workspace_discovery () =
     (has_get is_provider_in cmds_resp);
   Alcotest.(check bool) "Ctx_response skips cache-outcome" false
     (has_get is_cache_out cmds_resp);
+  (* 4b. Ctx_prompt_blocks reads the keeper's last prompt capture and nothing per turn *)
+  let is_last_prompt = function Cmd.Get_keeper_last_prompt _ -> true | _ -> false in
+  let cmds_blocks =
+    View_fetches.fetches_for_current_view
+      (model_for_subtab Keeper_context_store.Ctx_prompt_blocks)
+  in
+  Alcotest.(check bool) "Ctx_prompt_blocks requests last-prompt" true
+    (has_get is_last_prompt cmds_blocks);
+  Alcotest.(check bool) "Ctx_prompt_blocks skips provider-input" false
+    (has_get is_provider_in cmds_blocks);
+  Alcotest.(check bool) "Ctx_composition skips last-prompt" false
+    (has_get is_last_prompt cmds_comp);
   (* 5. Ctrl+T Drawer_context still fetches next-request + cache-outcome without provider-input/transcript *)
   let m_dive, _ =
     Update_nav.jump_to_keeper ~preserve_return:false ~zoomed:true
@@ -25158,6 +25212,8 @@ let () =
           Alcotest.test_case
             "Lazy Keeper Context fetches per subtab & sidebar/palette Workspace/Repos discovery"
             `Quick test_lazy_keeper_context_fetches_and_sidebar_workspace_discovery;
+          Alcotest.test_case "prompt block text joins the capture by digest"
+            `Quick test_prompt_block_text_joins_by_digest;
           Alcotest.test_case
             "Wave 4 Layer 1: SSE context auto-refresh, live retry/checkpoint stream & /ctl keeper control"
             `Quick

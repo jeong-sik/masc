@@ -3853,7 +3853,11 @@ let test_wave2_keeper_context_tool_calls_and_schedules () =
              || contains_sub ~needle:"BYTES" txt)
       | Keeper_context_store.Ctx_response ->
           Alcotest.(check bool) "Response subtab renders" true
-            (contains_sub ~needle:"Response" txt || contains_sub ~needle:"Transcript" txt))
+            (contains_sub ~needle:"Response" txt || contains_sub ~needle:"Transcript" txt)
+      | Keeper_context_store.Ctx_prompt_blocks ->
+          Alcotest.(check bool) "Prompt blocks subtab lists the turn's blocks" true
+            (contains_sub ~needle:"assembly order" txt
+             || contains_sub ~needle:"조립 순서" txt))
     Keeper_context_store.all_context_subtabs;
   (* 401/403 permission notice on Exact_input renders gracefully without crashing *)
   let m_denied =

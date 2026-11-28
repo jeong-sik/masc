@@ -161,22 +161,25 @@ let max_upload_bytes_for_mime mime =
   else max_non_video_upload_bytes
 
 let extension_of_mime mime =
-  match normalize_mime mime with
-  | "image/png" -> ".png"
-  | "image/jpeg" -> ".jpg"
-  | "image/webp" -> ".webp"
-  | "image/gif" -> ".gif"
-  | "application/pdf" -> ".pdf"
-  | "audio/mpeg" -> ".mp3"
-  | "audio/wav" -> ".wav"
-  | "audio/ogg" -> ".ogg"
-  | "audio/midi" -> ".mid"
-  | "audio/mp4" -> ".m4a"
-  | "audio/webm" -> ".webm"
-  | "video/mp4" -> ".mp4"
-  | "video/webm" -> ".webm"
-  | "video/quicktime" -> ".mov"
-  | _ -> ".bin"
+  let mime = normalize_mime mime in
+  match Document_format.of_wire_mime mime with
+  | Some format -> Document_format.extension format
+  | None ->
+    (match mime with
+     | "image/png" -> ".png"
+     | "image/jpeg" -> ".jpg"
+     | "image/webp" -> ".webp"
+     | "image/gif" -> ".gif"
+     | "audio/mpeg" -> ".mp3"
+     | "audio/wav" -> ".wav"
+     | "audio/ogg" -> ".ogg"
+     | "audio/midi" -> ".mid"
+     | "audio/mp4" -> ".m4a"
+     | "audio/webm" -> ".webm"
+     | "video/mp4" -> ".mp4"
+     | "video/webm" -> ".webm"
+     | "video/quicktime" -> ".mov"
+     | _ -> ".bin")
 
 let extension_mime_opt filename =
   let ext = String.lowercase_ascii (Filename.extension filename) in
@@ -628,16 +631,21 @@ let format_bytes_short n =
   else if n < 1024 * 1024 then Printf.sprintf "%dKB" ((n + 511) / 1024)
   else Printf.sprintf "%.1fMB" (float_of_int n /. (1024.0 *. 1024.0))
 
+let document_chip_label mime =
+  match Document_format.of_wire_mime (normalize_mime mime) with
+  | Some format ->
+      (* [extension] always starts with its dot. *)
+      let extension = Document_format.extension format in
+      String.sub extension 1 (String.length extension - 1)
+  | None -> "file"
+
 let format_chip (a : t) =
   let prefix =
     match a.kind with
     | Kind_image -> "img"
     | Kind_audio -> "audio"
     | Kind_video -> "video"
-    | Kind_document ->
-        if String.equal (String.lowercase_ascii a.mime_type) "application/pdf"
-        then "pdf"
-        else "file"
+    | Kind_document -> document_chip_label a.mime_type
   in
   let name =
     match a.filename with

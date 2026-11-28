@@ -187,6 +187,8 @@ let normalize_mime_header raw =
   String.lowercase_ascii (String.trim base)
 ;;
 
+let mime_of_string raw = supported_mime_of_normalized (normalize_mime_header raw)
+
 let is_forbidden_declared_mime normalized =
   match normalized with
   | "image/svg+xml"

@@ -126,3 +126,8 @@ val format_bytes_short : int -> string
 val format_chip : t -> string
 (** Compact chip label for composer tray and metadata captions, e.g.
     ["[img: screenshot.png 1280x720]"] or ["[pdf: report.pdf 42 KB]"]. *)
+
+val document_chip_label : string -> string
+(** The chip label of a document with this MIME type: its format's extension
+    without the dot ([pdf], [docx], [hwp]), or [file] for a type outside
+    {!Document_format}. *)

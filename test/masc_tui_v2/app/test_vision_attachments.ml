@@ -219,7 +219,25 @@ let test_wire_attachment_sniff_and_paths () =
       check (option int) "decoded width" (Some 640) att.width;
       check (option int) "decoded height" (Some 480) att.height;
       check string "format_chip includes name & dims"
-        "[img: cap.png 640x480]" (Wire_attachment.format_chip att)
+        "[img: cap.png 640x480]" (Wire_attachment.format_chip att);
+      (* Document chips name the format the server stored, not a file name. *)
+      check (list string) "document chip labels"
+        [ "pdf"; "docx"; "hwp"; "hwpx"; "file" ]
+        (List.map Wire_attachment.document_chip_label
+           [ "Application/PDF";
+             "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+             "application/x-hwp";
+             "application/hwp+zip";
+             "application/zip" ]);
+      (* A document without a file name is named by its format. *)
+      check (list string) "document extensions"
+        [ ".pdf"; ".docx"; ".hwp"; ".png"; ".bin" ]
+        (List.map Wire_attachment.extension_of_mime
+           [ "application/pdf";
+             "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+             "application/x-hwp";
+             "image/png";
+             "application/zip" ])
 
 (* --- 2. Wire_fleet: user_blocks + attachment_id, SSE media, history --- *)
 

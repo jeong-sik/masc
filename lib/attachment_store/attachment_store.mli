@@ -100,6 +100,11 @@ type supported_mime =
   | Video_quicktime
 
 val mime_to_string : supported_mime -> string
+
+val mime_of_string : string -> supported_mime option
+(** The inverse of {!mime_to_string}, after trimming, lowercasing and dropping
+    parameters. It also reads the aliases clients send ([image/jpg],
+    [audio/mp3], ...). *)
 val media_kind_of_mime : supported_mime -> media_kind
 val extension_of_mime : supported_mime -> string
 

@@ -125,7 +125,9 @@ type resource_media = Resource_image | Resource_audio | Resource_pdf
 
 (* MCP's ResourceContent has no modality tag. Decode only the declared MIME
    forms our existing image and H5 readers carry. Other blobs remain binary
-   resources; a URI supplies no authority to reinterpret them as documents. *)
+   resources; a URI supplies no authority to reinterpret them as documents.
+   Of the nine document formats only a PDF becomes a document block here;
+   the other eight stay binary resources. *)
 let resource_media media_type =
   let mime = Tool_blob_media_store.blob_mime media_type |> String.lowercase_ascii in
   if List.mem mime Runtime_official_client_tool.official_client_image_media_types
@@ -134,8 +136,10 @@ let resource_media media_type =
     | "audio/wav" | "audio/x-wav" | "audio/wave" | "audio/mpeg" | "audio/mp3"
     | "audio/ogg" | "audio/flac" | "audio/mp4" | "audio/m4a" | "audio/x-m4a"
     | "audio/webm" -> Some Resource_audio
-    | "application/pdf" -> Some Resource_pdf
-    | _ -> None
+    | other ->
+      (match Document_format.of_wire_mime other with
+       | Some Pdf -> Some Resource_pdf
+       | Some (Hwp | Hwpx | Doc | Docx | Xls | Xlsx | Ppt | Pptx) | None -> None)
 
 let project_item = function
   | Mcp.TextContent { text; _ } -> Ok (text, [ Native_block (P.Text text) ])

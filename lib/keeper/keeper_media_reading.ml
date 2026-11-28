@@ -232,11 +232,12 @@ let production_readers ~base_path ~kind ~media_type =
        in
        Ok (reader ~identity ~read:(transcribe_bytes prepared ~media_type)))
   | Document ->
-    if String.lowercase_ascii media_type = "application/pdf"
-    then
-      Ok (reader ~identity:{ id = "builtin.pdf_text"; revision = "1" }
-        ~read:(extract_pdf ~base_path))
-    else Error No_matching_reader
+    (match Document_format.of_wire_mime (String.lowercase_ascii media_type) with
+     | Some Pdf ->
+       Ok (reader ~identity:{ id = "builtin.pdf_text"; revision = "1" }
+         ~read:(extract_pdf ~base_path))
+     | Some (Hwp | Hwpx | Doc | Docx | Xls | Xlsx | Ppt | Pptx) | None ->
+       Error No_matching_reader)
 ;;
 
 let media_error_reason : Agent_core.History.media_error -> string = function

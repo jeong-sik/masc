@@ -846,10 +846,19 @@ let test_post_admission_defers_the_policy_update () =
     let posted, updated =
       queue_on_persistence ~sw
         ~while_queued:(fun () ->
-          let policy = board_result_exn
-              (Board_dispatch.get_sub_board ~reader:Masc_board_handlers.Board_access.Operator ~sub_board_id:"admitted-policy") in
-          Alcotest.(check bool) "a waiting update has not changed policy" true
-            (policy.access = Board.Open))
+          (* This fiber holds persistence here, and a Dispatch read of a
+             sub-board waits for persistence (#55207), so it would wait for
+             itself (#55462). The state lock alone shows what the queued
+             update has done to the policy. *)
+          match
+            List.find_opt
+              (fun (board : Board.sub_board) -> String.equal board.slug "admitted-policy")
+              (Board.list_sub_boards (Board.global ()))
+          with
+          | None -> Alcotest.fail "the policy board is not in the model"
+          | Some policy ->
+            Alcotest.(check bool) "a waiting update has not changed policy" true
+              (policy.access = Board.Open))
         (fun () -> policy_post "admitted-policy")
         (fun () ->
           Board_dispatch.update_sub_board ~reader:Masc_board_handlers.Board_access.Operator ~sub_board_id:"admitted-policy"

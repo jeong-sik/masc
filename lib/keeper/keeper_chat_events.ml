@@ -61,7 +61,7 @@ type runtime_attempt_scope_disposition =
   | Preserve_previous_scope
   | Abandon_previous_scope
 
-type tool_stream_occurrence =
+type tool_stream_occurrence = Ag_ui.tool_stream_occurrence =
   { stream_scope : int
   ; provider_message_id : string option
   ; block_index : int

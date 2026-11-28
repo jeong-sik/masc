@@ -81,9 +81,8 @@ let custom_event_name_to_string = function
   | Native_tool_progress -> "KEEPER_NATIVE_TOOL_PROGRESS"
 
 let custom ~timestamp state name value =
-  Ag_ui.make_event ~timestamp ~thread_id:state.thread_id ~run_id:state.run_id
-    ~custom_name:(Some (custom_event_name_to_string name))
-    ~custom_value:(Some value) Ag_ui.Custom
+  Ag_ui.custom ~timestamp ~thread_id:state.thread_id ?run_id:state.run_id
+    ~name:(custom_event_name_to_string name) value
 
 let reply_details_to_json
     (event : Keeper_chat_events.reply_details) =
@@ -200,27 +199,24 @@ let project ?base_path ~timestamp ~redact_text state event =
       let state = { state with thread_id; run_id = Some run_id } in
       ( state
       , Some
-          (Ag_ui.make_event ~timestamp ~thread_id ~run_id:(Some run_id)
-             Ag_ui.Run_started) )
+          (Ag_ui.run_started ~timestamp ~thread_id ~run_id ()) )
   | Text_message_start { message_id; role } ->
       let state = { state with message_id = Some message_id } in
       ( state
       , Some
-          (Ag_ui.make_event ~timestamp ~thread_id:state.thread_id
-             ~run_id:state.run_id ~message_id:(Some message_id)
-             ~role:(Some (ag_role role)) Ag_ui.Text_message_start) )
+          (Ag_ui.text_message_start ~timestamp ~thread_id:state.thread_id
+             ?run_id:state.run_id ~message_id ~role:(ag_role role) ()) )
   | Text_delta {text; response} ->
       ( state
       , Some
-          (Ag_ui.make_event ~timestamp ~thread_id:state.thread_id
-             ~run_id:state.run_id ~message_id:state.message_id
-             ~delta:(Some text) ~text_response:response Ag_ui.Text_message_content) )
+          (Ag_ui.text_message_content ~timestamp ~thread_id:state.thread_id
+             ?run_id:state.run_id ?message_id:state.message_id
+             ~text_response:response ~delta:text ()) )
   | Text_message_end ->
       ( state
       , Some
-          (Ag_ui.make_event ~timestamp ~thread_id:state.thread_id
-             ~run_id:state.run_id ~message_id:state.message_id
-             Ag_ui.Text_message_end) )
+          (Ag_ui.text_message_end ~timestamp ~thread_id:state.thread_id
+             ?run_id:state.run_id ?message_id:state.message_id ()) )
   | External_effect_completed { target } ->
       (* A typed target names the real destination so the dashboard stops
          assuming an external connector (#28374). *)
@@ -348,13 +344,8 @@ let project ?base_path ~timestamp ~redact_text state event =
   | Tool_call_start { occurrence; tool_call_id; tool_call_name } ->
       ( state
       , Some
-          (Ag_ui.make_event ~timestamp ~thread_id:state.thread_id
-             ~run_id:state.run_id ~tool_call_id
-             ~tool_call_name:(Some tool_call_name)
-             ~tool_stream_scope:(Some occurrence.stream_scope)
-             ~provider_message_id:occurrence.provider_message_id
-             ~tool_call_block_index:(Some occurrence.block_index)
-             Ag_ui.Tool_call_start) )
+          (Ag_ui.tool_call_start ~timestamp ~thread_id:state.thread_id
+             ?run_id:state.run_id ?tool_call_id ~tool_call_name occurrence) )
   | Tool_call_admitted { occurrence; tool_call_id; provider_tool_name; tool_call_name } ->
       state, Some (custom ~timestamp state Tool_call_admitted
         (`Assoc ([ "toolStreamScope", `Int occurrence.stream_scope
@@ -366,30 +357,18 @@ let project ?base_path ~timestamp ~redact_text state event =
   | Tool_call_args { occurrence; tool_call_id; delta } ->
       ( state
       , Some
-          (Ag_ui.make_event ~timestamp ~thread_id:state.thread_id
-             ~run_id:state.run_id ~tool_call_id
-             ~tool_stream_scope:(Some occurrence.stream_scope)
-             ~provider_message_id:occurrence.provider_message_id
-             ~tool_call_block_index:(Some occurrence.block_index)
-             ~delta:(Some delta) Ag_ui.Tool_call_args) )
+          (Ag_ui.tool_call_args ~timestamp ~thread_id:state.thread_id
+             ?run_id:state.run_id ?tool_call_id occurrence (Ag_ui.Arguments_delta delta)) )
   | Tool_call_args_snapshot { occurrence; tool_call_id; snapshot } ->
       ( state
       , Some
-          (Ag_ui.make_event ~timestamp ~thread_id:state.thread_id
-             ~run_id:state.run_id ~tool_call_id
-             ~tool_stream_scope:(Some occurrence.stream_scope)
-             ~provider_message_id:occurrence.provider_message_id
-             ~tool_call_block_index:(Some occurrence.block_index)
-             ~snapshot:(Some (`String snapshot)) Ag_ui.Tool_call_args) )
+          (Ag_ui.tool_call_args ~timestamp ~thread_id:state.thread_id
+             ?run_id:state.run_id ?tool_call_id occurrence (Ag_ui.Arguments_snapshot snapshot)) )
   | Tool_call_end { occurrence; tool_call_id } ->
       ( state
       , Some
-          (Ag_ui.make_event ~timestamp ~thread_id:state.thread_id
-             ~run_id:state.run_id ~tool_call_id
-             ~tool_stream_scope:(Some occurrence.stream_scope)
-             ~provider_message_id:occurrence.provider_message_id
-             ~tool_call_block_index:(Some occurrence.block_index)
-             Ag_ui.Tool_call_end) )
+          (Ag_ui.tool_call_end ~timestamp ~thread_id:state.thread_id
+             ?run_id:state.run_id ?tool_call_id occurrence) )
   | Tool_approval_requested { tool_call_id; approval_id; tool_call_name; args; question; because } ->
       ( state
       , Some
@@ -468,13 +447,10 @@ let project ?base_path ~timestamp ~redact_text state event =
   | Event_error { message } ->
       ( state
       , Some
-          (Ag_ui.make_event ~timestamp ~thread_id:state.thread_id
-             ~run_id:state.run_id ~message:(Some message)
-             ~code:(Some public_error_code)
-             Ag_ui.Run_error) )
+          (Ag_ui.run_error ~timestamp ~thread_id:state.thread_id
+             ?run_id:state.run_id ~message ~code:public_error_code ()) )
   | Run_finished { run_id } ->
       let state = { state with run_id = Some run_id } in
       ( state
       , Some
-          (Ag_ui.make_event ~timestamp ~thread_id:state.thread_id
-             ~run_id:(Some run_id) Ag_ui.Run_finished) )
+          (Ag_ui.run_finished ~timestamp ~thread_id:state.thread_id ~run_id ()) )

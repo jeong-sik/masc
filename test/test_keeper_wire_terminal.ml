@@ -110,10 +110,10 @@ let test_same_request_id_keeps_keeper_wire_audiences_separate () =
     match !observed, error_entries (read_journal ~base_path ~keeper_name ~operation_id) with
     | [event], [{ Journal.seq = 0; event = Events.Event_error { message }; _ }] ->
       check string "each Keeper journal carries a safe terminal" Events.public_error_message message;
-      let expected = Ag_ui.make_event ~timestamp:event.Ag_ui.timestamp
+      let expected = Ag_ui.run_error ~timestamp:event.Ag_ui.timestamp
         ~thread_id:("keeper:" ^ keeper_name)
-        ~run_id:(Some ("keeper-operation-run-" ^ operation_id))
-        ~message:(Some message) ~code:(Some Events.public_error_code) Ag_ui.Run_error in
+        ~run_id:("keeper-operation-run-" ^ operation_id)
+        ~message ~code:Events.public_error_code () in
       check string "wire carries only its Keeper's payload"
         (Ag_ui.event_to_sse expected) (Ag_ui.event_to_sse event)
     | _ -> fail "each Keeper must own one independent terminal and seq-zero journal")

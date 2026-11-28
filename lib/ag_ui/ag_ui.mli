@@ -67,43 +67,103 @@ type event = private {
   timestamp : float;
 }
 
-val make_event :
-  ?timestamp:float ->
-  ?run_id:string option ->
-  ?message_id:string option ->
-  ?role:role option ->
-  ?delta:string option ->
-  ?tool_call_id:string option ->
-  ?tool_call_name:string option ->
-  ?text_response:text_response ->
-  ?tool_stream_scope:int option ->
-  ?provider_message_id:string option ->
-  ?tool_call_block_index:int option ->
-  ?snapshot:Yojson.Safe.t option ->
-  ?message:string option ->
-  ?code:string option ->
-  ?custom_name:string option ->
-  ?custom_value:Yojson.Safe.t option ->
-  thread_id:string ->
-  event_type ->
-  event
-(** Construct an [event] with sensible defaults. [timestamp] defaults to
-    [Time_compat.now ()] at call time.
+(** {1 Constructors}
 
-    [Run_error] requires a non-empty [message]. [message] and [code] are
-    rejected for every other event type so the Custom [value] envelope cannot
-    become a second RUN_ERROR wire contract. *)
+    One constructor per frame kind. Each takes only the fields that kind
+    carries on the wire (lib/keeper_chat_wire/keeper_chat_wire.atd), so a
+    frame without a required field cannot be built. [timestamp] defaults to
+    [Time_compat.now ()] at call time. *)
+
+type tool_stream_occurrence =
+  { stream_scope : int
+  ; provider_message_id : string option
+  ; block_index : int
+  }
+(** The streamed tool call a [TOOL_CALL_*] frame names. *)
+
+type tool_call_arguments =
+  | Arguments_delta of string
+  | Arguments_snapshot of string
+      (** The whole arguments text so far, sent as a JSON string. *)
+
+val run_started :
+  ?timestamp:float -> thread_id:string -> run_id:string -> unit -> event
+
+val run_finished :
+  ?timestamp:float -> thread_id:string -> run_id:string -> unit -> event
 
 val run_error :
+  ?timestamp:float ->
   thread_id:string ->
   ?run_id:string ->
   message:string ->
   ?code:string ->
   unit ->
   event
-(** Construct a spec-compliant [Run_error] event. This is the concise public
-    path for lifecycle failures; Custom [name]/[value] fields are unavailable
-    by construction. *)
+(** @raise Invalid_argument when [message] is blank. *)
+
+val text_message_start :
+  ?timestamp:float ->
+  thread_id:string ->
+  ?run_id:string ->
+  message_id:string ->
+  role:role ->
+  unit ->
+  event
+
+val text_message_content :
+  ?timestamp:float ->
+  thread_id:string ->
+  ?run_id:string ->
+  ?message_id:string ->
+  ?text_response:text_response ->
+  delta:string ->
+  unit ->
+  event
+(** [text_response] defaults to [Unobserved_scope None]. *)
+
+val text_message_end :
+  ?timestamp:float ->
+  thread_id:string ->
+  ?run_id:string ->
+  ?message_id:string ->
+  unit ->
+  event
+
+val tool_call_start :
+  ?timestamp:float ->
+  thread_id:string ->
+  ?run_id:string ->
+  ?tool_call_id:string ->
+  tool_call_name:string ->
+  tool_stream_occurrence ->
+  event
+
+val tool_call_args :
+  ?timestamp:float ->
+  thread_id:string ->
+  ?run_id:string ->
+  ?tool_call_id:string ->
+  tool_stream_occurrence ->
+  tool_call_arguments ->
+  event
+
+val tool_call_end :
+  ?timestamp:float ->
+  thread_id:string ->
+  ?run_id:string ->
+  ?tool_call_id:string ->
+  tool_stream_occurrence ->
+  event
+
+val custom :
+  ?timestamp:float ->
+  thread_id:string ->
+  ?run_id:string ->
+  name:string ->
+  Yojson.Safe.t ->
+  event
+(** A [CUSTOM] frame. [name] says what the value holds. *)
 
 (** {1 Serialization} *)
 
@@ -119,7 +179,7 @@ val default_thread_id : string
 (** Thread ID used by the single-namespace MASC bridge (["default"]). *)
 
 val of_custom : ?timestamp:float -> name:string -> Yojson.Safe.t -> event
-(** Wrap any MASC event in [Custom] with the given [name]/[value]. *)
+(** {!custom} on {!default_thread_id} without a run. *)
 
 (** {1 Protocol Metadata} *)
 

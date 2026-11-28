@@ -76,66 +76,101 @@ type event = {
   timestamp: float;
 }
 
-(** Create an event with defaults *)
-let make_event ?(timestamp = Time_compat.now ()) ?(run_id=None) ?(message_id=None) ?(role=None)
-    ?(delta=None) ?(tool_call_id=None)
-    ?(tool_call_name=None) ?(text_response=Unobserved_scope None) ?(tool_stream_scope=None)
-    ?(provider_message_id=None) ?(tool_call_block_index=None) ?(snapshot=None)
-    ?(message=None) ?(code=None)
-    ?(custom_name=None) ?(custom_value=None)
-    ~thread_id event_type =
-  (match event_type with
-   | Run_error ->
-     (match message with
-      | Some error_message
-        when not (String.equal (String.trim error_message) "") -> ()
-      | Some _ | None ->
-        invalid_arg "AG-UI RUN_ERROR requires a non-empty top-level message");
-     (match custom_name, custom_value with
-      | None, None -> ()
-      | Some _, _ | _, Some _ ->
-        invalid_arg "AG-UI RUN_ERROR cannot use the Custom name/value envelope")
-   | ( Run_started
-     | Run_finished
-     | Text_message_start
-     | Text_message_content
-     | Text_message_end
-     | Tool_call_start
-     | Tool_call_args
-     | Tool_call_end
-     | Custom ) ->
-     (match message, code with
-      | None, None -> ()
-      | Some _, _ | _, Some _ ->
-        invalid_arg "AG-UI message/code fields are valid only for RUN_ERROR"));
-  {
-    event_type;
-    thread_id;
-    run_id;
-    message_id;
-    role;
-    delta;
-    tool_call_id;
-    tool_call_name;
-    text_response;
-    tool_stream_scope;
-    provider_message_id;
-    tool_call_block_index;
-    snapshot;
-    message;
-    code;
-    custom_name;
-    custom_value;
-    timestamp;
+type tool_stream_occurrence =
+  { stream_scope : int
+  ; provider_message_id : string option
+  ; block_index : int
   }
 
-let run_error ~thread_id ?run_id ~message ?code () =
-  make_event
-    ~thread_id
-    ~run_id
-    ~message:(Some message)
-    ~code
-    Run_error
+type tool_call_arguments =
+  | Arguments_delta of string
+  | Arguments_snapshot of string
+
+(* Every constructor starts from a frame with no optional field set and
+   fills in only the fields its kind carries. *)
+let bare ~timestamp ~thread_id event_type =
+  { event_type
+  ; thread_id
+  ; run_id = None
+  ; message_id = None
+  ; role = None
+  ; delta = None
+  ; tool_call_id = None
+  ; tool_call_name = None
+  ; text_response = Unobserved_scope None
+  ; tool_stream_scope = None
+  ; provider_message_id = None
+  ; tool_call_block_index = None
+  ; snapshot = None
+  ; message = None
+  ; code = None
+  ; custom_name = None
+  ; custom_value = None
+  ; timestamp
+  }
+
+let run_started ?(timestamp = Time_compat.now ()) ~thread_id ~run_id () =
+  { (bare ~timestamp ~thread_id Run_started) with run_id = Some run_id }
+
+let run_finished ?(timestamp = Time_compat.now ()) ~thread_id ~run_id () =
+  { (bare ~timestamp ~thread_id Run_finished) with run_id = Some run_id }
+
+let run_error ?(timestamp = Time_compat.now ()) ~thread_id ?run_id ~message ?code () =
+  if String.equal (String.trim message) "" then
+    invalid_arg "AG-UI RUN_ERROR requires a non-empty top-level message";
+  { (bare ~timestamp ~thread_id Run_error) with run_id; message = Some message; code }
+
+let text_message_start ?(timestamp = Time_compat.now ()) ~thread_id ?run_id ~message_id ~role () =
+  { (bare ~timestamp ~thread_id Text_message_start) with
+    run_id
+  ; message_id = Some message_id
+  ; role = Some role
+  }
+
+let text_message_content ?(timestamp = Time_compat.now ()) ~thread_id ?run_id ?message_id
+    ?(text_response = Unobserved_scope None) ~delta () =
+  { (bare ~timestamp ~thread_id Text_message_content) with
+    run_id
+  ; message_id
+  ; delta = Some delta
+  ; text_response
+  }
+
+let text_message_end ?(timestamp = Time_compat.now ()) ~thread_id ?run_id ?message_id () =
+  { (bare ~timestamp ~thread_id Text_message_end) with run_id; message_id }
+
+let tool_frame ~timestamp ~thread_id ~run_id ~tool_call_id
+    (occurrence : tool_stream_occurrence) event_type =
+  { (bare ~timestamp ~thread_id event_type) with
+    run_id
+  ; tool_call_id
+  ; tool_stream_scope = Some occurrence.stream_scope
+  ; provider_message_id = occurrence.provider_message_id
+  ; tool_call_block_index = Some occurrence.block_index
+  }
+
+let tool_call_start ?(timestamp = Time_compat.now ()) ~thread_id ?run_id ?tool_call_id
+    ~tool_call_name occurrence =
+  { (tool_frame ~timestamp ~thread_id ~run_id ~tool_call_id occurrence Tool_call_start) with
+    tool_call_name = Some tool_call_name
+  }
+
+let tool_call_args ?(timestamp = Time_compat.now ()) ~thread_id ?run_id ?tool_call_id
+    occurrence arguments =
+  let frame = tool_frame ~timestamp ~thread_id ~run_id ~tool_call_id occurrence Tool_call_args in
+  match arguments with
+  | Arguments_delta delta -> { frame with delta = Some delta }
+  | Arguments_snapshot snapshot -> { frame with snapshot = Some (`String snapshot) }
+
+let tool_call_end ?(timestamp = Time_compat.now ()) ~thread_id ?run_id ?tool_call_id occurrence =
+  tool_frame ~timestamp ~thread_id ~run_id ~tool_call_id occurrence Tool_call_end
+
+let custom ?(timestamp = Time_compat.now ()) ~thread_id ?run_id ~name value =
+  { (bare ~timestamp ~thread_id Custom) with
+    run_id
+  ; custom_name = Some name
+  ; custom_value = Some value
+  }
 
 (** Serialize AG-UI event to JSON (spec-compliant field names) *)
 let event_to_json (e : event) : Yojson.Safe.t =
@@ -178,10 +213,7 @@ let default_thread_id = "default"
 
 (** Map any MASC-specific event to AG-UI CUSTOM *)
 let of_custom ?timestamp ~name (value : Yojson.Safe.t) : event =
-  make_event ?timestamp ~thread_id:default_thread_id
-    ~custom_name:(Some name)
-    ~custom_value:(Some value)
-    Custom
+  custom ?timestamp ~thread_id:default_thread_id ~name value
 
 (** Protocol version *)
 let protocol_version = "0.1.0"

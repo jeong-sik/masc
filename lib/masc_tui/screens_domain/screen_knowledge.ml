@@ -19,6 +19,20 @@ let unique_strings xs =
       end)
     xs
 
+(* The Board has no playback key: [/play] only collects chat attachments. An
+   audio row (MIDI is [audio/midi]) says so instead of looking playable. *)
+let board_attachment_chip ~lang (a : Wire_attachment.t) =
+  let chip = Wire_attachment.format_chip a in
+  match a.kind with
+  | Wire_attachment.Kind_audio ->
+      chip ^ " · "
+      ^ Say.resolve lang
+          (Say.make ~ko:"Board에서 재생 불가, 대시보드에서 열기"
+             ~en:"No playback on Board, open in dashboard")
+  | Wire_attachment.Kind_image | Wire_attachment.Kind_video
+  | Wire_attachment.Kind_document ->
+      chip
+
 let post_visibility_label ~lang = function
   | None -> ""
   | Some Wire_knowledge.Vis_public ->
@@ -201,7 +215,7 @@ let draw_board_preview ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~bp
                 else
                   let chips =
                     c.attachments
-                    |> List.map Wire_attachment.format_chip
+                    |> List.map (board_attachment_chip ~lang)
                     |> String.concat " "
                   in
                   c.body ^ "\n\n" ^ chips
@@ -482,14 +496,12 @@ let draw_board_preview ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~bp
                                   else List.map render_one lines
                             in
                             let att_rows =
-                              if c.attachments = [] then []
-                              else
-                                let chips =
-                                  c.attachments
-                                  |> List.map Wire_attachment.format_chip
-                                  |> String.concat " "
-                                in
-                                [ `Body (body_indent, `Plain chips) ]
+                              List.map
+                                (fun att ->
+                                  `Body
+                                    ( body_indent,
+                                      `Plain (board_attachment_chip ~lang att) ))
+                                c.attachments
                             in
                             `Hdr (hdr, c_age) :: (body_rows @ att_rows))
                           threaded)
@@ -610,7 +622,7 @@ let draw_board_preview ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~bp
                         ignore
                           (H.put_clipped ~grid ~clip:content ~x:content.x ~y:!y
                              ~max_w:content.w ~style:(H.accent_style ~theme ())
-                             (Wire_attachment.format_chip att));
+                             (board_attachment_chip ~lang att));
                         incr y
                       end
                   | `Divider ->

@@ -4936,6 +4936,26 @@ let test_wiki_card_scroll_matches_the_drawn_card () =
   check_max_scroll "summary only, split 220x50"
     (model ~cols:220 ~rows:50 ~zoomed:false ~pane_index:1 ~loaded:false)
 
+let test_board_audio_attachment_says_not_playable () =
+  let chip ~lang mime name =
+    match
+      Wire_attachment.decode_attachment_ref
+        (`Assoc
+          [ ("id", `String "att_1"); ("mime_type", `String mime);
+            ("name", `String name) ])
+    with
+    | Ok att -> Screen_knowledge.board_attachment_chip ~lang att
+    | Error detail -> Alcotest.fail detail
+  in
+  Alcotest.(check string) "wav"
+    "[audio: a.wav] · Board에서 재생 불가, 대시보드에서 열기"
+    (chip ~lang:Say.Lang_ko "audio/wav" "a.wav");
+  Alcotest.(check string) "midi"
+    "[audio: a.mid] · No playback on Board, open in dashboard"
+    (chip ~lang:Say.Lang_en "audio/midi" "a.mid");
+  Alcotest.(check string) "pdf keeps the plain chip" "[pdf: a.pdf]"
+    (chip ~lang:Say.Lang_ko "application/pdf" "a.pdf")
+
 let () =
   Alcotest.run "masc_tui_screens_domain"
     [
@@ -5019,5 +5039,8 @@ let () =
           Alcotest.test_case
             "Feature Wave 2: Tools 3-subview + Tool_dive, Rich HTML Artifacts & Threaded Board"
             `Quick test_wave2_tools_artifacts_board_renders;
+          Alcotest.test_case
+            "Board audio attachment line says it cannot be played" `Quick
+            test_board_audio_attachment_says_not_playable;
         ] );
     ]

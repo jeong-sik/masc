@@ -3,7 +3,7 @@
  *
  * - 6 L0 Trunks: `pulse`, `work`, `knowledge`, `keepers`, `runtime`, `infra`.
  * - 2 Rail Footer Anchors: `settings` (Admin-only), `account` (Public).
- * - Strict 2-level cap: max 5 L1 sub-tabs per workspace.
+ * - Two levels: a workspace and its L1 sub-tabs.
  * - Declarative RBAC (`public | member | admin`) aligned with `Auth_gate.decide`
  *   so non-Admin `multi_account` Workers never trigger speculative 403 fetches.
  * - Syncs canonical slash paths via URL hash (`#/work/goals`, `#/keepers/grimja/chat`)
@@ -100,7 +100,7 @@ export type AccountSubTab = (typeof ACCOUNT_SUBTABS)[number]
 
 /**
  * Locked Proposal A+ Navigation Manifest:
- * 6 L0 Trunks + 2 Rail Footer Anchors, max 5 L1 sub-tabs each.
+ * 6 L0 Trunks + 2 Rail Footer Anchors, each with its L1 sub-tabs.
  */
 export const WORKSPACE_NAV: readonly WorkspaceNavDef[] = Object.freeze([
   {

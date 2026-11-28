@@ -10,7 +10,11 @@
  *   `set`); clearing it puts the file text back (`clear`). Both are admin
  *   tools on the server, so the editor is shown only to an admin session.
  * - Overrides the server saved but does not apply (`held_back`) are listed
- *   with the server's reason above the list.
+ *   with the server's reason above the list. Clearing one removes it from
+ *   disk; the server's clear takes held-back entries too.
+ * - Transport decodes only a 2xx answer, so an answer that fails to decode is
+ *   a change the server already made: the catalog is read again and the
+ *   operator is told the answer was unreadable, not that the change failed.
  */
 
 import { html } from 'htm/preact'
@@ -120,11 +124,17 @@ export function PromptsTab(_props: WorkspaceViewProps) {
 
   const send = async (request: PromptOverrideRequest): Promise<string | null> => {
     const res = await apiMutate<OverrideApplied>('POST', '/api/v1/prompts', request, { decode: decodeOverrideApplied })
-    if (!res.ok) return res.error.message
-    pushShellToast(appliedToast(request, res.value), 'success')
+    if (!res.ok && res.error.kind !== 'decode') return res.error.message
+    if (res.ok) pushShellToast(appliedToast(request, res.value), 'success')
+    else pushShellToast(`${request.key}: 서버가 요청을 받았지만 답을 읽지 못했어요 (${res.error.message}). 목록을 다시 읽어요.`, 'warning')
     resourceCache.invalidateTopic('prompts')
     void loadPromptCatalog('manual')
     return null
+  }
+
+  const clearHeldBack = async (key: string) => {
+    const why = await send({ action: 'clear', key })
+    if (why !== null) pushShellToast(`${key} override 를 지우지 못했어요: ${why}`, 'error')
   }
 
   const master = html`
@@ -155,7 +165,16 @@ export function PromptsTab(_props: WorkspaceViewProps) {
       ${catalog !== null && catalog.held_back.length > 0 && html`
         <div role="alert" class="ap-error" data-testid="prompts-held-back">
           <div>저장했지만 서버가 쓰지 않는 override ${catalog.held_back.length}건</div>
-          ${catalog.held_back.map(h => html`<div key=${h.key} class="mono" style=${{ fontSize: 'var(--fs-11)' }}>${h.key} (${h.bytes} bytes): ${h.reason}</div>`)}
+          ${catalog.held_back.map(h => html`
+            <div key=${h.key} style=${{ display: 'flex', gap: 'var(--sp-2)', alignItems: 'center', flexWrap: 'wrap' }}>
+              <span class="mono" style=${{ fontSize: 'var(--fs-11)', overflowWrap: 'anywhere' }}>${h.key} (${h.bytes} bytes): ${h.reason}</span>
+              ${canEdit && html`
+                <button type="button" class="btn-ghost btn-compact" data-testid="prompts-held-back-clear" onClick=${() => void clearHeldBack(h.key)}>
+                  지우기
+                </button>
+              `}
+            </div>
+          `)}
         </div>
       `}
       <div role="list" aria-label="프롬프트 목록" style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-1)', overflowY: 'auto', minHeight: 0 }}>
@@ -164,31 +183,32 @@ export function PromptsTab(_props: WorkspaceViewProps) {
           : rows.length === 0
             ? html`<div class="dtable-absent">조건에 맞는 프롬프트가 없어요.</div>`
             : rows.map(p => html`
-              <button
-                key=${p.key}
-                type="button"
-                role="listitem"
-                class="btn-ghost"
-                aria-current=${p.key === selectedKey ? 'true' : undefined}
-                onClick=${() => setSelectedKey(p.key)}
-                style=${{
-                  display: 'flex',
-                  flexDirection: 'column',
-                  alignItems: 'stretch',
-                  gap: 'var(--sp-0)',
-                  textAlign: 'left',
-                  background: p.key === selectedKey ? 'var(--bg-4)' : undefined,
-                }}
-              >
-                <span style=${{ display: 'flex', gap: 'var(--sp-1)', alignItems: 'center', flexWrap: 'wrap' }}>
-                  <span class="mono" style=${{ fontSize: 'var(--fs-12)', overflowWrap: 'anywhere' }}>${p.key}</span>
-                  ${p.source !== 'file' && html`<${SourceChip} source=${p.source} />`}
-                  ${p.override_default_moved && html`<${Chip} tone="warn">기본 텍스트 바뀜</${Chip}>`}
-                  ${p.authoring_issues.length > 0 && html`<${Chip} tone="bad">작성 오류</${Chip}>`}
-                  ${drafts.has(p.key) && html`<${Chip} tone="info">저장 안 함</${Chip}>`}
-                </span>
-                <span style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-3)', overflowWrap: 'anywhere' }}>${p.description}</span>
-              </button>
+              <div key=${p.key} role="listitem">
+                <button
+                  type="button"
+                  class="btn-ghost"
+                  aria-current=${p.key === selectedKey ? 'true' : undefined}
+                  onClick=${() => setSelectedKey(p.key)}
+                  style=${{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'stretch',
+                    gap: 'var(--sp-0)',
+                    width: '100%',
+                    textAlign: 'left',
+                    background: p.key === selectedKey ? 'var(--bg-4)' : undefined,
+                  }}
+                >
+                  <span style=${{ display: 'flex', gap: 'var(--sp-1)', alignItems: 'center', flexWrap: 'wrap' }}>
+                    <span class="mono" style=${{ fontSize: 'var(--fs-12)', overflowWrap: 'anywhere' }}>${p.key}</span>
+                    ${p.source !== 'file' && html`<${SourceChip} source=${p.source} />`}
+                    ${p.override_default_moved && html`<${Chip} tone="warn">기본 텍스트 바뀜</${Chip}>`}
+                    ${p.authoring_issues.length > 0 && html`<${Chip} tone="bad">작성 오류</${Chip}>`}
+                    ${drafts.has(p.key) && html`<${Chip} tone="info">저장 안 함</${Chip}>`}
+                  </span>
+                  <span style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-3)', overflowWrap: 'anywhere' }}>${p.description}</span>
+                </button>
+              </div>
             `)}
       </div>
     </div>
@@ -226,7 +246,7 @@ export function PromptsTab(_props: WorkspaceViewProps) {
           detail=${detail}
           hasSelection=${selected !== null}
           selectionKey=${selectedKey}
-          emptyDetail=${html`<div class="wka-card dtable-absent">왼쪽에서 프롬프트를 고르면 지금 쓰는 텍스트와 편집기가 열려요.</div>`}
+          emptyDetail=${html`<div class="wka-card dtable-absent">목록에서 프롬프트를 고르면 지금 쓰는 텍스트와 편집기가 열려요.</div>`}
         />
       </div>
     </div>

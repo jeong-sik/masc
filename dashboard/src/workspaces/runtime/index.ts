@@ -7,14 +7,12 @@ import { QuotasTab } from './quotas-tab'
 import { ToolsTab } from './tools-tab'
 import {
   normalizeRuntimeSubroute,
-  RUNTIME_TABS,
   type RuntimeSubroute,
   type WorkspaceInspectPayload,
   type WorkspaceViewProps,
 } from './types'
 
 export {
-  RUNTIME_TABS,
   normalizeRuntimeSubroute,
   type RuntimeSubroute,
   type WorkspaceInspectPayload,

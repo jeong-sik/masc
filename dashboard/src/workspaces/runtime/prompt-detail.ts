@@ -4,8 +4,11 @@
  *
  * The draft is the parent's (`draft`, `onDraft`), so picking another prompt
  * and coming back keeps what was typed. Saving sends the draft as the
- * override; clearing drops the override and the file text is in force again.
- * The server checks the template variables and answers with the text now in
+ * override and, once the server applies it, the draft is gone. Clearing drops
+ * the override so the file text is in force again; a draft the operator has
+ * not saved stays. The editor is read-only while a request is in flight, so
+ * nothing typed after the click is lost when the answer comes back. The
+ * server checks the template variables and answers with the text now in
  * force, or with the reason it refused.
  */
 
@@ -56,10 +59,14 @@ function overridePatch(entry: PromptEntry): string | null {
 }
 
 export function PromptDetail({ entry, canEdit, draft, onDraft, onSend }: PromptDetailProps) {
-  const [view, setView] = useState<DetailView>(draft !== undefined && canEdit ? 'edit' : 'text')
+  const [chosenView, setView] = useState<DetailView>(draft !== undefined && canEdit ? 'edit' : 'text')
   const [busy, setBusy] = useState(false)
   const [refusal, setRefusal] = useState<string | null>(null)
   const patch = overridePatch(entry)
+  // A view the entry can no longer show (the override is gone, or the session
+  // lost admin) falls back to the text in force.
+  const view: DetailView =
+    (chosenView === 'compare' && patch === null) || (chosenView === 'edit' && !canEdit) ? 'text' : chosenView
   const text = draft ?? entry.effective
   const dirty = draft !== undefined && draft !== entry.effective
 
@@ -68,11 +75,18 @@ export function PromptDetail({ entry, canEdit, draft, onDraft, onSend }: PromptD
     setRefusal(null)
     const why = await onSend(request)
     setBusy(false)
-    if (why === null) {
-      onDraft(entry.key, undefined)
-      setView('text')
-    } else {
+    if (why !== null) {
       setRefusal(why)
+      return
+    }
+    switch (request.action) {
+      case 'set':
+        onDraft(entry.key, undefined)
+        setView('text')
+        return
+      case 'clear':
+        if (draft === undefined) setView('text')
+        return
     }
   }
 
@@ -86,7 +100,6 @@ export function PromptDetail({ entry, canEdit, draft, onDraft, onSend }: PromptD
     <div class="wka-card" data-testid="prompt-detail" style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-2)', minWidth: 0 }}>
       <div class="wka-h">
         <h3 class="mono" style=${{ overflowWrap: 'anywhere' }}>${entry.key}</h3>
-        <button type="button" class="btn-ghost btn-compact" data-opens-master>목록</button>
       </div>
       <div style=${{ fontSize: 'var(--fs-13)', color: 'var(--fg-2)' }}>${entry.description}</div>
       <div style=${{ display: 'flex', gap: 'var(--sp-1)', flexWrap: 'wrap', alignItems: 'center' }}>
@@ -112,9 +125,9 @@ export function PromptDetail({ entry, canEdit, draft, onDraft, onSend }: PromptD
         </div>
       `)}
 
-      <div class="ap-viewseg" role="tablist" aria-label="프롬프트 보기 선택" style=${{ alignSelf: 'flex-start', flexWrap: 'wrap' }}>
+      <div class="ap-viewseg" role="group" aria-label="프롬프트 보기 선택" style=${{ alignSelf: 'flex-start', flexWrap: 'wrap' }}>
         ${views.map(([id, label]) => html`
-          <button key=${id} type="button" role="tab" data-view=${id} aria-selected=${view === id} class=${`ap-viewbtn ${view === id ? 'on' : ''}`} onClick=${() => setView(id)}>
+          <button key=${id} type="button" data-view=${id} aria-pressed=${view === id} class=${`ap-viewbtn ${view === id ? 'on' : ''}`} onClick=${() => setView(id)}>
             ${label}
           </button>
         `)}
@@ -122,12 +135,14 @@ export function PromptDetail({ entry, canEdit, draft, onDraft, onSend }: PromptD
 
       ${view === 'text' && html`<pre class="mono" data-testid="prompt-effective" style=${preStyle}>${entry.effective}</pre>`}
       ${view === 'compare' && patch !== null && html`<${UnifiedDiffView} diffText=${patch} testId="prompt-override-diff" />`}
-      ${view === 'edit' && canEdit && html`
+      ${view === 'edit' && html`
         <textarea
           aria-label=${`${entry.key} override 편집`}
+          aria-busy=${busy}
           class="mono"
           rows=${18}
           value=${text}
+          readOnly=${busy}
           spellcheck=${false}
           onInput=${(e: Event) => onDraft(entry.key, (e.currentTarget as HTMLTextAreaElement).value)}
           style=${{ ...preStyle, width: '100%', resize: 'vertical', maxHeight: undefined, minHeight: '16rem' }}

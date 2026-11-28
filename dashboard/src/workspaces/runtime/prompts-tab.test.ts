@@ -39,7 +39,11 @@ function prompt(key: string, overrides: Record<string, unknown> = {}) {
 
 interface Post { readonly url: string; readonly body: unknown }
 
-function serve(prompts: readonly unknown[], answer: (body: unknown) => Response) {
+function serve(
+  prompts: readonly unknown[],
+  answer: (body: unknown) => Response | Promise<Response>,
+  heldBack: readonly unknown[] = [],
+) {
   const posts: Post[] = []
   let catalogReads = 0
   globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -51,7 +55,7 @@ function serve(prompts: readonly unknown[], answer: (body: unknown) => Response)
     }
     if (url === '/api/v1/prompts') {
       catalogReads += 1
-      return jsonResponse({ prompts, held_back: [], runtime_assets: [] })
+      return jsonResponse({ prompts, held_back: heldBack, runtime_assets: [] })
     }
     return jsonResponse({})
   }) as typeof fetch
@@ -98,7 +102,7 @@ describe('Runtime → Prompts', () => {
   const listKeys = () => Array.from(container.querySelectorAll('[role="listitem"] .mono')).map(n => n.textContent)
   const pick = async (key: string) => {
     const row = await vi.waitFor(() => {
-      const found = Array.from(container.querySelectorAll<HTMLButtonElement>('[role="listitem"]'))
+      const found = Array.from(container.querySelectorAll<HTMLButtonElement>('[role="listitem"] button'))
         .find(b => b.querySelector('.mono')?.textContent === key)
       expect(found).toBeDefined()
       return found!
@@ -142,7 +146,7 @@ describe('Runtime → Prompts', () => {
     expect(container.querySelector('textarea')).toBeNull()
   })
 
-  it('clears an override so the file text is in force again', async () => {
+  it('sends clear for an override and keeps a draft the operator has not saved', async () => {
     const server = serve(
       [prompt('judge.board', { category: 'judge', source: 'override', override_value: 'mine', has_override: true, effective: 'mine' })],
       () => applied('judge.board', 'file'),
@@ -151,8 +155,63 @@ describe('Runtime → Prompts', () => {
     await pick('judge.board')
     click('[data-view="edit"]')
     await flushUi()
+    await type('my unsaved draft')
     click('[data-testid="prompt-clear"]')
     await vi.waitFor(() => expect(server.posts).toEqual([{ url: '/api/v1/prompts', body: { action: 'clear', key: 'judge.board' } }]))
+    await vi.waitFor(() => expect(server.catalogReads()).toBe(2))
+    expect(container.querySelector<HTMLTextAreaElement>('textarea')?.value).toBe('my unsaved draft')
+  })
+
+  it('holds the editor read-only while a save is in flight', async () => {
+    let release: (r: Response) => void = () => {}
+    const server = serve([prompt('keeper.worldview')], () => new Promise<Response>(resolve => { release = resolve }))
+    mount()
+    await pick('keeper.worldview')
+    click('[data-view="edit"]')
+    await flushUi()
+    await type('first')
+    click('[data-testid="prompt-save"]')
+    await vi.waitFor(() => expect(server.posts).toHaveLength(1))
+    expect(container.querySelector<HTMLTextAreaElement>('textarea')?.readOnly).toBe(true)
+    release(applied('keeper.worldview', 'override'))
+    await vi.waitFor(() => expect(container.querySelector('textarea')).toBeNull())
+  })
+
+  it('keeps a draft when another prompt is picked and back again', async () => {
+    serve([prompt('keeper.worldview'), prompt('keeper.identity')], () => jsonResponse({}))
+    mount()
+    await pick('keeper.worldview')
+    click('[data-view="edit"]')
+    await flushUi()
+    await type('<world>draft</world>')
+    await pick('keeper.identity')
+    expect(container.querySelector('textarea')).toBeNull()
+    await pick('keeper.worldview')
+    expect(container.querySelector<HTMLTextAreaElement>('textarea')?.value).toBe('<world>draft</world>')
+  })
+
+  it('clears an override the server holds back from the banner', async () => {
+    const server = serve(
+      [prompt('keeper.worldview')],
+      () => applied('judge.board', 'file'),
+      [{ key: 'judge.board', bytes: 812, reason: 'template variable {{post}} is no longer declared' }],
+    )
+    mount()
+    await vi.waitFor(() => expect(container.querySelector('[data-testid="prompts-held-back-clear"]')).not.toBeNull())
+    click('[data-testid="prompts-held-back-clear"]')
+    await vi.waitFor(() => expect(server.posts).toEqual([{ url: '/api/v1/prompts', body: { action: 'clear', key: 'judge.board' } }]))
+  })
+
+  it('reads the catalog again when the server applied the change but its answer does not decode', async () => {
+    const server = serve([prompt('keeper.worldview')], () => jsonResponse({ ok: true, message: 'saved' }))
+    mount()
+    await pick('keeper.worldview')
+    click('[data-view="edit"]')
+    await flushUi()
+    await type('<world>x</world>')
+    click('[data-testid="prompt-save"]')
+    await vi.waitFor(() => expect(server.catalogReads()).toBe(2))
+    expect(container.querySelector('[data-testid="prompt-refusal"]')).toBeNull()
   })
 
   it('keeps the draft and the server reason when the override is refused', async () => {

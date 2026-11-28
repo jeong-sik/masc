@@ -397,7 +397,7 @@ let acp_argv ?(skip_permissions = false) driver posture =
 
 let acp_env driver posture =
   Runtime_acp_client.For_testing.host_environment ~base_env:[| "PATH=/usr/bin" |] ~driver
-    ~extra_strip_env:[] (Some posture)
+    ~extra_strip_env:[] ~git_author_environment:[] (Some posture)
   |> Array.to_list
 ;;
 

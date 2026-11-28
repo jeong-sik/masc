@@ -117,6 +117,8 @@ related: []
   - 비교할 값은 표본이 아니라 만드는 곳 목록에서 뽑는다. 먼저 이벤트를 만드는 곳을 모두 frame 종류별 생성 함수로 옮긴다. 그러면 이벤트는 frame 종류마다 하나인 생성 함수로만 만들어진다. fixture 는 생성 함수마다 만드는 곳에서 나오는 option 조합을 모두 넣는다. 만드는 곳이 새로 생겨도 생성 함수를 거치므로 새 모양이 나오지 않는다. 만드는 곳 목록은 PR 본문에 둔다.
 - 같은 fixture(`apps/fixtures/keeper_chat/`)를 각 언어의 생성 decoder 가 읽는지도 본다. 표현을 바꾼 뒤에는 이 protocol 경계 시험만 남는다.
 
+단계 1 은 이 가운데 AG-UI frame 만 옮긴다. 나머지 모양은 단계 2 다(§4).
+
 Dashboard·TUI 를 생성 타입으로 옮기는 일은 이 RFC 밖이다(§3).
 
 ### D2. Swift·Kotlin 타입은 `tools/atd-native-gen/` 이 만든다
@@ -135,14 +137,15 @@ Dashboard·TUI 를 생성 타입으로 옮기는 일은 이 RFC 밖이다(§3).
 `tools/atd-native-gen/` 은 OCaml `atd` 라이브러리로 `.atd` AST 를 읽어 Swift·Kotlin 을 낸다.
 
 - 다루는 범위: record, option, list, enum, `<json name>`, type-field variant.
-  - Swift 는 associated value 를 가진 `enum` 과 `Codable` 구현이다.
-  - Kotlin 은 `sealed class` 에 `@JsonClassDiscriminator("type")` 와 `@SerialName` 을 붙인다.
+  - Swift 는 associated value 를 가진 `enum` 과 `Decodable` 구현이다.
+  - Kotlin 은 `sealed interface` 와, `"type"` 을 먼저 읽고 그 종류의 `@Serializable` record 로 읽는 `DeserializationStrategy` 다. 열린 variant 의 `Unrecognized(name, raw)` 도 이 함수가 만든다.
+  - 단계 1 의 생성물은 읽기만 한다. 앱이 보내는 요청 본문은 단계 2 에서 쓰기(Swift `Encodable`)와 `nullable` 을 더한다.
 - 열린 variant: 앱은 서버보다 늦게 업데이트되므로, 모르는 이름을 받아도 decode 가 실패하면 안 된다.
   - type-field variant 에 생성기 전용 annotation `<native open>` 을 붙이면, 생성기가 `unrecognized(name, raw)` 경우를 더한다. 앱은 이 경우를 기본값으로 바꾸지 않고 「이 앱이 모르는 이벤트」로 보인다.
   - ATD 의 `<json open_enum>` 은 payload 없는 enum 에만 쓸 수 있어 이 자리에 맞지 않는다.
   - atdgen 은 모르는 annotation 절을 무시한다. ATD 4.2.0 에서 `<native open>` 을 붙인 파일로 `atdgen -t`·`-j` 가 그대로 통과했다. 서버는 이 variant 를 쓰기만 하므로 OCaml 쪽 동작은 바뀌지 않는다.
 - 그 밖의 annotation 은 생성을 거절한다. 다른 adapter, 다른 field name 의 `Type_field.Param` 이 여기에 든다. 모르는 모양을 비슷한 모양으로 바꿔 내지 않는다.
-- 생성물은 `apps/apple/MascWire/Generated/`, `apps/android/wire/src/main/kotlin/.../generated/` 에 커밋한다. Swift·Kotlin 은 dune 이 빌드하지 않기 때문이다.
+- 생성물은 `apps/apple/MascWire/Generated/`, `apps/android/wire/src/main/kotlin/masc/wire/generated/` 에 커밋한다. Swift·Kotlin 은 dune 이 빌드하지 않기 때문이다.
 - 어긋남 검사는 dune rule 로 둔다. 생성기를 돌린 결과를 커밋본과 `diff` 하는 rule 을 `@check` alias 에 붙인다. 그러면 지금 도는 `type-check` 가 이 검사를 같이 한다. 응답 정의만 바꾸고 생성물을 다시 만들지 않으면 `type-check` 가 실패한다.
 
 ### D3. 앱은 Worker bearer 와 `chat/stream` 하나로 대화한다
@@ -194,7 +197,7 @@ Dashboard·TUI 를 생성 타입으로 옮기는 일은 이 RFC 밖이다(§3).
   | 스크롤 끊김 | `XCTOSSignpostMetric` scroll | `FrameTimingMetric` |
   | frame 을 받고 글이 보이기까지 | signpost 구간 | trace section |
 
-- 측정은 손으로 돌리는 target 이다(`xcodebuild test -only-testing:MascPerf`, `./gradlew :macrobenchmark:connectedCheck`). 통과·실패를 숫자로 가르는 검사로 만들지 않는다.
+- 측정은 손으로 돌리는 target 이다(`xcodebuild test -only-testing:MascPerf`, `gradle :macrobenchmark:connectedCheck`). 통과·실패를 숫자로 가르는 검사로 만들지 않는다.
   - 헌장 `build_and_ci` 는 기능 고장과 이어지지 않는 숫자 검사를 만들지 않게 한다. PR 마다 도는 검사를 운영자 요청 없이 늘리지도 못하게 한다.
   - 같은 헌장 규칙과 `docs/guides/WORKSPACE-STORAGE.md` 에 따라, 측정값은 저장소에 커밋하지 않고 그 앱 PR 본문에 남긴다. 조건(기기, OS, fixture, 빌드 설정)을 같이 적는다.
 - 비교 기준으로 같은 fixture 를 Dashboard 에서 Playwright 로 한 번 잰다. 「Dashboard 보다 얼마나 빠른가」를 같은 입력으로 말하기 위해서다.
@@ -215,6 +218,7 @@ Dashboard·TUI 를 생성 타입으로 옮기는 일은 이 RFC 밖이다(§3).
 - 기기 페어링(QR, 범위를 좁힌 token, 갱신).
 - 게시판, 리뷰, 서버 관리 화면.
 - macOS 앱이 서버를 품는 일(시작·업데이트·메뉴 막대). 서버 시작 시간은 이 RFC 밖에서 다룬다(#55235).
+- macOS 시스템 통합: 알림 센터, 메뉴 막대, 단축어(App Intents), Spotlight, 공유. 2026-11-28 운영자가 바란다고 했다. 첫 버전 대화 화면이 자리 잡은 뒤 다음 RFC 에서 다룬다.
 - 실기기 설치와 TestFlight. 이 Mac 에는 코드 서명 인증서가 없다.
 - Dashboard·TUI 를 생성 타입으로 옮기기. D1·D2 가 자리 잡은 뒤 따로 한다.
 
@@ -222,21 +226,30 @@ Dashboard·TUI 를 생성 타입으로 옮기는 일은 이 RFC 밖이다(§3).
 
 헌장 `execution_protocol` 대로 native stack 으로 쌓는다.
 
-- 단계 1 은 이 RFC 위에 쌓는다. 이 RFC 가 맨 아래 층이고, 스택은 맨 위 PR 로 한 번에 병합한다.
-- 단계 2·3 은 단계 1 스택이 main 에 들어간 뒤, 각자 main 위의 새 스택으로 시작한다.
+- 단계마다 main 위의 새 스택으로 시작한다. 앞 단계 스택이 main 에 들어간 뒤에 연다.
+- 각 스택은 맨 위 PR 로 한 번에 병합한다. 단계 1 은 이 RFC 가 맨 아래 층이다.
+- 2026-11-28 운영자가 단계 1 을 AG-UI frame 과 생성기로 닫고, 나머지 응답 모양을 단계 2 로 나누기로 했다. 아래 층을 고칠 때마다 위 층을 다시 쌓는 일을 줄이기 위해서다.
 
-1. **응답 정의와 생성기**
+1. **AG-UI frame 과 생성기**
    - 층 1-a: ATD 파일과 atdgen rule. 서버 encoder 는 아직 그대로 둔다.
    - 층 1-b: frame 종류마다 타입 있는 생성 함수를 두고, 이벤트를 만드는 곳을 모두 옮긴다. `make_event` 는 공개 interface 에서 뺀다. 표현과 encoder 는 그대로 둔다.
    - 층 1-c: 지금 encoder 로 fixture(`apps/fixtures/keeper_chat/*.json`, `*.sse`)를 만들고, 서버 출력이 fixture 와 같은 JSON 값인지 보는 테스트를 둔다.
    - 층 1-d: 서버 표현을 생성 타입으로 바꾸고 손으로 쓴 encoder 를 지운다. 1-c 의 fixture 는 그대로여야 한다.
-   - 층 1-e: `tools/atd-native-gen/`, 생성물, `@check` 어긋남 rule 을 넣는다.
-   - 확인: 대상별 `dune build --root .`, fixture 비교 테스트, 생성기 거절 테스트(모르는 annotation), Swift·Kotlin 생성물의 fixture decode(로컬 `swift test`·`./gradlew test`), 기존 Dashboard·TUI 테스트 통과.
-2. **Apple 앱 v1**
+   - 층 1-e: `tools/atd-native-gen/` 의 Swift 출력, `apps/apple/MascWire` 생성물, `@check` 어긋남 rule.
+   - 층 1-f: Kotlin 출력. inherit 으로만 쓰이는 record 는 쓰지 않는다.
+   - 층 1-g: `apps/android/wire` 생성물과 어긋남 rule.
+   - 확인: 대상별 `dune build --root .`, fixture 비교 테스트, 생성기 거절 테스트(모르는 annotation, 두 언어가 담지 못하는 이름), Swift·Kotlin 생성물의 fixture decode(로컬 `swift test`·`gradle :wire:test`), 기존 Dashboard·TUI 테스트 통과.
+2. **나머지 응답 모양**
+   - 대상: 기록 쪽과 행, `chat/stream` 요청 본문, 첨부 meta, 첫 버전이 그리는 CUSTOM payload(수락, `KEEPER_ATTACHMENT`, 오류), Keeper 목록 행(§5 Q1 측정 뒤).
+   - 모양마다 단계 1 과 같은 순서로 간다. 지금 출력을 fixture 로 남기고, 서버 표현을 생성 타입으로 바꾸고, 생성물을 다시 만든다.
+   - 기록 행은 최상위 field 가 스무 개쯤이다. `blocks`·`surface`·`speaker`·`approval_lifecycle` 은 각자 encoder 가 있다. 앱이 그리지 않는 하위 값은 ATD 에서 `json` 으로 두고, 그 값을 만드는 모듈이 계속 쓴다. Dashboard·TUI 가 읽는 바이트는 바뀌지 않는다.
+   - 요청 본문: 서버 parser 는 모양을 읽은 뒤 trim, 빈 값, 연결 문맥 조건을 본다. 생성 reader 는 모양만 읽고, 그 뒤 검사는 그대로 둔다. 거절 문구가 바뀌는지는 fixture 로 본다.
+   - 확인: 단계 1 과 같다.
+3. **Apple 앱 v1**
    - 확인: `xcodebuild test`(iOS 26.5 시뮬레이터, macOS), fixture decode, D4 측정.
    - 실서버 확인: 로컬 서버에 Worker token 으로 붙어 보내기, 스트리밍, 끊긴 뒤 이어 받기, 이미지.
-3. **Android 앱 v1**
-   - 확인: `./gradlew test`, 에뮬레이터 `connectedCheck`, D4 측정, 같은 실서버 확인.
+4. **Android 앱 v1**
+   - 확인: `gradle test`, 에뮬레이터 `connectedCheck`, D4 측정, 같은 실서버 확인.
 
 앱 빌드·테스트를 CI 에서 돌릴지는 운영자가 정한다(§5 Q3). 정하기 전에는 앱 PR 본문에 로컬 결과를 남긴다.
 
@@ -251,3 +264,8 @@ Dashboard·TUI 를 생성 타입으로 옮기는 일은 이 RFC 밖이다(§3).
 - **Q4. 다른 곳에서 시작한 턴 따라가기.** Dashboard 는 observer 스트림(`/mcp?sse_kind=observer`, 다중 계정에서는 `/api/v1/auth/events`)으로 모든 대화 operation 의 AG-UI 이벤트를 받는다(`dashboard/src/core/observer.ts`). 앱이 이 스트림을 쓰면 TUI·Dashboard 가 시작한 턴도 실시간으로 보인다.
   - 대신 앱이 앞에 있는 동안 연결 하나를 늘 열어 둔다.
   - Worker token 으로 열리는지, 다시 붙을 때(`Last-Event-ID`, `observer_resync_required`) 무엇을 다시 읽어야 하는지 확인한 뒤 정한다.
+- **Q5. AG-UI 1.0 과 얼마나 맞출지.** 2026-11-28 `docs.ag-ui.com/spec/1.0` 을 읽었다. 서버의 `Ag_ui.protocol_version` 은 `"0.1.0"` 이고 부르는 곳이 없다.
+  - 1.0 의 HTTP SSE binding 에는 이어 받기가 없다. SSE `id:` 는 무시하라고 하고, 끊긴 스트림은 새 `runId` 로 다시 시작하게 한다(`spec/1.0/basic/transports/http-sse.md` 「No resumption」). masc 의 `id: <journal seq>` 와 `since_seq` 이어 받기(D3)는 이 binding 밖의 확장이다. 앱은 뒤로 갔다 돌아올 때 이 확장이 필요하다.
+  - 1.0 schema 에서 생성한 SDK 는 TypeScript·Python·.NET 이다(`migrating-to-1-0.md`). Kotlin SDK 는 community 이고(`introduction.md`), Swift SDK 는 없다. 앱 쪽 타입은 D2 생성기가 계속 만든다.
+  - 1.0 표준 이벤트와 뜻이 겹쳐 보이는 CUSTOM 이 있다. `KEEPER_THINKING_*` 와 `REASONING_*`, `KEEPER_TOOL_RESULT_READY` 와 `TOOL_CALL_RESULT`, `KEEPER_NATIVE_TOOL_*` 와 `ACTIVITY_*` 가 후보다. 뜻이 정확히 같은지는 아직 보지 않았다. 바꾸면 Dashboard·TUI 가 읽는 wire 가 바뀌므로 따로 정한다.
+  - 단계 2 의 기록 쪽을 1.0 `MESSAGES_SNAPSHOT` 모양의 projection 으로 줄 수도 있다. 메시지가 role 별 union 이고 이미지 ContentPart 가 있다. 대신 cursor 가 없고, masc 행의 `turn_ref`·delivery provenance·승인 상태는 담지 못한다. 단계 2 를 시작할 때 기록 행을 그대로 옮기는 안과 비교한다.

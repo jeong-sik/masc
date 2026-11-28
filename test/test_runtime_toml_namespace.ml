@@ -628,6 +628,36 @@ http_base_url = "https://masc-accounts.example.test/"
             | exception Env_config_core.Config_error _ -> true))
 ;;
 
+(* A file value that is not an origin stops the load, and the refusal names
+   the key: a host with no scheme, an origin with a path, and an empty string,
+   which would otherwise read as no base URL at all. *)
+let test_a_base_url_that_is_not_an_origin_stops_the_load () =
+  List.iter
+    (fun value ->
+       let base_path = Filename.temp_dir "base-url-ns-" "" in
+       let cfg_dir = Filename.concat (Filename.concat base_path ".masc") "config" in
+       Sys.mkdir (Filename.concat base_path ".masc") 0o755;
+       Sys.mkdir cfg_dir 0o755;
+       Out_channel.with_open_bin (Filename.concat cfg_dir "runtime.toml") (fun oc ->
+         output_string oc (Printf.sprintf "[transport]\nhttp_base_url = %S\n" value));
+       Config_boot_overrides.reset_for_tests ();
+       Fun.protect
+         ~finally:(fun () ->
+           Config_boot_overrides.reset_for_tests ();
+           Fs_compat.remove_tree base_path)
+         (fun () ->
+            match Keeper_runtime_config.load_and_apply ~base_path with
+            | Ok _ -> Alcotest.failf "the base URL %S was accepted" value
+            | Error failure ->
+              Alcotest.(check bool)
+                (Printf.sprintf "the refusal of %S names the key" value)
+                true
+                (String_util.contains_substring
+                   (Keeper_runtime_config.load_failure_to_string failure)
+                   Env_config_core.http_base_url_toml_key)))
+    [ "masc.example.com"; "https://masc.example.com/app"; "" ]
+;;
+
 let () =
   Alcotest.run "runtime_toml_namespace"
     [ ( "namespaces"
@@ -667,5 +697,7 @@ let () =
             test_parameterized_effort_on_models_and_bindings
         ; Alcotest.test_case "typed boot overrides decoded without string roundtrip" `Quick
             test_typed_boot_overrides_decoded_without_string_roundtrip
+        ; Alcotest.test_case "a base URL that is not an origin stops the load" `Quick
+            test_a_base_url_that_is_not_an_origin_stops_the_load
         ] )
     ]

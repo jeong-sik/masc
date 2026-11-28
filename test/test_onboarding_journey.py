@@ -1478,6 +1478,53 @@ class Journey(StepByStep):
                 self.assertEqual(config.read_text(), asked)
 
     @unittest.skipUnless(BINARY, 'requires the CI-built native executable')
+    def test_native_auth_invite_reads_the_base_url_of_runtime_toml(self):
+        # masc auth invite builds its link on the address a server on the base
+        # path reads: with no MASC_HTTP_BASE_URL in the shell, the one in
+        # [transport] http_base_url of the workspace's runtime.toml. A value
+        # the server would refuse refuses the command before anything is
+        # written.
+        with tempfile.TemporaryDirectory() as home:
+            home = str(Path(home).resolve())
+            base = Path(home, 'accounts')
+            (base / '.masc/auth').mkdir(parents=True)
+            (base / '.masc/auth/config.json').write_text(
+                '{"enabled":true,"require_token":true,"account_mode":"Multi_account"}')
+            Path(home, 'external').mkdir()
+            environment = {key: value for key, value in os.environ.items()
+                           if not key.startswith(('MASC_', 'AGENT_CORE_'))}
+            environment.update(HOME=home, XDG_CONFIG_HOME=home + '/config', TERM='dumb', MASC_HTTPS_PORT='0')
+
+            def masc(*arguments, **extra):
+                return subprocess.run([BINARY, *arguments, '--base-path', str(base)], env=dict(environment, **extra),
+                                      capture_output=True, text=True, timeout=180, stdin=subprocess.DEVNULL)
+
+            # What bootstrap prints is not shown: it names the first invitation.
+            bootstrapped = masc('auth', 'bootstrap', '--external-store', home + '/external/external.jsonl',
+                                MASC_HTTP_BASE_URL='http://127.0.0.1:8946')
+            self.assertEqual(bootstrapped.returncode, 0, 'masc auth bootstrap did not activate the workspace')
+            declared = base / '.masc/config/runtime.toml'
+            shipped = declared.read_text()
+            self.assertEqual(shipped.count('\n[transport]\n'), 1)
+
+            def declare(value):
+                declared.write_text(shipped.replace(
+                    '\n[transport]\n', '\n[transport]\nhttp_base_url = "' + value + '"\n'))
+
+            declare('https://masc-accounts.example.test')
+            invited = masc('auth', 'invite')
+            self.assertEqual(invited.returncode, 0, invited.stderr)
+            # The link itself is not shown: it carries the token.
+            self.assertTrue('https://masc-accounts.example.test/accounts/invite#' in invited.stdout,
+                            'the link is not on the address of runtime.toml')
+            declare('masc-accounts.example.test')
+            refused = masc('auth', 'invite')
+            self.assertEqual(refused.returncode, 1, refused.stderr)
+            self.assertIn('do not load', refused.stderr)
+            self.assertIn('transport.http_base_url', refused.stderr)
+            self.assertNotIn('/accounts/invite#', refused.stdout)
+
+    @unittest.skipUnless(BINARY, 'requires the CI-built native executable')
     def test_native_account_server_is_seen_by_the_journey_and_left_running(self):
         # The real bootstrap, the real account server and the shipped journey:
         # the server is named with the port it announces, whichever port was

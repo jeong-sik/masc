@@ -890,9 +890,10 @@ let test_stops_when_a_redirect_is_not_on_the_base_url () =
 
 (* The shell sets no base URL, and runtime.toml of the base path names one
    (transport.http_base_url, which the loader leaves in the boot store): the
-   boot compares the redirect with the address of the file. The listener then
-   leaves that address in the variable, not the one it bound, so a reader of
-   the variable sees the same base as the comparison. *)
+   boot compares the redirect with the address of the file. The listener
+   writes neither that address nor the one it bound into the variable, so the
+   settings panel, which reads the layer from the variable, still sees the
+   file's value as the file's. *)
 let test_compares_a_redirect_with_the_base_url_of_the_file () =
   Unix.putenv github_secret_env "secret-of-the-case";
   with_installation
@@ -911,9 +912,19 @@ let test_compares_a_redirect_with_the_base_url_of_the_file () =
             "github redirect on https://masc.example, the base URL is on https://other.example"
             (boot_outcome env ~port:(free_port ()) multi_account);
           Alcotest.(check (option string))
-            "the variable holds the address of the file, not the bound one"
-            (Some "https://other.example")
+            "the listener left the variable unset"
+            None
             (Sys.getenv_opt Env_config_core.http_base_url_env_key);
+          Alcotest.(check bool)
+            "the base URL is still the file's"
+            true
+            (match Config_boot_overrides.source Env_config_core.http_base_url_env_key with
+             | Config_boot_overrides.Boot_override -> true
+             | Config_boot_overrides.Env | Config_boot_overrides.Default -> false);
+          Alcotest.(check (option string))
+            "the getter reads the file's base URL"
+            (Some "https://other.example")
+            (Env_config_core.masc_http_base_url_opt ());
           Alcotest.(check (option int)) "no port is recorded for the CLI" None (recorded_port ~base)))
 ;;
 

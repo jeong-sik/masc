@@ -46,7 +46,7 @@ import { decodeApprovalQueuePhase, normalizeKeeperSummaryAttemptDisposition } fr
 import { decodeGateJudgeLane, normalizeGateDecisionSource } from '../../api/dashboard-gate'
 import { approvalPhaseView, decisionSourceLabel, gateDecisionLabel, judgeLaneText } from '../../lib/gate-approval-labels'
 import { orderByWait, QueueWait, waitingSinceAskedAt, waitingSinceGateRead } from './inbox-queue'
-import { formatDuration } from '../../lib/format-time'
+import { formatDuration, formatRelativeTime } from '../../lib/format-time'
 import type { ApprovalQueuePhase, GateJudgeLane } from '../../types/gate'
 import { KeeperBadge } from '../../components/keeper-badge'
 import { DataTable, type DataTableColumn } from '../../components/primitives/data-table'
@@ -60,7 +60,6 @@ import {
   asSafeInt,
   decodeGoalConfirmation,
   decodeGoalItem,
-  formatRelativeTime,
   isRecord,
   readWorkspacePrecondition,
   type GatePendingItem,

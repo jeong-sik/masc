@@ -16,6 +16,7 @@
 import { html } from 'htm/preact'
 import '../knowledge/wiki-editor.css'
 import { MarkdownContent } from '../../components/common/markdown-renderer'
+import { formatRelativeTime, formatScheduledTime } from '../../lib/format-time'
 import { WORKSPACE_MEDIA_ACCEPT, useWorkspaceMediaComposer } from '../../lib/use-workspace-media-composer'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { authSession, isEpochCurrent, sessionEpoch } from '../../core/auth'
@@ -50,7 +51,6 @@ import {
   decodeGoalItem,
   decodeTaskItem,
   filterTasksByChip,
-  formatRelativeTime,
   isRecord,
   readWorkspacePrecondition,
   toExpectedWorkspaceBody,
@@ -1090,7 +1090,7 @@ export function TasksTab(props: WorkspaceViewProps) {
                     <div class="wk-row-meta">
                       ${s.keeperName && html`<${KeeperBadge} id=${s.keeperName} size="sm" />`}
                       <span>${s.recurrenceSummary || s.recurrenceKind}</span>
-                      <span>다음 실행: ${formatRelativeTime(s.nextDueAt ?? s.dueAt)}</span>
+                      <span>다음 실행: ${formatScheduledTime(s.nextDueAt ?? s.dueAt)}</span>
                     </div>
                   </button>
                 `}

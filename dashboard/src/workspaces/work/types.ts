@@ -103,31 +103,6 @@ export function formatCompactCount(n: number | null | undefined): string {
   return String(Math.trunc(n))
 }
 
-export function formatRelativeTime(tsInput: number | string | null | undefined, nowMs = Date.now()): string {
-  if (tsInput === null || tsInput === undefined || tsInput === '') return '없음'
-  let ms: number
-  if (typeof tsInput === 'number') {
-    if (!Number.isFinite(tsInput)) return '없음'
-    ms = tsInput < 1_000_000_000_000 ? tsInput * 1000 : tsInput
-  } else {
-    const parsed = Date.parse(tsInput)
-    if (Number.isNaN(parsed)) return tsInput
-    ms = parsed
-  }
-  const diffSec = Math.round((nowMs - ms) / 1000)
-  if (diffSec < 0) {
-    const ahead = Math.abs(diffSec)
-    if (ahead < 60) return `${ahead}초 후`
-    if (ahead < 3600) return `${Math.floor(ahead / 60)}분 후`
-    if (ahead < 86400) return `${Math.floor(ahead / 3600)}시간 후`
-    return `${Math.floor(ahead / 86400)}일 후`
-  }
-  if (diffSec < 45) return '방금 전'
-  if (diffSec < 3600) return `${Math.floor(diffSec / 60)}분 전`
-  if (diffSec < 86400) return `${Math.floor(diffSec / 3600)}시간 전`
-  return `${Math.floor(diffSec / 86400)}일 전`
-}
-
 // ── Workspace Precondition & MCP Tool Helper (Core Transport Only) ────────
 
 function extractRuntimeInstanceId(health: Record<string, unknown>): string | null {

@@ -25,6 +25,7 @@ import { PopoverMenu } from '../../components/primitives/popover-menu'
 import { RefreshButton } from '../../components/primitives/refresh-button'
 import { VirtualList } from '../../components/primitives/virtual-list'
 import { computeMarkdownLineDiff } from './wiki-diff'
+import { formatRelativeTime } from '../../lib/format-time'
 import { WORKSPACE_MEDIA_ACCEPT, useWorkspaceMediaComposer } from '../../lib/use-workspace-media-composer'
 import {
   describeWireType,
@@ -40,10 +41,10 @@ import {
 import { isAdminLockedForSession, navigate, resolveRoute } from '../../routes/router'
 import { pushShellToast } from '../../shell/shell-state'
 import { WikiEmbedPicker, type WikiEmbedPages } from './wiki-embed-picker'
+import { wikiLintCountLabel, wikiLintKindLabel } from './wiki-lint-kind'
 import {
   WIKI_LINK_KINDS,
   WIKI_SOURCES,
-  formatRelativeTime,
   type WikiDuplicateCandidate,
   type WikiIndexData,
   type WikiLintData,
@@ -815,8 +816,8 @@ export function WikiTab(props: WorkspaceViewProps) {
             : html`
                 <div class="kn-chips">
                   ${Object.entries(lintData.counts ?? {}).map(([k, v]) => html`
-                    <span key=${k} class=${`kn-badge ${v > 0 ? 'kn-badge--warn' : 'kn-badge--ok'}`}>
-                      ${k}: ${v}
+                    <span key=${k} class=${`kn-badge ${v > 0 ? 'kn-badge--warn' : 'kn-badge--ok'}`} title=${k}>
+                      ${wikiLintCountLabel(k)}: ${v}
                     </span>
                   `)}
                 </div>
@@ -842,7 +843,7 @@ export function WikiTab(props: WorkspaceViewProps) {
                         }}
                       >
                         <div class="kn-row-top">
-                          <span class="kn-badge kn-badge--warn">${f.kind}</span>
+                          <span class="kn-badge kn-badge--warn" title=${f.kind}>${wikiLintKindLabel(f.kind)}</span>
                           <span class="mono kn-sub-id">${f.page ?? f.subject}</span>
                         </div>
                         <div class="kn-body-sm">
@@ -1278,8 +1279,8 @@ export function WikiTab(props: WorkspaceViewProps) {
 
             ${(pageDetail.lint_findings ?? []).length > 0 && html`
               <div class="kn-notice kn-notice--warn">
-                이 페이지에 Lint 경고 ${(pageDetail.lint_findings ?? []).length}건이 있습니다:
-                ${(pageDetail.lint_findings ?? []).map((f) => f.kind).join(', ')}
+                이 페이지에 Lint 경고 ${(pageDetail.lint_findings ?? []).length}건이 있습니다:${' '}
+                ${(pageDetail.lint_findings ?? []).map((f) => wikiLintKindLabel(f.kind)).join(', ')}
               </div>
             `}
 

@@ -69,7 +69,7 @@ describe('WikiTab body links', () => {
     author: 'librarian', created: '2026-11-20T00:00:00Z', updated: '2026-11-24T05:00:00Z',
     revision: 1, tags: [], backlink_count: 0, outgoing_link_count: 0, sources_count: 0, hearsay_count: 0, sha256: `sha-${slug}`,
   })
-  const pageEnvelope = (slug: string, body: string, outgoing_links: unknown[]) => ({
+  const pageEnvelope = (slug: string, body: string, outgoing_links: unknown[], lint_findings: unknown[] = []) => ({
     schema_version: 1,
     instance_id: 'inst-1',
     generated_at_unix: 1732430000,
@@ -86,7 +86,7 @@ describe('WikiTab body links', () => {
       outgoing_links,
       backlinks: [],
       sources: { references: [], hearsay: [] },
-      lint_findings: [],
+      lint_findings,
     },
   })
   const link = (text: string, kind: string, target: string, raw: string, exists: boolean | null) =>
@@ -94,7 +94,7 @@ describe('WikiTab body links', () => {
 
   // Page A links to page B, to a missing page and to a site; page B has no links.
   const pageABody = 'See [B](page-b.md), [gone](page-gone.md) and [site](https://example.com).'
-  async function openWikiWithPageA(pageALinks: unknown[], body = pageABody): Promise<void> {
+  async function openWikiWithPageA(pageALinks: unknown[], body = pageABody, pageALint: unknown[] = []): Promise<void> {
     globalThis.fetch = vi.fn((input: RequestInfo | URL) => {
       const url = String(input)
       if (url.startsWith('/api/v1/wiki?')) {
@@ -111,7 +111,7 @@ describe('WikiTab body links', () => {
         }))
       }
       if (url === '/api/v1/wiki/page-a') {
-        return Promise.resolve(jsonResponse(pageEnvelope('page-a', body, pageALinks)))
+        return Promise.resolve(jsonResponse(pageEnvelope('page-a', body, pageALinks, pageALint)))
       }
       if (url === '/api/v1/wiki/page-b') {
         return Promise.resolve(jsonResponse(pageEnvelope('page-b', 'Body of page B', [])))
@@ -174,6 +174,17 @@ describe('WikiTab body links', () => {
 
     expect(container.querySelector('.kn-md-panel')).toBeNull()
     expect(container.querySelector('.kn-notice--err[role="alert"]')).not.toBeNull()
+  })
+
+  it('A page names its lint findings by kind in Korean, and a kind the tab does not know by its wire name', async () => {
+    await openWikiWithPageA(pageALinks, pageABody, [
+      { kind: 'missing_sources', subject: 'page-a', page: 'page-a' },
+      { kind: 'broken_media_embed', subject: 'page-a', page: 'page-a', line: 3, target: 'media:0001' },
+      { kind: 'kind_from_a_newer_server', subject: 'page-a', page: 'page-a' },
+    ])
+
+    const notice = container.querySelector('.md-detail .kn-notice--warn')?.textContent?.replace(/\s+/g, ' ').trim()
+    expect(notice).toBe('이 페이지에 Lint 경고 3건이 있습니다: 출처 없음, 없는 그림 임베드, kind_from_a_newer_server')
   })
 
   it('A page lists its body headings in a table of contents that scrolls the body to each', async () => {

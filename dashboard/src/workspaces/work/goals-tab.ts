@@ -23,7 +23,7 @@ import { apiGet, apiMutate } from '../../core/transport'
 import { KeeperBadge } from '../../components/keeper-badge'
 import { TimeAgo } from '../../components/common/time-ago'
 import { InlineSpinner } from '../../components/common/inline-spinner'
-import { formatDuration } from '../../lib/format-time'
+import { formatDuration, formatRelativeTime } from '../../lib/format-time'
 import { LinkedItemAbsent, MasterDetail } from '../../components/primitives/master-detail'
 import { PopoverMenu } from '../../components/primitives/popover-menu'
 import { RefreshButton } from '../../components/primitives/refresh-button'
@@ -40,7 +40,6 @@ import {
   callMcpToolViaCore,
   decodeGoalConfirmation,
   decodeGoalItem,
-  formatRelativeTime,
   goalActivitySourceLabel,
   goalPhaseLabel,
   goalPhaseTone,

@@ -64,6 +64,7 @@ let fresh_nonce () = Nonce (Random_id.hex ~bytes:nonce_random_bytes)
 (* Discord text-message content limit, in Unicode scalar units.
    Messages longer than this must be split into multiple payloads. *)
 let message_content_limit = 2000
+let max_files_per_message = 10
 
 (* Discord takes the API version in the request path. Built from the
    shared constant so the gateway and REST surfaces cannot drift apart. *)

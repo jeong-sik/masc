@@ -66,7 +66,9 @@ val thread_ts_of_args :
 val attachment_ids_of_json : Yojson.Safe.t -> (string list, string) result
 (** Decode a non-empty array of canonical attachment ids
     (["att_<64hex>"], {!Attachment_store.parse_id}) in the given order.
-    [Error] for an empty array, a non-string, a malformed id or a repeat. *)
+    [Error] for an empty array, more than
+    {!Discord_rest_client.max_files_per_message} ids, a non-string, a
+    malformed id or a repeat. *)
 
 val attachment_ids_of_args :
   surface:string -> Yojson.Safe.t -> (string list, string) result

@@ -92,6 +92,8 @@ type = "object"
 name = "attachment_ids"
 type = "array"
 items = { type = "string" }
+# Discord_rest_client.max_files_per_message: Discord refuses an 11th file.
+max_items = 10
 description = """
 Files to upload with this post, in order: canonical attachment ids \
 (att_<64 hex>), such as the attachment_id a tool returned. Discord surface \

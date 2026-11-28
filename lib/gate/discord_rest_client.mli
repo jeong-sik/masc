@@ -15,6 +15,10 @@ val message_content_limit : int
 (** Discord text-message content limit, in Unicode scalar units.
     Messages longer than this must be split into multiple payloads. *)
 
+val max_files_per_message : int
+(** Most files one Discord message carries. Discord refuses more with JSON
+    error 30015, "Maximum number of attachments in a message reached (10)". *)
+
 val split_at_codepoint : string -> limit:int -> string * string
 (** [split_at_codepoint s ~limit] returns [(head, tail)] where [head] is
     a valid-UTF-8 prefix of [s] of at most [limit] Unicode scalar values

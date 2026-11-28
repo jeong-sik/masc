@@ -752,7 +752,56 @@ let test_attachment_ids_args_decode () =
   refused "repeated id" (decode "discord" (`List [ `String (id 'a'); `String (id 'a') ]));
   refused "malformed id" (decode "discord" (`List [ `String "att_xyz" ]));
   refused "non-string id" (decode "discord" (`List [ `Int 1 ]));
-  refused "non-array" (decode "discord" (`String (id 'a')))
+  refused "non-array" (decode "discord" (`String (id 'a')));
+  let distinct n =
+    `List (List.init n (fun i -> `String ("att_" ^ Printf.sprintf "%064x" i)))
+  in
+  check bool "ten files fit one Discord message" true
+    (match decode "discord" (distinct 10) with Ok ids -> List.length ids = 10 | Error _ -> false);
+  refused "an eleventh file" (decode "discord" (distinct 11))
+
+(* Before approval a post may name only files its Keeper may read, and each
+   becomes durable, so the Keeper's later ephemeral files cannot evict it while
+   the post waits for an operator. *)
+let test_discord_attachments_held_before_approval () =
+  let base_path = Filename.temp_dir "surface-post-held-" "" in
+  Eio_main.run @@ fun env ->
+  Fun.protect
+    ~finally:(fun () -> Fs_compat.remove_tree base_path)
+    (fun () ->
+       if not (Fs_compat.has_fs ()) then Fs_compat.set_fs (Eio.Stdenv.fs env);
+       let store = Attachment_store.create ~base_path in
+       let ephemeral_id =
+         match
+           Attachment_store.put ~declared_mime:"image/png" ~filename:"cat.png"
+             ~origin:Attachment_store.Model_generated ~created_by:"alice"
+             ~retention:(Attachment_store.Ephemeral { keeper = "alice" })
+             store ~bytes:tiny_png
+         with
+         | Ok (meta : Attachment_store.meta) -> meta.id
+         | Error error -> fail (Attachment_store.put_error_to_string error)
+       in
+       let held keeper ids =
+         Masc.Keeper_tool_in_process_runtime.For_testing.discord_attachments_held
+           ~base_path ~keeper ids
+       in
+       let retention () =
+         match Attachment_store.get_meta store ~id:ephemeral_id with
+         | Ok (Some (meta : Attachment_store.meta)) -> meta.retention
+         | Ok None -> fail "the attachment vanished"
+         | Error error -> fail (Attachment_store.get_error_to_string error)
+       in
+       check bool "another keeper's ephemeral file is refused" true
+         (Result.is_error (held "bob" [ ephemeral_id ]));
+       check bool "a refused check leaves the file ephemeral" true
+         (retention () = Attachment_store.Ephemeral { keeper = "alice" });
+       check bool "an absent file is refused" true
+         (Result.is_error (held "alice" [ "att_" ^ String.make 64 'f' ]));
+       (match held "alice" [ ephemeral_id ] with
+        | Ok () -> ()
+        | Error detail -> fail detail);
+       check bool "the owner's file is now durable" true
+         (retention () = Attachment_store.Durable))
 
 (* The approved input is what the replay sends after approval: the files a
    post names survive it in order, and a text-only post's input has no
@@ -967,6 +1016,8 @@ let () =
             test_attachment_ids_args_decode;
           test_case "approved Discord input carries attachment_ids" `Quick
             test_approved_discord_input_carries_attachment_ids;
+          test_case "attachments are held before approval" `Quick
+            test_discord_attachments_held_before_approval;
           test_case "explicit thread_ts wins over continuation" `Quick
             test_resolve_explicit_thread_ts_wins_over_continuation;
           test_case "explicit thread_ts travels without continuation" `Quick

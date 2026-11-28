@@ -1567,21 +1567,36 @@ let discord_uploads ~base_path = function
     in
     Ok (Some (first, rest))
 
-(* Whether every named attachment is in the store, from its metadata alone:
-   the bytes are read once, after approval. *)
-let discord_attachments_present ~base_path attachment_ids =
+(* Before approval: every named attachment must be one this Keeper may read,
+   and it is promoted to durable. An ephemeral attachment can otherwise be
+   evicted by the Keeper's own later files while the post waits for an
+   operator, and the approved replay would find nothing to upload. Durable
+   bytes stay alive while the pending gate record names them; attachment GC
+   reads canonical ids anywhere in that tree. The bytes are read once, after
+   approval. *)
+let discord_attachments_held ~base_path ~keeper attachment_ids =
   let store = Attachment_store.create ~base_path in
+  let store_error id error =
+    Printf.sprintf "attachment %s: %s" id
+      (Attachment_store.get_error_to_string error)
+  in
+  let not_held id =
+    Printf.sprintf
+      "attachment %s is not in this keeper's attachments (absent, or another \
+       keeper's ephemeral file)"
+      id
+  in
   List.fold_left
     (fun acc id ->
        Result.bind acc (fun () ->
-         match Attachment_store.get_meta store ~id with
-         | Ok (Some _) -> Ok ()
-         | Ok None ->
-           Error (Printf.sprintf "attachment %s is not in the attachment store" id)
-         | Error error ->
-           Error
-             (Printf.sprintf "attachment %s: %s" id
-                (Attachment_store.get_error_to_string error))))
+         match Attachment_store.can_keeper_read store ~keeper ~id_or_sha256:id with
+         | Error error -> Error (store_error id error)
+         | Ok false -> Error (not_held id)
+         | Ok true ->
+           (match Attachment_store.promote_to_durable store ~id with
+            | Ok (Some _) -> Ok ()
+            | Ok None -> Error (not_held id)
+            | Error error -> Error (store_error id error))))
     (Ok ()) attachment_ids
 
 let replay_connector_post_with_senders
@@ -1877,8 +1892,8 @@ let handle_surface_post_with_outcome
     (* Checked before approval so a post naming a file that is not there
        fails here, not after an operator approved it. *)
     match
-      discord_attachments_present ~base_path:config.Workspace.base_path
-        attachment_ids
+      discord_attachments_held ~base_path:config.Workspace.base_path
+        ~keeper:meta.name attachment_ids
     with
     | Error message ->
       fail
@@ -2737,6 +2752,8 @@ let handle_masc_keeper_with_outcome
 ;;
 
 module For_testing = struct
+  let discord_attachments_held = discord_attachments_held
+
   let replay_connector_post_with_senders
         ~config
         ~meta

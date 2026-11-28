@@ -440,6 +440,11 @@ val handle_masc_local_runtime_with_outcome
   -> Keeper_tool_execution.t
 
 module For_testing : sig
+  val discord_attachments_held :
+    base_path:string -> keeper:string -> string list -> (unit, string) result
+  (** The check a Discord post's attachment_ids pass before approval: each id
+      is readable by [keeper] and is promoted to durable. *)
+
   val replay_connector_post_with_senders :
     config:Workspace.config ->
     meta:keeper_meta ->

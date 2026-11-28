@@ -134,6 +134,11 @@ let thread_ts_of_args ~surface args =
 let attachment_ids_of_json = function
   | `List [] ->
     Error "attachment_ids must not be empty; omit it to post text only"
+  | `List items
+    when List.length items > Discord_rest_client.max_files_per_message ->
+    Error
+      (Printf.sprintf "attachment_ids names %d files; a Discord post carries at most %d"
+         (List.length items) Discord_rest_client.max_files_per_message)
   | `List items ->
     let rec decode seen acc index = function
       | [] -> Ok (List.rev acc)

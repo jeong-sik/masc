@@ -41,8 +41,10 @@ let run_error_of (event : Ag_ui.event) : Keeper_chat_wire.Keeper_chat_wire_t.run
 
 let is_run_error event = Option.is_some (run_error_of event)
 
+(* A non-terminal frame. MASC_EVENT is a name no Keeper chat path selects on,
+   so the frame stands for "any CUSTOM" and nothing else. *)
 let custom_event () =
-  Ag_ui.of_custom ~name:Keeper_stream_ping (`Assoc [ ("ok", `Bool true) ])
+  Ag_ui.of_custom ~name:Masc_event (`Assoc [ ("ok", `Bool true) ])
 
 let run_error_event () =
   Ag_ui.run_error ~thread_id:"keeper:test" ~message:"boom" ()

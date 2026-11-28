@@ -111,7 +111,7 @@ related: []
 | `KEEPER_TOOL_RESULT_READY` | 결과가 tool-call 저장소에 기록됐다. 내용은 없다 | `TOOL_CALL_RESULT` 는 `content` 가 필수다 | 다르다. Q2 |
 | `KEEPER_TOOL_APPROVAL_REQUESTED`·`_SETTLED` | 턴 안에서 운영자 답을 기다린다 | interrupt 는 run 을 끝낸다 | 다르다. Q1 |
 | `KEEPER_NATIVE_TOOL_START`·`_END`·`_PROGRESS` | provider 가 직접 도는 도구(검색 등)의 진행 | `ACTIVITY_*`: "structured progress that is not conversation content"(`activity.md`) | 가깝다. Q3 |
-| `KEEPER_STREAM_MESSAGE_START`·`_DELTA` | provider 메시지의 model, stop reason, usage | `RUN_FINISHED.usage`·`RUN_ERROR.usage`(`TokenUsage[]`)는 usage 만 받는다 | usage 는 run 끝에도 싣는다. 이벤트는 `masc.` |
+| `KEEPER_STREAM_MESSAGE_START`·`_DELTA` | provider 메시지의 model, stop reason, usage | `RUN_FINISHED.usage`·`RUN_ERROR.usage`(`TokenUsage[]`)는 usage 만 받는다 | 이벤트는 `masc.` 로 남는다. run 끝의 usage 는 Q8 |
 | `KEEPER_CONNECTED`, `KEEPER_RUNTIME_ATTEMPT_STARTED`, `KEEPER_PROVIDER_RETRY`, `KEEPER_STREAM_MESSAGE_STOP`, `KEEPER_STREAM_PING`, `KEEPER_CONTENT_BLOCK_START`·`_STOP`, `KEEPER_MODEL_CONTENT_ACTIVITY`, `KEEPER_STREAM_PROTOCOL_ERROR`, `KEEPER_MEDIA_DELTA` | provider 스트림과 runtime 관찰 | 없다 | `masc.` |
 | `KEEPER_CHAT_BATCH_BOUND`, `KEEPER_CONTINUATION_CHECKPOINT`, `KEEPER_EXTERNAL_EFFECT_COMPLETED`, `KEEPER_REPLY_DETAILS`, `KEEPER_TOOL_CALL_ADMITTED`, `KEEPER_TOOL_TRANSCRIPT_COMMITTED`, `KEEPER_ATTACHMENT` | masc 대화 operation 과 저장 사실 | 없다 | `masc.` |
 | `MASC_EVENT` | `/ag-ui/events` 의 masc 이벤트 | 없다 | `masc.` |
@@ -173,7 +173,9 @@ related: []
 
 #### 턴 경계
 
-- journal 은 그대로다. 턴의 `Run_started`·`Run_finished` 를 wire 에서는 `masc.KEEPER_TURN_STARTED`·`masc.KEEPER_TURN_FINISHED` 로 보낸다.
+- journal 은 그대로다. 턴의 `Run_started`·`Run_finished`·`Event_error` 를 wire 에서는 `masc.KEEPER_TURN_STARTED`·`masc.KEEPER_TURN_FINISHED`·`masc.KEEPER_TURN_FAILED` 로 보낸다.
+- `Event_error` 는 run 의 끝이 아닐 수 있다. continuation 이 남은 operation 은 턴 outcome 을 보지 않고 `Operation_deferred` 로 `Queued` 에 돌아간다. 그 뒤의 display·transcript 실패도 `Event_error` 를 낸다(`operation_execution_of_outcome_with_ref` 주석). projection 은 journal 만의 함수라 그 이벤트가 마지막인지 모른다.
+- settle 이 쓰는 `Event_error`(`record_terminal_error`, `synthesize_wire_terminal_on_settle`)도 journal 에서는 같은 이벤트라 `masc.KEEPER_TURN_FAILED` 가 된다. run 의 실패 끝은 기록에서 따로 만든다(「run 의 끝」).
 - `next_sequence` 의 경계 조건, settle 보정, `content_generation` 의 원천은 바뀌지 않는다.
 - masc 클라이언트는 「대기」를 `RUN_STARTED` 로, 「실행 시작」을 `masc.KEEPER_TURN_STARTED` 로 구분한다. Dashboard 의 `started` 와 TUI 의 `Chunk_run_started` 처리를 턴 CUSTOM 으로 옮긴다.
 - 묶인 턴(`masc.KEEPER_CHAT_BATCH_BOUND`)은 지금처럼 member operation 마다 run 이다.
@@ -186,11 +188,11 @@ related: []
 |---|---|---|
 | `Succeeded` | `RUN_FINISHED`, outcome `success` | 없음 |
 | `Cancelled` | `RUN_FINISHED`, outcome `cancelled`(`lifecycle.md`: 실패가 아닌 이유로 멈춘 run 은 MUST) | 없음 |
-| `Failed` | `RUN_ERROR`. 지금처럼 settle 이 journal 에 쓴 `Event_error` 를 보낸다 | 있음. journal 에 쓰지 못했으면 없음 |
+| `Failed` | `RUN_ERROR`. code 와 message 는 기록의 공개 failure 다(`Keeper_chat_operation.to_public_json` 의 typed code 와 고정 문구). private detail 은 싣지 않는다 | 없음 |
 
-- seq 없는 끝은 기록으로 만든다. timestamp 는 기록의 `completed_at` 이다. 지금 `Failed` 보충과 같은 꼴이다.
+- 세 끝 모두 seq 없이 기록으로 만든다. timestamp 는 기록의 `completed_at` 이다. 지금 `Failed` 보충(`operation_terminal_after_replay`)과 같은 꼴이다.
 - 끝을 보내는 길은 셋이다. 셋 다 operation 기록을 읽는다.
-  - live: settle hook(`on_operation_execution_settled`)이 `Succeeded` 끝을, 큐 취소 길이 `Cancelled` 끝을 보낸다. 받는 곳은 `chat/stream` 응답의 live sink(`publish_operation_live_event`)와 observer 길(`Keeper_chat_broadcast.operation_event`) 둘이다. 지금 `Failed` 끝이 두 곳에 가는 것과 같다. 큐 취소는 HTTP cancel 길과 도구 길 모두 `cancel_queued` 가 성공한 뒤다. 묶음 실행은 `cancel_queued` 가 member 까지 정산하므로 member operation 마다 보낸다.
+  - live: settle hook(`on_operation_execution_settled`)이 `Succeeded`·`Failed` 끝을, 큐 취소 길이 `Cancelled` 끝을 보낸다. 받는 곳은 `chat/stream` 응답의 live sink(`publish_operation_live_event`)와 observer 길(`Keeper_chat_broadcast.operation_event`) 둘이다. 지금 settle 이 `Failed` 의 `Event_error` 를 두 곳에 보내는 길을 쓴다. 큐 취소는 HTTP cancel 길과 도구 길 모두 `cancel_queued` 가 성공한 뒤다. 묶음 실행은 `cancel_queued` 가 member 까지 정산하므로 member operation 마다 보낸다.
   - heartbeat: 기록이 끝 상태면 그 끝을 live queue 에 넣고, pump 가 보내고 닫는다. 지금은 frame 없이 닫는다. heartbeat 는 pump 와 다른 fiber 라서 직접 쓰면 queue 에 남은 frame 보다 끝이 앞설 수 있다. 그래서 `Server_sse_response.idle` 에 frame 을 queue 로 넘기는 갈래를 더한다.
   - 재생 뒤 보충: `operation_terminal_after_replay` 를 `Succeeded`·`Cancelled` 로 넓힌다.
 - 셋이 같은 끝을 만들 수 있다. pump 는 첫 끝을 `Send_last` 로 보내고 닫으므로 한 응답에 끝은 하나다.
@@ -201,12 +203,12 @@ related: []
 - 이 셋으로 끝이 빠지는 창이 닫힌다.
   - 기록을 commit 한 뒤 settle hook 이 보내기 전에 heartbeat 가 온 경우: heartbeat 가 보낸다.
   - live 로 보내지 못한 경우(연결 전, 큐 취소 직후 프로세스가 죽음): 다시 붙으면 재생 뒤 보충이 보낸다.
-  - `Failed` 의 journal 쓰기가 실패한 경우: 지금은 broadcast 를 건너뛰고 frame 없이 닫힌다. heartbeat 가 기록의 `RUN_ERROR` 를 보낸다.
-- stream 은 끝 frame 을 보내고 닫는다. 턴의 `Run_finished` 로는 닫지 않는다.
+  - settle 이 journal 에 `Event_error` 를 쓰지 못한 경우: 지금은 broadcast 를 건너뛰고 frame 없이 닫힌다. 끝은 기록에서 나오므로 journal 쓰기와 상관없이 간다.
+- stream 은 끝 frame 을 보내고 닫는다. 턴의 `Run_finished`·`Event_error` 로는 닫지 않는다. journal 중간의 `Event_error` 뒤에 다음 턴이 와도 live·재생·observer 가 run 을 이어 간다.
 - 끝을 journal 에 쓰지 않는 이유:
   - 기록과 journal 두 곳이 끝을 가지면, 두 쓰기 사이의 창마다 기록 보충이 어차피 필요하다.
   - 시작 복구 대상, journal codec 의 새 태그, 옛 바이너리로 되돌릴 때의 재생이 새 문제가 된다.
-  - 단점: `Succeeded`·`Cancelled` 끝에는 seq 가 없다. `since_seq` 로 다시 붙은 클라이언트는 재생 뒤 보충으로 끝을 받는다. 순서 시험은 journal 녹화에 operation 기록의 끝 상태를 더해서 돌린다.
+  - 단점: 끝에는 seq 가 없다. `since_seq` 로 다시 붙은 클라이언트는 재생 뒤 보충으로 끝을 받는다. 순서 시험은 journal 녹화에 operation 기록의 끝 상태를 더해서 돌린다.
 - seq 없는 끝의 중복: 소비자는 위치로 거르지 않고 run 상태로 거른다. 이미 끝난 run 에 온 끝은 버린다. observer 의 seq 중복 제거(`keeper-chat-tab.ts` `recordObserverSeq`)는 지금도 seq 없는 frame 을 거르지 않는다.
 - 업그레이드 전 journal 도 같은 길로 끝을 받는다. 옛 journal 을 위한 reader 는 더하지 않는다.
 
@@ -222,7 +224,7 @@ related: []
   - reasoning 의 `messageId` 도 thinking 의 response 식별자로 같은 꼴을 쓴다.
   - operation id 는 thread 안에서 하나뿐이다. 나머지는 operation 안의 occurrence 다. 이 조합이 겹치지 않는지는 순서 시험이 본다.
 - 끊긴 item: projection 은 응답마다 열린 message·tool call·reasoning 을 들고 있다가 닫는다.
-  - 닫는 때: 턴 끝(`masc.KEEPER_TURN_FINISHED` 앞), provider 재시도(`masc.KEEPER_PROVIDER_RETRY` 앞), run 끝 앞.
+  - 닫는 때: 턴 끝(`masc.KEEPER_TURN_FINISHED`·`_FAILED` 앞), provider 재시도(`masc.KEEPER_PROVIDER_RETRY` 앞), run 끝 앞.
   - 재시도 뒤 item 은 앞과 다른 id 를 쓴다. 지금 occurrence 가 재시도마다 바뀌는지는 단계 2 에서 확인한다. 바뀌지 않으면 runtime attempt 를 id 에 넣는다.
 - `snapshot`: Q5 를 정한 뒤 옮긴다.
 - role: ATD `role` 을 1.0 의 네 값으로 좁힌다. `tool` 이 빠지고 `developer` 가 생긴다. 서버는 이 frame 에 `User`·`Assistant` 만 쓰므로(§1.2) 빠지는 값을 쓰는 곳이 없다.
@@ -230,10 +232,7 @@ related: []
   - `passthrough.md` 는 prefix 꼴을 정하지 않는다. 예시 `com.example.cart-updated` 처럼 `.` 으로 나눈다. reverse-DNS 이름은 masc 가 가진 domain 이 없어 쓰지 않는다.
   - 스택의 생성기 `atd-native-gen` 은 wire 이름을 ASCII 영문·숫자·`_` 만 받는다(`native_ir.ml` `plain_name`). 이 단계에서 `.` 도 받게 한다. `.` 은 Swift·Kotlin 문자열 literal 에서 escape 가 필요 없어 `naming.ml` 의 전제가 그대로다. 거절 시험은 `x-y` 를 계속 거절하고 `masc.x` 를 받는지 본다.
 - thinking: `KEEPER_THINKING_DELTA` 를 `REASONING_*` 로 보낸다. provider content block 하나가 reasoning 하나다. block 이 열릴 때 `REASONING_START`·`REASONING_MESSAGE_START` 를, 닫힐 때 `_END` 둘을 보낸다. thinking 의 `response` 는 `metadata.masc` 로 간다.
-- usage: run 끝(`RUN_FINISHED.usage`·`RUN_ERROR.usage`)에 provider·model 마다 `TokenUsage` 하나를 싣는다. 1.0 은 run 안의 모델 호출을 모두 더해 provider·model 로 나누게 한다(`RunFinishedEvent.usage`). 토큰을 쓴 뒤 실패한 run 도 usage 를 남긴다.
-  - 원천: operation 기록에는 usage 가 없다(`Succeeded` 는 `completed_at`·`outcome_ref`, `Cancelled` 는 `completed_at`). 끝을 만드는 세 길이 그 operation 의 journal 을 읽는다. provider 메시지마다 마지막 누적 usage 를 그 메시지 `KEEPER_STREAM_MESSAGE_START` 의 model 로 묶어 더한다. `KEEPER_STREAM_MESSAGE_DELTA` 의 usage 는 누적값이다(`dashboard/src/schemas/sse.ts:447`).
-  - 계산법: `Agent_core.Types.api_usage` 는 `input_tokens`, cache 쓰기, cache 읽기를 따로 둔다. 셋이 겹치지 않는다고 보고 `inputTokens` = 셋의 합, `cachedInputTokens` = cache 읽기, `cacheWriteInputTokens` = cache 쓰기, `totalTokens` = `inputTokens` + `outputTokens` 로 쓴다. 1.0 은 `inputTokens` 에 cache 읽기·쓰기를 넣게 한다(`TokenUsage`). provider adapter 마다 이 뜻으로 채우는지는 층 2-b 에서 provider 마다 시험한다.
-  - journal 이 끝까지 완전할 때만 싣는다. 읽기가 `Ok` 이고, seq 에 빈자리가 없고, 마지막 이벤트가 끝 경계(`Run_finished`·`Event_error`)여야 한다. seq 는 bus 가 매기고 publish 마다 journal 에 쓰므로(`keeper_chat_event_log.mli` `append`), 빈자리는 쓰기 실패다. 완전하지 않으면 `usage` 를 뺀다. 일부만 더한 값은 싣지 않는다.
+- usage: 첫 버전은 run 끝에 싣지 않는다(Q8). 1.0 에서 `usage` 는 선택 필드다(`RunFinishedEvent`·`RunErrorEvent` 의 required 에 없음). masc 클라이언트는 지금처럼 `masc.KEEPER_STREAM_MESSAGE_*` 에서 provider 메시지의 usage 를 받는다.
 - `Ag_ui.protocol_version` 은 `"1.0"` 으로 바꾸고 `RUN_STARTED.protocolVersion` 에 쓴다.
 
 #### frame 위치와 이어 받기
@@ -312,10 +311,10 @@ related: []
 
 | 경우 | 동작 |
 |---|---|
-| 답이 일부 온 뒤 끊겨 다시 보냄(새 runId) | 같은 operation 에 붙는다. SDK 는 `TEXT_MESSAGE_START` 에서 assistant 메시지를 `messages` 에 쌓으므로 마지막 메시지가 assistant 여도 U 로 찾는다 |
+| 답이 일부 온 뒤 끊겨 다시 보냄(새 runId) | 같은 operation 에 붙는다. SDK 는 `TEXT_MESSAGE_START` 에서 assistant 메시지를 `messages` 에 쌓으므로 마지막 메시지가 assistant 여도 U 로 찾는다. 끝날 때 snapshot 으로 답을 받는다(아래 상태 표) |
 | 큐에서 기다리는 중 다시 보냄 | 같은 operation 에 붙는다. 턴은 한 번만 돈다 |
 | 앞 메시지가 operation 이 되기 전에 거절됨(400, `Keeper_not_started`, paused) | 그 메시지에는 operation 이 없다. 새 마지막 user 메시지가 입력이 된다. 거절된 메시지는 쓰지 않고, snapshot 이 화면에서 지운다 |
-| 끝난 operation 의 메시지를 다시 보냄 | 붙어서 그 operation 의 내용과 끝을 다시 받는다. 같은 말을 다시 시도하려면 클라이언트가 새 메시지로 보내야 한다 |
+| 끝난 operation 의 메시지를 다시 보냄 | 붙어서 기록 행으로 만든 snapshot 과 끝을 받는다. 같은 말을 다시 시도하려면 클라이언트가 새 메시지로 보내야 한다 |
 | 같은 id 의 메시지를 고쳐 보냄 | `Idempotency_conflict`. 응답은 `RUN_ERROR` 하나다(code `masc.idempotency_conflict`). 스트림은 `RUN_ERROR` 로 시작해도 된다(`lifecycle.md`) |
 
 - 클라이언트 메시지 id 는 수락 때 operation source 에 저장한다. user 행은 턴이 실행될 때 쓰이므로(`append_queued_user_row_once`, `server_routes_http_keeper_stream.ml:1711`), 그때 이 id 를 행에 옮긴다.
@@ -323,24 +322,33 @@ related: []
 
 #### 이벤트 순서
 
-- 응답은 journal 을 frame 으로 다시 보내지 않는다. 지금까지의 내용은 snapshot 에 담고, 그 뒤의 frame 만 live 로 보낸다.
-  - 이유: 1.0 클라이언트는 이미 가진 id 의 `TEXT_MESSAGE_START` 를 그 메시지를 다시 여는 것으로 보고 글을 덧붙인다(`text-messages.md`). snapshot 에 답이 있는데 journal 을 처음부터 보내면 글이 두 번 쌓인다.
-- 순서: `RUN_STARTED` → `MESSAGES_SNAPSHOT` → 열린 item 을 다시 여는 START → live frame → 끝.
-- snapshot: masc 기록에 이 operation 의 지금까지 내용을 더한 것이다.
-  - 완료된 operation 은 `outcome_ref` 와 연결된 저장 행을 원본으로 쓴다. journal 은 안정 id 와 부가 관측을 복원하는 데 보조로 쓴다. journal 이 없어도 저장된 답은 유지하고, 같은 operation 행을 중복 합산하지 않는다.
-  - 실행 중 operation 은 live owner 의 접두부 위치와 대조해 journal 이 위치 c 까지 완전할 때만 snapshot 을 보낸다. journal 이 없거나 읽을 수 없거나 누락을 배제할 수 없으면 `RUN_STARTED` 다음에 복원 오류 `RUN_ERROR` 를 보낸다. 이 응답은 기존 메시지를 교체하는 snapshot 을 보내지 않으며 durable operation 의 상태를 바꾸지 않는다. 완료 결과를 읽지 못해도 같은 복원 오류를 보낸다. user 행이 아직 없으면 operation source 의 메시지를 쓴다.
-  - 다른 operation 은 기록 행으로 넣는다.
-  - 범위: 기록의 마지막 N 행과 이 operation 이다. N 은 단계 3 에서 응답 크기를 재고 정한다. 잘라 보내면 클라이언트 화면에서 그보다 앞 메시지가 지워진다. 다른 connector 에서 온 메시지도 masc 기록이라 들어간다.
-  - reasoning: snapshot 에 reasoning 메시지가 하나라도 있으면 클라이언트는 snapshot 에 없는 reasoning 을 버린다(`state.md`). 이 operation 의 reasoning 을 넣어 끊기 전의 조각이 남지 않게 한다.
-- 열린 item: 위치 c 에서 열려 있던 message·tool call·reasoning message 는 snapshot 에 지금까지 내용이 들어가고, 같은 id 의 START 로 다시 연다. 1.0 은 닫힌 message·tool call 을 다시 열어 덧붙이는 것을 허용한다(`text-messages.md`, `tool-calls.md`). reasoning message 는 열린 id 만 막는다(`reasoning.md`).
-  - 열린 tool call 은 snapshot 에 인자를 빈 문자열로 넣는다. START 직후 첫 `TOOL_CALL_ARGS` 가 그 시점까지의 인자 전체이고, 그 뒤에 새 delta 를 잇는다.
-    - 1.0 은 다시 연 call 의 인자를 덧붙이고(`tool-calls.md`), `@ag-ui/client` 1.0.5 는 첫 `TOOL_CALL_ARGS` 로 바꾼다(`replaceToolCallArgs`). snapshot 에 지금까지의 인자를 넣으면 1.0 규칙대로 읽는 클라이언트에서 인자가 두 번 쌓인다. 빈 값이면 두 읽기가 같은 인자가 된다.
-    - `FunctionCall.arguments` 는 필수 string 이고 JSON 이 아니어도 된다(1.0 schema). 빈 문자열도 맞는 값이다.
-  - reasoning span(`REASONING_START`)을 다시 여는 규칙은 1.0 에 없다. c 에서 span 이 열려 있으면 어떻게 할지는 D4 에서 SDK 동작을 보고 정한다.
-- live: sink 는 journal 을 읽기 전에 등록한다. c 까지의 이벤트는 live 에서 거른다. 지금 `chat/stream` 이 재생과 live 를 잇는 방식(`live_event_is_new`)과 같다.
+- 이 operation 의 내용은 기록 행으로만 보낸다. journal 을 frame 으로 다시 보내거나, journal 을 접어 snapshot 을 만들지 않는다.
+  - journal 로 다시 보내면 글이 두 번 쌓인다. 1.0 클라이언트는 이미 가진 id 의 `TEXT_MESSAGE_START` 를 그 메시지를 다시 여는 것으로 보고 글을 덧붙인다(`text-messages.md`).
+  - journal 을 접은 snapshot 은 클라이언트가 받은 답을 지울 수 있다. 클라이언트는 snapshot 에 없는 assistant·tool 메시지를 버린다(`state.md`).
+    - journal 쓰기는 실패해도 턴을 멈추지 않는다(`keeper_chat_event_log.mli` `append`). 보존 기간이 지나면 지워진다(`server_runtime_startup_maintenance.ml`).
+    - continuation 턴 하나의 쓰기가 통째로 빠지면 seq 는 이어지고 마지막 이벤트도 앞 턴의 경계라, journal 만 봐서는 빠진 것을 알 수 없다.
+  - 기록 행은 operation 이 그 delivery key 로 쓴다(`Server_keeper_operation_transcript.persist`). 턴의 답, tool call, trace block 이 행에 있다. 미뤄진 runtime 시도(`Runtime_deferred`)는 tool 행만 쓴다(`tools_only`).
+- 응답은 live 를 먼저 등록하고 operation 기록을 읽은 뒤, 기록 상태로 갈린다.
+
+| 기록 상태 | 응답 |
+|---|---|
+| `Queued`, 남은 continuation 없음(첫 턴 전) | `RUN_STARTED` → `MESSAGES_SNAPSHOT`(기록과 U) → live frame → 끝. 등록한 뒤에 읽었으므로 이 operation 의 이벤트는 모두 live 로 온다 |
+| `Queued`, 남은 continuation 있음(`Operation_deferred`) | `RUN_STARTED` → SSE comment → operation 이 끝나면 끝난 상태의 행대로 보낸다. live frame 은 보내지 않는다 |
+| `Running` | 위와 같다 |
+| `Succeeded`·`Failed`·`Cancelled` | `RUN_STARTED` → `MESSAGES_SNAPSHOT`(기록과 이 operation 의 행) → 기록으로 만든 끝(D2 「run 의 끝」) |
+| 끝났는데 행 읽기가 `Error` | `RUN_STARTED` → `masc.KEEPER_RESTORE_FAILED` → 기록으로 만든 끝. snapshot 을 보내지 않으므로 클라이언트가 가진 메시지는 그대로다 |
+
+- 「행 읽기가 `Error`」는 없음과 다르다. 행 저장소는 깨진 행을 없음으로 읽지 않고 `Error` 로 돌려준다(`keeper_chat_store.mli` `append_assistant_message_once` 주석). 행이 하나도 없는 끝(첫 턴 전에 취소됨)은 snapshot 에 U 만 든다.
+- 끝은 늘 기록에서 만든다. 붙은 응답이 run 을 실패로 알리는 것은 기록이 `Failed` 일 때뿐이다. 돌고 있거나 성공한 operation 에 복원 오류 `RUN_ERROR` 를 보내지 않는다.
+- 기다린 뒤 읽는 행은 이미 있다. 행은 턴 안에서 쓰고(`persist_operation_attempt`), settle hook 은 턴과 그 publisher 가 끝난 뒤 불린다(`:3395` 주석).
+- 기다리는 동안 run 은 열려 있고 SSE comment 만 온다. 큐 대기와 같은 모양이다(「못 하는 것」).
+- snapshot 은 masc 기록과 같다. 기록에 없는 것은 1.0 클라이언트 화면에서도 없어진다. 클라이언트 화면은 Dashboard 를 다시 열었을 때와 같아진다.
+- snapshot 범위: masc 기록의 마지막 N 행과 이 operation 의 행이다. user 행이 아직 없으면 operation source 의 메시지로 채운다.
+  - N 은 단계 3 에서 응답 크기를 재고 정한다. 잘라 보내면 클라이언트 화면에서 그보다 앞 메시지가 지워진다. 다른 connector 에서 온 메시지도 masc 기록이라 들어간다.
+  - reasoning: 행의 thinking block 을 reasoning 메시지로 넣는다. snapshot 에 reasoning 메시지가 하나라도 있으면 클라이언트는 snapshot 에 없는 reasoning 을 버리므로(`state.md`), 끊긴 응답의 조각이 남지 않는다.
 - snapshot 의 id:
   - user 메시지는 클라이언트 id 가 있으면 그것을, 없으면 masc 행 id 를 쓴다.
-  - assistant·tool·reasoning 메시지는 stream 이 쓴 id(D2)와 같다.
+  - assistant·tool·reasoning 메시지는 stream 이 쓴 id(D2)와 같다. 그래야 끊긴 응답에서 받은 메시지가 같은 자리에서 바뀐다.
   - 기록 행과 stream message 가 1:1 로 맞는지는 단계 3 의 첫 확인이다.
 
 #### 첫 버전에서 1.0 클라이언트가 못 하는 것
@@ -348,6 +356,7 @@ related: []
 - 큐 대기와 승인 대기 동안 run 은 열려 있고 SSE comment 만 온다. 무엇을 기다리는지는 `masc.` CUSTOM 이라 보이지 않는다(Q1, Q3).
 - 승인은 Dashboard·TUI 에서 한다.
 - 연결을 끊어도 operation 은 취소되지 않는다. 다시 보내면 붙는다. 외부 클라이언트의 취소는 없다.
+- 실행 중이거나 continuation 을 기다리는 operation 에 다시 붙으면 남은 글이 흐르지 않는다. 끝나면 snapshot 으로 한 번에 보인다(Q7).
 - text part 가 하나도 없는 메시지(이미지만)는 턴 없이 닫히고, snapshot 이 그 메시지를 화면에서 지운다. 알림은 `masc.` CUSTOM 뿐이라 1.0 클라이언트 사용자는 이유를 볼 수 없다.
 
 ### D4. 외부 클라이언트로 확인한다
@@ -385,11 +394,12 @@ related: []
 2. **wire 를 1.0 모양으로**
    - 층마다 서버, masc 클라이언트 셋, fixture 를 같이 바꾼다. 각 층의 CI 가 깨지지 않게 하기 위해서다.
    - 층 2-a: timestamp, `metadata.masc`, id, role.
-   - 층 2-b: 응답 머리, 턴 CUSTOM, 기록으로 만드는 끝과 그 세 길, CUSTOM 이름과 생성기의 `.`, thinking, usage, 두 SSE reader 와 observer 위치의 동시 전환, smoke 스크립트.
+   - 층 2-b: 응답 머리, 턴 CUSTOM, 기록으로 만드는 끝과 그 세 길, CUSTOM 이름과 생성기의 `.`, thinking, 두 SSE reader 와 observer 위치의 동시 전환, smoke 스크립트.
    - 층 2-c: fixture 를 생성자마다 채우고 frame 시험과 순서 시험을 켠다.
-   - 확인: 두 시험 통과, 끝을 보내는 세 길마다 시험(성공 직후 heartbeat, 큐 취소 live, 끝난 뒤 다시 붙기), observer 가 성공·취소 끝을 받는 시험, frame 여럿을 내는 이벤트 중간에서 끊고 이어 받아 빠짐·겹침이 없는 시험, journal 이 완전하지 않을 때 run 끝에 usage 가 없는 시험, provider 마다 usage 변환 시험, Dashboard·TUI 기존 시험 통과, 네이티브 생성물 decode 시험 통과, smoke 스크립트 로컬 실행.
+   - 확인: 두 시험 통과, 끝을 보내는 세 길마다 시험(성공 직후 heartbeat, 큐 취소 live, 끝난 뒤 다시 붙기), observer 가 성공·취소 끝을 받는 시험, frame 여럿을 내는 이벤트 중간에서 끊고 이어 받아 빠짐·겹침이 없는 시험, continuation 이 남은 operation 에서 턴 `Event_error` 뒤에 다음 턴이 와도 live·재생·observer 가 run 을 닫지 않고 끝을 기록에서 한 번 받는 시험, Dashboard·TUI 기존 시험 통과, 네이티브 생성물 decode 시험 통과, smoke 스크립트 로컬 실행.
 3. **`RunAgentInput` 길**
-   - 확인: 입력 해석 표의 행마다 시험, 중복 전송 표의 행마다 시험(붙은 응답의 최종 글이 한 번인지 포함), `MESSAGES_SNAPSHOT` 을 포함한 응답이 순서 시험을 통과. journal 이 없거나 빠진 완료 작업은 저장 결과를 한 번 표시하고, 실행 중 완전성을 확인하지 못하면 기존 메시지를 지우는 snapshot 이 나가지 않음을 확인. 인자가 흐르던 tool call 에 다시 붙은 뒤의 인자가 1.0 덧붙임과 SDK 교체 두 읽기에서 같음을 확인.
+   - 확인: 입력 해석 표의 행마다 시험, 중복 전송 표의 행마다 시험(붙은 응답의 최종 글이 한 번인지 포함), `MESSAGES_SNAPSHOT` 을 포함한 응답이 순서 시험을 통과.
+   - 이벤트 순서의 상태 표 행마다 시험: 첫 턴 전 큐, continuation 대기, 실행 중, 성공, 실패, 첫 턴 전 취소와 continuation 뒤 취소, 행 읽기 `Error`. journal 을 지운 끝난 operation 에 붙어도 답이 기록 행과 같은지도 본다.
 4. **외부 클라이언트 확인**(D4)
 
 ## 5. 열린 질문
@@ -400,3 +410,13 @@ related: []
 - **Q4. 검사기.** 2026-11-28 `opam search` 로 JSON Schema 2020-12 검사기를 찾지 못했다. Dashboard 의존성에도 없다. Python `jsonschema`(측정에 쓴 것)를 쓰면 `type-check` job 에 설치가 는다. 헌장은 운영자 요청 없이 PR 마다 도는 검사를 늘리지 않게 하므로, 고른 도구와 job 변경을 운영자에게 확인받는다.
 - **Q5. 인자 `snapshot`.** `snapshot` 이 오는 경우 그 call 에 `delta` 를 보낸 적이 있는지 본다. 없으면 `snapshot` 을 그대로 `delta` 로 보내면 된다. 있으면 1.0 에는 담을 자리가 없다.
 - **Q6. CopilotKit 이 기본으로 보내는 값.** 단계 3 전에 실제 요청으로 본다. 볼 것은 `tools`·`context`·`forwardedProps` 의 값, threadId 를 정하는 설정, `protocolVersion` 이다. `context` 를 모델에 넘길지는 이 측정 뒤 정한다.
+- **Q7. 실행 중 다시 붙기의 이어 흘리기.** 첫 버전은 끝날 때 snapshot 으로 보낸다. 실행 중에 이어 흘리려면 그 시점까지의 내용을 journal 에서 만들어야 하고, 아래가 같이 정해져야 한다.
+  - journal 이 빠짐없다는 판정. seq 연속만으로는 continuation 턴 하나가 통째로 빠진 경우를 못 잡는다.
+  - live owner 의 위치와 journal 끝을 맞대는 길.
+  - 열린 tool call 의 인자. 1.0 은 다시 연 call 의 인자를 덧붙이고(`tool-calls.md`), `@ag-ui/client` 1.0.5 는 첫 `TOOL_CALL_ARGS` 로 바꾼다(`replaceToolCallArgs`). snapshot 에 인자를 빈 문자열로 두면 두 읽기가 같아진다. `FunctionCall.arguments` 는 필수 string 이다.
+  - 열린 reasoning span 을 다시 여는 규칙은 1.0 에 없다.
+- **Q8. run 끝의 usage.** 정확히 싣으려면 셋이 정해져야 한다.
+  - 묶음 실행: 모델 호출 하나를 member journal 마다 쓴다(`keeper_chat_operation_batch.mli`, `event_for_member`). member 마다 실으면 N 배로 센다. 한 member(`operation_id = execution_id`)만 싣고, 그 member 가 취소될 때의 처리를 정한다.
+  - provider 이름: `KEEPER_STREAM_MESSAGE_START` 에는 model 만 있다. 1.0 은 provider·model 마다 한 항목이다(`RunFinishedEvent.usage`). `runtime_id` 를 쓸지 비울지 정한다.
+  - 빠짐없음: `Succeeded.outcome_ref` 는 마지막 턴의 `turn_ref` 다. 그 턴의 `Run_finished` 가 journal 에 있는지까지 봐야 continuation 턴이 통째로 빠진 경우를 잡는다.
+  - 계산법은 정해져 있다. `api_usage` 는 `input_tokens`·cache 쓰기·cache 읽기를 따로 두고, 1.0 `inputTokens` 는 둘을 포함한다.

@@ -1115,14 +1115,14 @@ let test_encoded_pixel_snapshot () =
          was flaky under CI: in failing runs the guest never observed the flag,
          pixels stayed constant, and the retained/inline assertion inverted
          (runs 46077144207, 46082771264, 46084052839 — one constant revision
-         across all ticks). *)
+         across all ticks). On the pinned core 581da90 the cart additionally never ran unless the boot ROM selects slot 2 for page 1: the frame stayed blanked (all-zero rgb, sha256 8123c216..., mode GRAPHIC1), so every tick read retained (runs 46086810409, 46088129522, 46089075533, 46090234412). *)
       let roms_dir = Filename.concat base_path "pixel-bios" in
       Sys.mkdir roms_dir 0o755;
       let write_code bytes offset code =
         List.iteri (fun i n -> Bytes.set bytes (offset + i) (Char.chr n)) code
       in
       let bios = Bytes.make 32768 '\000' in
-      write_code bios 0 [ 0xc3; 0x10; 0x40 ]; (* JP 4010; cartridge page is slot 2 *)
+      write_code bios 0 [ 0x3e; 0x08; 0xd3; 0xa8; 0xc3; 0x10; 0x40 ]; (* LD A,0x08; OUT (0xA8),A routes page 1 to slot 2 (the cartridge) - the pinned ocaml-msx 581da90 no longer forces ppi_a in load_cartridge, so the boot ROM must select the cart slot itself like real C-BIOS; then JP 4010 *)
       Out_channel.with_open_bin
         (Filename.concat roms_dir "cbios_main_msx2.rom")
         (fun oc -> output_bytes oc bios);
@@ -1190,34 +1190,17 @@ let test_encoded_pixel_snapshot () =
               Route.tick_response ~config ~body:(retained_request ~frames:2 first_tick)
             in
             assert_pixels_kind "retained" same_pixels;
-            (match
-               Lane.press
-                 ~who:"unit-pixel"
-                 ~keys:[ Result.get_ok (Lane.key_of_string "space") ]
-                 ~hold_frames:1
-                 ~step_frames:1
-                 ~sequence:false
-             with
-             | Ok _ ->
-               Printf.printf "DEBUG press-ok frame=%d\\n" (current_frame_number ());
-               (match Lane.frame () with
-                | Some f ->
-                  Printf.printf "DEBUG lane frame=%d mode=%s rgb_sha=%s\\n" f.number f.mode
-                    (Agent_core_sha256.to_hex (Agent_core_sha256.digest_string f.rgb))
-                | None -> Printf.printf "DEBUG no-frame\\n");
-               print_newline ()
-             | Error e -> fail (Lane.error_to_string e));
+            ignore
+              (require
+                 (Lane.press
+                    ~who:"unit-pixel"
+                    ~keys:[ Result.get_ok (Lane.key_of_string "space") ]
+                    ~hold_frames:1
+                    ~step_frames:1
+                    ~sequence:false));
             let _, changed_pixels =
               Route.tick_response ~config ~body:(retained_request same_pixels)
             in
-            Printf.printf "DEBUG changed kind=%s rev=%s\\n"
-              (match List.assoc_opt "kind" (pixels_object changed_pixels) with
-               | Some (`String s) -> s
-               | _ -> "?")
-              (match List.assoc_opt "revision" (pixels_object changed_pixels) with
-               | Some (`String s) -> s
-               | _ -> "?");
-            print_newline ();
             assert_pixels_kind "inline" changed_pixels;
             let pixel_fields = pixels_object changed_pixels in
             let rgb =

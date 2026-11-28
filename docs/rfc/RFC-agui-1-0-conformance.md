@@ -230,7 +230,10 @@ related: []
   - `passthrough.md` 는 prefix 꼴을 정하지 않는다. 예시 `com.example.cart-updated` 처럼 `.` 으로 나눈다. reverse-DNS 이름은 masc 가 가진 domain 이 없어 쓰지 않는다.
   - 스택의 생성기 `atd-native-gen` 은 wire 이름을 ASCII 영문·숫자·`_` 만 받는다(`native_ir.ml` `plain_name`). 이 단계에서 `.` 도 받게 한다. `.` 은 Swift·Kotlin 문자열 literal 에서 escape 가 필요 없어 `naming.ml` 의 전제가 그대로다. 거절 시험은 `x-y` 를 계속 거절하고 `masc.x` 를 받는지 본다.
 - thinking: `KEEPER_THINKING_DELTA` 를 `REASONING_*` 로 보낸다. provider content block 하나가 reasoning 하나다. block 이 열릴 때 `REASONING_START`·`REASONING_MESSAGE_START` 를, 닫힐 때 `_END` 둘을 보낸다. thinking 의 `response` 는 `metadata.masc` 로 간다.
-- usage: provider 메시지마다 `TokenUsage` 를 만들어 run 끝에 싣는다. `RUN_FINISHED.usage` 와 `RUN_ERROR.usage` 둘 다다. 토큰을 쓴 뒤 실패한 run 도 usage 를 남긴다.
+- usage: run 끝(`RUN_FINISHED.usage`·`RUN_ERROR.usage`)에 provider·model 마다 `TokenUsage` 하나를 싣는다. 1.0 은 run 안의 모델 호출을 모두 더해 provider·model 로 나누게 한다(`RunFinishedEvent.usage`). 토큰을 쓴 뒤 실패한 run 도 usage 를 남긴다.
+  - 원천: operation 기록에는 usage 가 없다(`Succeeded` 는 `completed_at`·`outcome_ref`, `Cancelled` 는 `completed_at`). 끝을 만드는 세 길이 그 operation 의 journal 을 읽는다. provider 메시지마다 마지막 누적 usage 를 그 메시지 `KEEPER_STREAM_MESSAGE_START` 의 model 로 묶어 더한다. `KEEPER_STREAM_MESSAGE_DELTA` 의 usage 는 누적값이다(`dashboard/src/schemas/sse.ts:447`).
+  - 계산법: `Agent_core.Types.api_usage` 는 `input_tokens`, cache 쓰기, cache 읽기를 따로 둔다. 셋이 겹치지 않는다고 보고 `inputTokens` = 셋의 합, `cachedInputTokens` = cache 읽기, `cacheWriteInputTokens` = cache 쓰기, `totalTokens` = `inputTokens` + `outputTokens` 로 쓴다. 1.0 은 `inputTokens` 에 cache 읽기·쓰기를 넣게 한다(`TokenUsage`). provider adapter 마다 이 뜻으로 채우는지는 층 2-b 에서 provider 마다 시험한다.
+  - journal 이 끝까지 완전할 때만 싣는다. 읽기가 `Ok` 이고, seq 에 빈자리가 없고, 마지막 이벤트가 끝 경계(`Run_finished`·`Event_error`)여야 한다. seq 는 bus 가 매기고 publish 마다 journal 에 쓰므로(`keeper_chat_event_log.mli` `append`), 빈자리는 쓰기 실패다. 완전하지 않으면 `usage` 를 뺀다. 일부만 더한 값은 싣지 않는다.
 - `Ag_ui.protocol_version` 은 `"1.0"` 으로 바꾸고 `RUN_STARTED.protocolVersion` 에 쓴다.
 
 #### frame 위치와 이어 받기
@@ -330,7 +333,9 @@ related: []
   - 범위: 기록의 마지막 N 행과 이 operation 이다. N 은 단계 3 에서 응답 크기를 재고 정한다. 잘라 보내면 클라이언트 화면에서 그보다 앞 메시지가 지워진다. 다른 connector 에서 온 메시지도 masc 기록이라 들어간다.
   - reasoning: snapshot 에 reasoning 메시지가 하나라도 있으면 클라이언트는 snapshot 에 없는 reasoning 을 버린다(`state.md`). 이 operation 의 reasoning 을 넣어 끊기 전의 조각이 남지 않게 한다.
 - 열린 item: 위치 c 에서 열려 있던 message·tool call·reasoning message 는 snapshot 에 지금까지 내용이 들어가고, 같은 id 의 START 로 다시 연다. 1.0 은 닫힌 message·tool call 을 다시 열어 덧붙이는 것을 허용한다(`text-messages.md`, `tool-calls.md`). reasoning message 는 열린 id 만 막는다(`reasoning.md`).
-  - 열린 tool call 의 START 직후에는 그 시점까지의 인자 전체를 `TOOL_CALL_ARGS` 로 먼저 보낸 뒤 새 delta 를 잇는다.
+  - 열린 tool call 은 snapshot 에 인자를 빈 문자열로 넣는다. START 직후 첫 `TOOL_CALL_ARGS` 가 그 시점까지의 인자 전체이고, 그 뒤에 새 delta 를 잇는다.
+    - 1.0 은 다시 연 call 의 인자를 덧붙이고(`tool-calls.md`), `@ag-ui/client` 1.0.5 는 첫 `TOOL_CALL_ARGS` 로 바꾼다(`replaceToolCallArgs`). snapshot 에 지금까지의 인자를 넣으면 1.0 규칙대로 읽는 클라이언트에서 인자가 두 번 쌓인다. 빈 값이면 두 읽기가 같은 인자가 된다.
+    - `FunctionCall.arguments` 는 필수 string 이고 JSON 이 아니어도 된다(1.0 schema). 빈 문자열도 맞는 값이다.
   - reasoning span(`REASONING_START`)을 다시 여는 규칙은 1.0 에 없다. c 에서 span 이 열려 있으면 어떻게 할지는 D4 에서 SDK 동작을 보고 정한다.
 - live: sink 는 journal 을 읽기 전에 등록한다. c 까지의 이벤트는 live 에서 거른다. 지금 `chat/stream` 이 재생과 live 를 잇는 방식(`live_event_is_new`)과 같다.
 - snapshot 의 id:
@@ -382,9 +387,9 @@ related: []
    - 층 2-a: timestamp, `metadata.masc`, id, role.
    - 층 2-b: 응답 머리, 턴 CUSTOM, 기록으로 만드는 끝과 그 세 길, CUSTOM 이름과 생성기의 `.`, thinking, usage, 두 SSE reader 와 observer 위치의 동시 전환, smoke 스크립트.
    - 층 2-c: fixture 를 생성자마다 채우고 frame 시험과 순서 시험을 켠다.
-   - 확인: 두 시험 통과, 끝을 보내는 세 길마다 시험(성공 직후 heartbeat, 큐 취소 live, 끝난 뒤 다시 붙기), observer 가 성공·취소 끝을 받는 시험, frame 여럿을 내는 이벤트 중간에서 끊고 이어 받아 빠짐·겹침이 없는 시험, Dashboard·TUI 기존 시험 통과, 네이티브 생성물 decode 시험 통과, smoke 스크립트 로컬 실행.
+   - 확인: 두 시험 통과, 끝을 보내는 세 길마다 시험(성공 직후 heartbeat, 큐 취소 live, 끝난 뒤 다시 붙기), observer 가 성공·취소 끝을 받는 시험, frame 여럿을 내는 이벤트 중간에서 끊고 이어 받아 빠짐·겹침이 없는 시험, journal 이 완전하지 않을 때 run 끝에 usage 가 없는 시험, provider 마다 usage 변환 시험, Dashboard·TUI 기존 시험 통과, 네이티브 생성물 decode 시험 통과, smoke 스크립트 로컬 실행.
 3. **`RunAgentInput` 길**
-   - 확인: 입력 해석 표의 행마다 시험, 중복 전송 표의 행마다 시험(붙은 응답의 최종 글이 한 번인지 포함), `MESSAGES_SNAPSHOT` 을 포함한 응답이 순서 시험을 통과. journal 이 없거나 빠진 완료 작업은 저장 결과를 한 번 표시하고, 실행 중 완전성을 확인하지 못하면 기존 메시지를 지우는 snapshot 이 나가지 않음을 확인.
+   - 확인: 입력 해석 표의 행마다 시험, 중복 전송 표의 행마다 시험(붙은 응답의 최종 글이 한 번인지 포함), `MESSAGES_SNAPSHOT` 을 포함한 응답이 순서 시험을 통과. journal 이 없거나 빠진 완료 작업은 저장 결과를 한 번 표시하고, 실행 중 완전성을 확인하지 못하면 기존 메시지를 지우는 snapshot 이 나가지 않음을 확인. 인자가 흐르던 tool call 에 다시 붙은 뒤의 인자가 1.0 덧붙임과 SDK 교체 두 읽기에서 같음을 확인.
 4. **외부 클라이언트 확인**(D4)
 
 ## 5. 열린 질문

@@ -393,6 +393,7 @@ let acp_argv ?(skip_permissions = false) driver posture =
       dangerously_skip_permissions = skip_permissions
     }
     ~temp_gemini_dir:None
+    ~muse_plugin_capabilities:[]
 ;;
 
 let acp_env driver posture =

@@ -550,7 +550,8 @@ export function QuotasTab(props: WorkspaceViewProps) {
     return personConnectRows(personIntegrations, connected)
   }, [personIntegrations, multiAccounts])
   const personKeyRows = useMemo(() => keyConnectableRows(personConnect), [personConnect])
-  const inventoryOpen = inventoryToggled ?? (isMultiAccountSignedIn && multiAccounts.length === 0)
+  const inventoryOpen = inventoryToggled
+    ?? (isMultiAccountSignedIn && inventoryObs.kind === 'value' && multiAccounts.length === 0)
 
   const providerDisplayNames = useMemo(() => {
     const names = new Map<string, string>()
@@ -2282,7 +2283,7 @@ export function QuotasTab(props: WorkspaceViewProps) {
         >
           <span>
             ${isMultiAccountSignedIn
-              ? `내 제공자 계정 (${multiAccounts.length}개 연결 · 연결할 수 있는 구독 ${personConnect.length}개)`
+              ? `내 제공자 계정 (${multiAccounts.length}개 계정 · 연결할 수 있는 구독 ${personConnect.length}개)`
               : `제공자 연동 & 자격 증명 (${integrations.length}개 제공자 · 활성 ${enabledIntegrationsCount})`}
           </span>
           <span aria-hidden="true">${inventoryOpen ? '▾' : '▸'}</span>

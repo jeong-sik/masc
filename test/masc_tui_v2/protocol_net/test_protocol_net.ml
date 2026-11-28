@@ -1130,6 +1130,50 @@ let test_wire_knowledge () =
     | `Int n -> n
     | _ -> Alcotest.fail "expected int offset")
 
+(* The server's embed lint kinds reach the TUI by name, and the header counts
+   an embed to nothing as broken. *)
+let test_wiki_lint_embed_kinds_and_tally () =
+  let lint_json =
+    parse_json
+      {|{
+        "pages_total": 1, "pages_unreadable": 0, "log_hole_suppressed": false,
+        "log_unknown_action": 0, "log_unreadable_line": 0,
+        "counts": {
+          "duplicate_title_candidates": 1, "broken_link": 1, "broken_media_embed": 2,
+          "broken_wiki_embed": 1, "broken_artifact_embed": 1, "invalid_embed": 1,
+          "unsupported_embed": 0, "orphan": 1, "missing_sources": 0
+        },
+        "duplicate_title_candidates": [],
+        "findings": [
+          { "kind": "broken_media_embed", "subject": "p", "page": "p", "line": 3, "target": "media:0001" },
+          { "kind": "broken_wiki_embed", "subject": "p", "page": "p", "line": 4, "target": "wiki:gone" },
+          { "kind": "broken_artifact_embed", "subject": "p", "page": "p", "line": 5, "target": "artifact:gone" },
+          { "kind": "invalid_embed", "subject": "p", "page": "p", "line": 6, "target": "media:xyz" },
+          { "kind": "unsupported_embed", "subject": "p", "page": "p", "line": 7, "target": "x:y" }
+        ]
+      }|}
+  in
+  let lint =
+    expect_ok "wiki lint report" (Wire_knowledge.decode_wiki_lint lint_json)
+  in
+  let kinds = List.map (fun (f : Wire_knowledge.wiki_lint_finding) -> f.kind) lint.findings in
+  Alcotest.(check bool) "every embed kind decodes to its own constructor" true
+    (kinds
+     = Wire_knowledge.
+         [
+           Broken_media_embed;
+           Broken_wiki_embed;
+           Broken_artifact_embed;
+           Invalid_embed;
+           Unsupported_embed;
+         ]);
+  Alcotest.(check int) "broken media embed count" 2 lint.counts.broken_media_embed;
+  let tally = Wire_knowledge.wiki_lint_tally lint.counts in
+  Alcotest.(check (list int))
+    "duplicates, orphans, broken (link and embeds), other"
+    [ 1; 1; 5; 1 ]
+    [ tally.duplicates; tally.orphans; tally.broken; tally.other ]
+
 (* 5. Wire_runtime: $0 Sub/$0 Exhausted/? Unreported, real paths, nested probe, browser-lane, clients *)
 let test_wire_runtime () =
   Alcotest.(check string) "efficiency path" "/api/v1/keeper-efficiency?month=2026-11"
@@ -8345,6 +8389,8 @@ let () =
             test_wire_chat_journal_refusals;
           Alcotest.test_case "wire_work" `Quick test_wire_work;
           Alcotest.test_case "wire_knowledge" `Quick test_wire_knowledge;
+          Alcotest.test_case "wiki lint embed kinds and tally" `Quick
+            test_wiki_lint_embed_kinds_and_tally;
           Alcotest.test_case "wire_runtime" `Quick test_wire_runtime;
           Alcotest.test_case "account cost state: credit and quota windows" `Quick
             test_account_cost_state_credit_and_quota;

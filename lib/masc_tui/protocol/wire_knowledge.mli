@@ -265,6 +265,11 @@ type wiki_embed = {
 type wiki_lint_kind =
   | Broken_link
   | Unsupported_link
+  | Broken_media_embed
+  | Broken_wiki_embed
+  | Broken_artifact_embed
+  | Invalid_embed
+  | Unsupported_embed
   | Orphan_page
   | Orphan_unconfirmed
   | Missing_sources
@@ -323,6 +328,11 @@ type wiki_page_summary = {
 type wiki_lint_counts = {
   broken_link : int;
   unsupported_link : int;
+  broken_media_embed : int;
+  broken_wiki_embed : int;
+  broken_artifact_embed : int;
+  invalid_embed : int;
+  unsupported_embed : int;
   orphan : int;
   orphan_unconfirmed : int;
   missing_sources : int;
@@ -332,6 +342,18 @@ type wiki_lint_counts = {
   revision_log_hole : int;
   duplicate_title_candidates : int;
 }
+
+(** The header's lint numbers. [broken] is what a reader cannot follow: a
+    link or an embed to nothing, and a page that does not read. [other] is
+    every other finding but the orphans and the duplicate titles. *)
+type wiki_lint_tally = {
+  duplicates : int;
+  orphans : int;
+  broken : int;
+  other : int;
+}
+
+val wiki_lint_tally : wiki_lint_counts -> wiki_lint_tally
 
 type wiki_index_lint = {
   total_findings : int;

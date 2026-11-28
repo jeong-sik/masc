@@ -934,6 +934,11 @@ type wiki_embed = {
 type wiki_lint_kind =
   | Broken_link
   | Unsupported_link
+  | Broken_media_embed
+  | Broken_wiki_embed
+  | Broken_artifact_embed
+  | Invalid_embed
+  | Unsupported_embed
   | Orphan_page
   | Orphan_unconfirmed
   | Missing_sources
@@ -992,6 +997,11 @@ type wiki_page_summary = {
 type wiki_lint_counts = {
   broken_link : int;
   unsupported_link : int;
+  broken_media_embed : int;
+  broken_wiki_embed : int;
+  broken_artifact_embed : int;
+  invalid_embed : int;
+  unsupported_embed : int;
   orphan : int;
   orphan_unconfirmed : int;
   missing_sources : int;
@@ -1001,6 +1011,44 @@ type wiki_lint_counts = {
   revision_log_hole : int;
   duplicate_title_candidates : int;
 }
+
+type wiki_lint_tally = {
+  duplicates : int;
+  orphans : int;
+  broken : int;
+  other : int;
+}
+
+(* Warning 9 is on here: a count added to the record and left out of this
+   pattern stops the build until it goes in one of the four. *)
+let[@warning "+9"] wiki_lint_tally
+    {
+      broken_link;
+      unsupported_link;
+      broken_media_embed;
+      broken_wiki_embed;
+      broken_artifact_embed;
+      invalid_embed;
+      unsupported_embed;
+      orphan;
+      orphan_unconfirmed;
+      missing_sources;
+      hearsay_only;
+      unreadable_page;
+      revision_log_gap;
+      revision_log_hole;
+      duplicate_title_candidates;
+    } =
+  {
+    duplicates = duplicate_title_candidates;
+    orphans = orphan;
+    broken =
+      broken_link + broken_media_embed + broken_wiki_embed
+      + broken_artifact_embed + unreadable_page;
+    other =
+      unsupported_link + invalid_embed + unsupported_embed + orphan_unconfirmed
+      + missing_sources + hearsay_only + revision_log_gap + revision_log_hole;
+  }
 
 type wiki_index_lint = {
   total_findings : int;
@@ -1119,6 +1167,11 @@ let wiki_source_of_string raw =
 let wiki_lint_kind_of_string = function
   | "broken_link" -> Broken_link
   | "unsupported_link" -> Unsupported_link
+  | "broken_media_embed" -> Broken_media_embed
+  | "broken_wiki_embed" -> Broken_wiki_embed
+  | "broken_artifact_embed" -> Broken_artifact_embed
+  | "invalid_embed" -> Invalid_embed
+  | "unsupported_embed" -> Unsupported_embed
   | "orphan" | "orphan_page" -> Orphan_page
   | "orphan_unconfirmed" -> Orphan_unconfirmed
   | "missing_sources" -> Missing_sources
@@ -1141,6 +1194,13 @@ let decode_wiki_lint_counts json =
   (* [Wiki_lint.counts] omits zero-count keys; validate every present key is >= 0. *)
   let* broken_link = optional_nonnegative_count json "broken_link" in
   let* unsupported_link = optional_nonnegative_count json "unsupported_link" in
+  let* broken_media_embed = optional_nonnegative_count json "broken_media_embed" in
+  let* broken_wiki_embed = optional_nonnegative_count json "broken_wiki_embed" in
+  let* broken_artifact_embed =
+    optional_nonnegative_count json "broken_artifact_embed"
+  in
+  let* invalid_embed = optional_nonnegative_count json "invalid_embed" in
+  let* unsupported_embed = optional_nonnegative_count json "unsupported_embed" in
   let* orphan = optional_nonnegative_count json "orphan" in
   let* orphan_unconfirmed =
     optional_nonnegative_count json "orphan_unconfirmed"
@@ -1157,6 +1217,11 @@ let decode_wiki_lint_counts json =
     {
       broken_link;
       unsupported_link;
+      broken_media_embed;
+      broken_wiki_embed;
+      broken_artifact_embed;
+      invalid_embed;
+      unsupported_embed;
       orphan;
       orphan_unconfirmed;
       missing_sources;

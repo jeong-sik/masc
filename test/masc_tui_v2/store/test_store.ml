@@ -4252,6 +4252,11 @@ let test_p0_actions_settings_safety_and_wired_cmds () =
               {
                 broken_link = 0;
                 unsupported_link = 0;
+                broken_media_embed = 0;
+                broken_wiki_embed = 0;
+                broken_artifact_embed = 0;
+                invalid_embed = 0;
+                unsupported_embed = 0;
                 orphan = 0;
                 orphan_unconfirmed = 0;
                 missing_sources = 0;
@@ -4441,6 +4446,11 @@ let test_p0_actions_settings_safety_and_wired_cmds () =
             {
               broken_link = 0;
               unsupported_link = 0;
+              broken_media_embed = 0;
+              broken_wiki_embed = 0;
+              broken_artifact_embed = 0;
+              invalid_embed = 0;
+              unsupported_embed = 0;
               orphan = 0;
               orphan_unconfirmed = 0;
               missing_sources = 0;
@@ -5394,6 +5404,11 @@ let test_nav_fix4_knowledge_board_chains_and_wiki_clusters () =
         {
           broken_link = 0;
           unsupported_link = 0;
+          broken_media_embed = 0;
+          broken_wiki_embed = 0;
+          broken_artifact_embed = 0;
+          invalid_embed = 0;
+          unsupported_embed = 0;
           orphan = 0;
           orphan_unconfirmed = 0;
           missing_sources = 0;
@@ -6958,6 +6973,11 @@ let test_p2_grouped_top_header_row0_restoration () =
         {
           broken_link = 0;
           unsupported_link = 0;
+          broken_media_embed = 0;
+          broken_wiki_embed = 0;
+          broken_artifact_embed = 0;
+          invalid_embed = 0;
+          unsupported_embed = 0;
           orphan = 0;
           orphan_unconfirmed = 0;
           missing_sources = 0;
@@ -9495,6 +9515,11 @@ let test_wiki_index_reply_requests_selected_page () =
         {
           broken_link = 0;
           unsupported_link = 0;
+          broken_media_embed = 0;
+          broken_wiki_embed = 0;
+          broken_artifact_embed = 0;
+          invalid_embed = 0;
+          unsupported_embed = 0;
           orphan = 0;
           orphan_unconfirmed = 0;
           missing_sources = 0;
@@ -9569,6 +9594,25 @@ let test_wiki_index_reply_requests_selected_page () =
   Alcotest.(check (list string))
     "the index reply asks for the page it selects" [ "guide" ]
     (wiki_page_gets (index_reply on_wiki_tab));
+  let asked, _ =
+    Update.step ~now:t1 on_wiki_tab
+      (Msg.Http_reply
+         { epoch = on_wiki_tab.epoch; reply = Msg.Reply_wiki_index (Ok index) })
+  in
+  Alcotest.(check bool) "the asked page reads as loading until it lands" true
+    (Observed.is_loading
+       (Knowledge_store.wiki_page_for ~slug:"guide" asked.knowledge));
+  let answered, _ =
+    Update.step ~now:t1 asked
+      (Msg.Http_reply
+         {
+           epoch = asked.epoch;
+           reply = Msg.Reply_wiki_page { page = "guide"; result = Ok detail };
+         })
+  in
+  Alcotest.(check bool) "the answer takes the loading slot's place" true
+    (Observed.is_value
+       (Knowledge_store.wiki_page_for ~slug:"guide" answered.knowledge));
   let page_loaded =
     {
       on_wiki_tab with
@@ -14301,6 +14345,11 @@ let test_ux_batch4_knowledge_runtime_infra () =
         {
           broken_link = 0;
           unsupported_link = 0;
+          broken_media_embed = 0;
+          broken_wiki_embed = 0;
+          broken_artifact_embed = 0;
+          invalid_embed = 0;
+          unsupported_embed = 0;
           orphan = 0;
           orphan_unconfirmed = 0;
           missing_sources = 0;
@@ -24596,6 +24645,11 @@ let test_uncached_knowledge_jumps () =
         {
           broken_link = 0;
           unsupported_link = 0;
+          broken_media_embed = 0;
+          broken_wiki_embed = 0;
+          broken_artifact_embed = 0;
+          invalid_embed = 0;
+          unsupported_embed = 0;
           orphan = 0;
           orphan_unconfirmed = 0;
           missing_sources = 0;
@@ -24828,6 +24882,11 @@ let test_wiki_body_link_follow_and_back () =
             {
               broken_link = 0;
               unsupported_link = 0;
+              broken_media_embed = 0;
+              broken_wiki_embed = 0;
+              broken_artifact_embed = 0;
+              invalid_embed = 0;
+              unsupported_embed = 0;
               orphan = 0;
               orphan_unconfirmed = 0;
               missing_sources = 0;

@@ -926,6 +926,32 @@ let reserve_file_peek_read ~now (m : Model.t) flat_cmds =
       let infra = List.fold_left reserve m.infra flat_cmds in
       if infra == m.infra then m else { m with infra }
 
+(* The Wiki tab and a Wiki dive draw the page they ask for from its slot.
+   While the read is out, a slot with no page shows it loading, not as a
+   page the server has not reported. *)
+let reserve_wiki_page_reads ~now (m : Model.t) flat_cmds =
+  match flat_cmds with
+  | [] -> m
+  | _ :: _ ->
+      let start = function
+        | Observed.Value _ as read -> Observed.mark_stale read
+        | Observed.Loading _ as read -> read
+        | Observed.Unreported | Observed.Absent | Observed.Failed _ ->
+            Observed.loading ~since_ns:now
+      in
+      let reserve (k : Knowledge_store.t) cmd =
+        (match cmd with
+        | Cmd.Http_get { epoch; req = Cmd.Get_wiki_page { page } }
+          when Epoch.equal epoch m.epoch ->
+            Knowledge_store.set_wiki_page ~slug:page
+              (start (Knowledge_store.wiki_page_for ~slug:page k))
+              k
+        | _ -> k)
+        [@warning "-4"]
+      in
+      let knowledge = List.fold_left reserve m.knowledge flat_cmds in
+      if knowledge == m.knowledge then m else { m with knowledge }
+
 let reserve_account_reads ~now (m : Model.t) flat_cmds =
   match flat_cmds with
   | [] -> m
@@ -1056,5 +1082,6 @@ let step ~now m msg =
         |> (fun s -> reserve_workspace_file_read ~now s flat_final)
         |> (fun s -> reserve_account_reads ~now s flat_final)
         |> (fun s -> reserve_file_peek_read ~now s flat_final)
+        |> (fun s -> reserve_wiki_page_reads ~now s flat_final)
   in
   (next, final_cmds)

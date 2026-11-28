@@ -761,20 +761,6 @@ let a_result_marker_previews_its_first_200_bytes () = with_demotion_store @@ fun
     (List.map (fetch_body store) (markers outcome.messages))
 ;;
 
-(* Call arguments keep the blob store's preview. An argument that preview
-   holds whole is no smaller as a reference, so it stays as the model wrote
-   it; with a 200-byte preview it would leave as a [_blob] input, the shape
-   models then sent as the input of new calls (#55372). *)
-let an_argument_the_store_preview_holds_stays_as_written () =
-  let input = `Assoc ["command", `String (String.make 3_000 'c')] in
-  let seed = argument_cycle ~id:"written" input in
-  let completed_arguments = bind_arguments ~completed_before:1 ~seed seed in
-  let planned = Demotion.plan ~measure_wire_bytes:stored_wire_bytes ~completed_arguments
-      ~measure_message_bytes ~demote_before:0 seed in
-  Alcotest.(check int) "nothing is planned" 0 (List.length planned.pending);
-  Alcotest.(check bool) "the argument is sent as written" true (argument_inputs planned.messages = [input])
-;;
-
 let repeated_id_bodies () =
   let prefix = String.make Tool_blob_store.preview_max 'p' in
   [prefix ^ String.make 4000 'a'; prefix ^ String.make 4000 'b']
@@ -888,6 +874,20 @@ let argument_reference input =
 let long_arguments suffix =
   `Assoc ["command", `String (String.concat "" (List.init 1200 (fun _ -> "echo \"한글\"\n")) ^ suffix);
           "path", `String "/tmp/argument-example"; "flags", `List [`Bool true; `Int 7]]
+;;
+
+(* Call arguments keep the blob store's preview. An argument that preview
+   holds whole is no smaller as a reference, so it stays as the model wrote
+   it; with a 200-byte preview it would leave as a [_blob] input, the shape
+   models then sent as the input of new calls (#55372). *)
+let an_argument_the_store_preview_holds_stays_as_written () =
+  let input = `Assoc ["command", `String (String.make 3_000 'c')] in
+  let seed = argument_cycle ~id:"written" input in
+  let completed_arguments = bind_arguments ~completed_before:1 ~seed seed in
+  let planned = Demotion.plan ~measure_wire_bytes:stored_wire_bytes ~completed_arguments
+      ~measure_message_bytes ~demote_before:0 seed in
+  Alcotest.(check int) "nothing is planned" 0 (List.length planned.pending);
+  Alcotest.(check bool) "the argument is sent as written" true (argument_inputs planned.messages = [input])
 ;;
 
 let completed_arguments_restore_through_reader () =

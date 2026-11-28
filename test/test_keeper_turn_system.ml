@@ -672,7 +672,8 @@ let observe_request world ~runtime_id =
   in
   let request : Ledger.request =
     { prefix_digest = "turn-system-prefix"; first_atom = 0; atom_count = history_atoms; ends
-    ; tail_bytes = 0; turn_context = false; finished_turn = Ledger.Carried_whole
+    ; tail_bytes = 0; turn_context = false; turn_boundary = None
+    ; finished_turn = Ledger.Carried_whole
     ; demote_before = 0
     ; working_state = None }
   in

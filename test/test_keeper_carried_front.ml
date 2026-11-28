@@ -391,6 +391,7 @@ let ledger_with ~first_atom ~atom_count ends : Ledger.t =
     ; ends
     ; tail_bytes = 0
     ; turn_context = false
+    ; turn_boundary = None
     ; finished_turn = Ledger.Carried_whole
     ; demote_before = 0
     ; working_state = None

@@ -58,6 +58,7 @@ let request ~digest_at ~first_atom ~atom_count : Ledger.request =
   ; ends = ends_from digest_at ~first_atom ~atom_count
   ; tail_bytes = 0
   ; turn_context = false
+  ; turn_boundary = None
   ; finished_turn = Ledger.Carried_whole
   ; demote_before = 0
   ; working_state = None
@@ -628,12 +629,12 @@ let test_memory_receipt_failure_fences_enclosing_recovery () =
    The pair's ledger last carried a window that opened at atom 4; the last
    completed turn ended at atom 8. Under that window the second turn grew
    from 1,500 to 2,400, so the next turn is expected at 2,400 + 900. *)
-let window_ledger ~history ~first_atom counts =
+let window_ledger ?(demote_before = 0) ~history ~first_atom counts =
   let atom_count, digest_at = Window.atom_opening_index history in
   List.fold_left
     (fun ledger (turn_context, input_tokens) ->
        let request =
-         { (request ~digest_at ~first_atom ~atom_count) with turn_context }
+         { (request ~digest_at ~first_atom ~atom_count) with turn_context; demote_before }
        in
        Some
          (Ledger.observe ~digest_at ledger request
@@ -893,7 +894,45 @@ let test_a_window_holds_only_while_the_size_signal_watches () =
   check at "no ledger holds nothing" None (held ~opens_turn:false None);
   check at "a ledger this history does not hold holds nothing" None
     (held ~opens_turn:false
-       (window_ledger ~history:(exchanges ~from:100 10) ~first_atom:4 grown_turns))
+       (window_ledger ~history:(exchanges ~from:100 10) ~first_atom:4 grown_turns));
+  check at "it keeps the boundary its last request sent markers below" (Some 6)
+    (Option.map
+       (fun (held : Try_provider.held_window) -> held.markers_before)
+       (Try_provider.held_window ~opens_turn:false ~input_limit:None
+          ~finished_turn:Ledger.Carried_whole
+          ~history_digest_at:(Window.atom_opening_digest history)
+          (window_ledger ~demote_before:6 ~history ~first_atom:4 grown_turns)))
+;;
+
+(* Both readers ask the ledger what the next turn's first request will do
+   with the turn in hand. The third turn's first request went uncounted here,
+   so that turn has no first count: carried whole, the next turn builds on
+   its last count; left as markers, it has nothing to build on. *)
+let test_the_signal_reads_the_turn_in_hand_as_the_next_turn_will_send_it () =
+  let history = exchanges ~from:0 10 in
+  let history_digest_at = Window.atom_opening_digest history in
+  let ledger =
+    window_ledger ~history ~first_atom:4 (grown_turns @ [ true, 0; false, 2_600 ])
+  in
+  let peak finished_turn =
+    Option.map
+      (fun (signal : Try_provider.past_max_context) -> signal.next_turn_peak)
+      (Try_provider.past_max_context ~input_limit:(input_limit_of (Some 3_000)) ~finished_turn
+         ~continuity:None ~history_digest_at ~turn_boundary:boundary_8 ledger)
+  in
+  let held finished_turn =
+    Option.map
+      (fun (held : Try_provider.held_window) -> held.window_opened_at)
+      (Try_provider.held_window ~opens_turn:true ~input_limit:(input_limit_of (Some 400_000))
+         ~finished_turn ~history_digest_at ledger)
+  in
+  check (option int) "carried whole, the last count plus the 900 a turn grew passes the limit"
+    (Some (2_600 + 900)) (peak Ledger.Carried_whole);
+  check (option int) "left as markers, the last count alone stays under it" None
+    (peak Ledger.Left_as_markers);
+  check (option int) "carried whole, the signal watches the window" (Some 4)
+    (held Ledger.Carried_whole);
+  check (option int) "left as markers, nothing watches it" None (held Ledger.Left_as_markers)
 ;;
 
 (* P0-1b: Mid-turn current-turn tool demotion, deterministic preview fallback
@@ -1327,6 +1366,8 @@ let () =
     ; ( "held window watch"
       , [ test_case "a window holds only while the size signal watches" `Quick
             test_a_window_holds_only_while_the_size_signal_watches
+        ; test_case "the signal reads the turn in hand as the next turn will send it" `Quick
+            test_the_signal_reads_the_turn_in_hand_as_the_next_turn_will_send_it
         ] )
     ; ( "held window"
       , [ test_case "it stays behind the Librarian point" `Quick

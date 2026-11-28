@@ -18,6 +18,7 @@ type request =
   ; ends : carried_ends
   ; tail_bytes : int
   ; turn_context : bool
+  ; turn_boundary : int option
   ; finished_turn : finished_turn
   ; demote_before : int
   ; working_state : string option
@@ -104,14 +105,33 @@ let base_blocks (request : request) =
     ]
 ;;
 
+(* A request that carries the turn context opens a turn, unless it ran under
+   the turn boundary of the request before it. No turn ended between those
+   two: a dispatch took up the open turn again and sent the context a second
+   time. A boundary the dispatch could not name says nothing about the turn,
+   so the request opens one. *)
+let opens_turn_after (last : request) ~turn_context ~turn_boundary =
+  turn_context
+  &&
+  match last.turn_boundary, turn_boundary with
+  | Some before, Some now -> not (Int.equal before now)
+  | Some _, None | None, (Some _ | None) -> true
+;;
+
+let opens_turn (t : t option) ~turn_context ~turn_boundary =
+  match t with
+  | None -> turn_context
+  | Some t -> opens_turn_after t.last ~turn_context ~turn_boundary
+;;
+
 (* A window that opened at the request in hand: that request is the only one
    counted under it, and no turn has finished under it yet. [counted] is the
    provider's count for the request whether or not it is a sample. The turn
    has a first count under the window only when this request opens it. *)
-let growth_from ~turn_context (counted : usage option) =
+let growth_from ~opens_turn (counted : usage option) =
   let input = Option.map (fun (u : usage) -> u.input_tokens) counted in
   { built_on = None
-  ; opened_at = (if turn_context then input else None)
+  ; opened_at = (if opens_turn then input else None)
   ; peak = input
   ; largest = None
   ; last_input = input
@@ -142,13 +162,13 @@ let larger a b =
   | None, None -> None
 ;;
 
-(* The same window carries one more request. A request with the turn context
-   opens the next turn: it builds on what it kept of the turn before it, and
-   that turn's growth joins the largest. A turn with a request the provider
-   did not count has no peak, so it adds nothing. *)
-let grow (growth : turn_growth) ~turn_context ~finished_turn (counted : usage option) =
+(* The same window carries one more request. A request that opens the next
+   turn builds on what it kept of the turn before it, and that turn's growth
+   joins the largest. A turn with a request the provider did not count has no
+   peak, so it adds nothing. *)
+let grow (growth : turn_growth) ~opens_turn ~finished_turn (counted : usage option) =
   let input = Option.map (fun (u : usage) -> u.input_tokens) counted in
-  if turn_context
+  if opens_turn
   then
     { built_on = kept_of_turn growth finished_turn
     ; opened_at = input
@@ -171,11 +191,11 @@ let grow (growth : turn_growth) ~turn_context ~finished_turn (counted : usage op
    How much one turn grows does not depend on where the window opens, so the
    largest growth stays. A move at a turn's first request adds the turn that
    ended under the old window to it. *)
-let moved_growth (growth : turn_growth) ~turn_context (counted : usage option) =
+let moved_growth (growth : turn_growth) ~opens_turn (counted : usage option) =
   let largest =
-    if turn_context then larger growth.largest (finished_growth growth) else growth.largest
+    if opens_turn then larger growth.largest (finished_growth growth) else growth.largest
   in
-  { (growth_from ~turn_context counted) with largest }
+  { (growth_from ~opens_turn counted) with largest }
 ;;
 
 let last_input_tokens t = t.growth.last_input
@@ -197,7 +217,7 @@ let start (request : request) ~counted (usage : usage option) =
   ; blocks = base_blocks request
   ; last = request
   ; last_usage = usage
-  ; growth = growth_from ~turn_context:request.turn_context counted
+  ; growth = growth_from ~opens_turn:request.turn_context counted
   }
 ;;
 
@@ -366,11 +386,13 @@ let observe_trimmed
       ; last = request
       ; last_usage = (match usage with Some _ -> usage | None -> t.last_usage)
       ; growth =
-          (if evicted_atoms > 0
-           then moved_growth t.growth ~turn_context:request.turn_context counted
-           else
-             grow t.growth ~turn_context:request.turn_context
-               ~finished_turn:request.finished_turn counted)
+          (let opens_turn =
+             opens_turn_after t.last ~turn_context:request.turn_context
+               ~turn_boundary:request.turn_boundary
+           in
+           if evicted_atoms > 0
+           then moved_growth t.growth ~opens_turn counted
+           else grow t.growth ~opens_turn ~finished_turn:request.finished_turn counted)
       }
     in
     let event =
@@ -491,6 +513,7 @@ let to_json t =
     ; "atom_count", `Int t.last.atom_count
     ; "tail_bytes", `Int t.last.tail_bytes
     ; "turn_context", `Bool t.last.turn_context
+    ; "turn_boundary", int_opt t.last.turn_boundary
     ; "demote_before", `Int t.last.demote_before
     ; "blocks", `Int (List.length t.blocks)
     ; ( "measured_blocks"

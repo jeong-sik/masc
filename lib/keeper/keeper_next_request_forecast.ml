@@ -497,9 +497,20 @@ let first_request ~keeper_name ~trace_id ~runtime_id reads =
     with
     | Some ledger when Keeper_model_input_ledger.holds ~digest_at:reads.digest_at ledger ->
       let front = Keeper_carried_front.of_ledger ledger in
-      (* The next request is a turn's first, where the driver reads the size
-         signal and the window it holds from the same ledger and the same
-         input-budget declaration. *)
+      (* The next request carries the turn context. It is a turn's first
+         unless the turn the ledger's last request ran in is still open, as
+         the driver reads it ({!Keeper_model_input_ledger.opens_turn}). At a
+         turn's first request the driver reads the size signal and the
+         window it holds from the same ledger and the same input-budget
+         declaration; in a turn still open it holds the window and reads no
+         signal. *)
+      let opens_turn =
+        Keeper_model_input_ledger.opens_turn
+          (Some ledger)
+          ~turn_context:true
+          ~turn_boundary:
+            (Keeper_turn_driver_try_provider.turn_boundary_for_ledger reads.turn_start)
+      in
       let input_limit =
         Keeper_turn_driver_try_provider.input_limit_of_runtime
           (Runtime.get_runtime_by_id runtime_id)
@@ -511,9 +522,13 @@ let first_request ~keeper_name ~trace_id ~runtime_id reads =
       ( front
       , front
       , ledger.Keeper_model_input_ledger.total_tokens
-      , Keeper_turn_driver_try_provider.past_max_context ~input_limit ~finished_turn
-          ~continuity:(Some reads.continuity) ~history_digest_at:reads.digest_at ~turn_boundary:reads.turn_start (Some ledger)
-      , Keeper_turn_driver_try_provider.held_window ~opens_turn:true ~input_limit ~finished_turn
+      , (if opens_turn
+         then
+           Keeper_turn_driver_try_provider.past_max_context ~input_limit ~finished_turn
+             ~continuity:(Some reads.continuity) ~history_digest_at:reads.digest_at
+             ~turn_boundary:reads.turn_start (Some ledger)
+         else None)
+      , Keeper_turn_driver_try_provider.held_window ~opens_turn ~input_limit ~finished_turn
           ~history_digest_at:reads.digest_at (Some ledger) )
     | Some _ | None -> None, Lazy.force reads.seed, None, None, None
   in

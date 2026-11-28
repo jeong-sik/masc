@@ -79,15 +79,24 @@ type carried_ends =
                 carried atom. *)
       }
 
-(** What a request did with the results of the turns that ended before it.
-    Read at a turn's first request: it decides what the turn builds on. *)
+(** What a turn's first request does with the results of the turn that ended
+    before it. It decides what the turn builds on. The dispatch says it from
+    how it sends the results of ended turns at all, not from what one request
+    happened to carry, and it is read only at a request that opens a turn
+    ({!opens_turn}). *)
 type finished_turn =
   | Carried_whole
       (** As the turn's own requests sent them. The next turn builds on the
           turn's last request. *)
   | Left_as_markers
-      (** As markers. What the turn added leaves with its results, so the
-          next turn builds on the turn's first request. *)
+      (** As markers. The next turn is taken to build on the turn's first
+          request, as if all the turn added left with its results. Some of
+          it stays: the assistant's text, results under the marker
+          threshold, the markers themselves. A turn's growth is measured
+          from the first count of the turn before it, so what a turn
+          usually leaves behind is inside the growth. The peak is off only
+          by how much that changes from one turn to the next: low after a
+          turn that leaves more behind than the turns measured before it. *)
 
 (** One request as the projection handed it to the provider. *)
 type request =
@@ -103,6 +112,11 @@ type request =
   ; turn_context : bool
         (** The request carried the per-turn context message, so its usage
             is not a sample. *)
+  ; turn_boundary : int option
+        (** The atom the turns that ended stop before, as the dispatch that
+            built the request read it from the turn log; [None] when the
+            dispatch could not name it. Two requests under the same boundary
+            belong to the same turn. *)
   ; finished_turn : finished_turn
         (** What this request did with the turn that ended before it. *)
   ; demote_before : int
@@ -135,7 +149,8 @@ type block =
     is the provider's [input_tokens] for a request, a sample or not: the
     turn's first request carries the turn context and is still the largest
     request of a turn that calls no tool. A request with the turn context
-    opens a turn. A turn's growth is its largest count less the count it
+    opens a turn, unless it ran under the turn boundary of the request before
+    it ({!opens_turn}). A turn's growth is its largest count less the count it
     builds on, which is what its first request kept of the turn before it
     ({!finished_turn}): that turn's last count when carried whole, its first
     count when left as markers. Measured from the last count either way, a
@@ -224,6 +239,16 @@ val holds : digest_at:(int -> string option) -> t -> bool
     caller that has to decide before it composes whether the ledger's front
     names an atom of this history (RFC keeper-context-window-in-tokens
     §10.3). *)
+
+val opens_turn : t option -> turn_context:bool -> turn_boundary:int option -> bool
+(** Whether a request with [turn_context] under [turn_boundary] opens a turn
+    after the ledger's last request. It does when it carries the turn
+    context, unless both requests name the same turn boundary: no turn ended
+    between them, so a dispatch took up the open turn again and sent the
+    context a second time. A boundary either dispatch could not name says
+    nothing, and the request opens a turn. With no ledger, the turn context
+    alone decides. {!observe} applies the same rule to the request it is
+    given. *)
 
 val last_input_tokens : t -> int option
 (** Provider-counted [input_tokens] of the last request recorded in this ledger,

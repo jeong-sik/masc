@@ -2459,6 +2459,7 @@ let ledger_request ~system_prompt ~tools { source_messages; digest_at; sends_fro
   ; ends
   ; tail_bytes = 0
   ; turn_context = true
+  ; turn_boundary = None
   ; finished_turn = Keeper_model_input_ledger.Carried_whole
   ; demote_before = 0
   ; working_state = None

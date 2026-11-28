@@ -2858,7 +2858,13 @@ let a_window_that_stays_keeps_what_it_sent_as_markers () =
     (planned (finished_turns_through turn_start));
   Alcotest.(check (pair int int)) "a turn boundary past the last markers moves them forward"
     (turn_start, 2)
-    (planned ~held_window:(held ~markers_before:0) (finished_turns_through turn_start))
+    (planned ~held_window:(held ~markers_before:0) (finished_turns_through turn_start));
+  let opened_elsewhere =
+    { Try_provider.window_opened_at = 1; markers_before = refused_end; working_state = None }
+  in
+  Alcotest.(check (pair int int)) "a range that opens elsewhere reads the turn boundary alone"
+    (turn_start, 2)
+    (planned ~held_window:opened_elsewhere (finished_turns_through turn_start))
 ;;
 
 (* Nothing is known about which turns ended, so nothing is demoted; a Keeper

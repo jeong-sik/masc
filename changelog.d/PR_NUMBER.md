@@ -1,0 +1,3 @@
+### Fixed
+
+- `keeper_memory_write` and `keeper_memory_retract` receipts carry `memory_id_history` (how many times the Memory commit log has inserted and retracted that id, and when it was last retracted), so a Keeper re-inserting a claim it just retracted no longer reads a plain "inserted" as if for the first time. The answer the repeat guard compares is unchanged (#PR_NUMBER).

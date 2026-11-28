@@ -3243,6 +3243,73 @@ let test_retract_records_a_retraction () =
     "and the earlier retraction stays in the commit log" recorded (retractions ())
 ;;
 
+(* task-1644: one turn wrote and retracted the same claim ten times each, and
+   every write receipt said "inserted" as if for the first time. Each receipt
+   now carries what the commit log says that id has been through, counting
+   the commit it reports, while the answer the repeat guard reads stays the
+   same so the loop still looks like a loop. *)
+let test_alternating_write_and_retract_receipts_carry_the_id_history () =
+  with_temp_dir
+  @@ fun base_path ->
+  let config = Masc.Workspace.default_config base_path in
+  let meta = make_meta "alternating-write-retract" in
+  let args = make_args ~title:"" ~content:"the build cache lives on volume b" in
+  let write () =
+    (write_tool ~config ~meta ~args).Masc.Keeper_tool_execution.raw_output
+  in
+  let retract id =
+    (retract_tool
+       ~config
+       ~meta
+       ~args:(make_retract_args ~memory_id:id ~reason:"rechecking the volume"))
+      .Masc.Keeper_tool_execution.raw_output
+    |> Yojson.Safe.from_string
+  in
+  let history json = json_field "memory_id_history" json in
+  let count key json =
+    match json_field key (history json) with
+    | `Int n -> n
+    | _ -> Alcotest.failf "expected int history field: %s" key
+  in
+  let check_counts label ~inserted ~retracted json =
+    Alcotest.(check (pair int int))
+      label
+      (inserted, retracted)
+      (count "inserted" json, count "retracted" json)
+  in
+  let fingerprint receipt =
+    match
+      Masc.Keeper_tool_progress_identity.digest_tool_io
+        ~tool_name:"keeper_memory_write" ~input:args ~output_text:receipt ()
+    with
+    | Some io -> io.Masc.Keeper_tool_progress_identity.output_fingerprint
+    | None -> Alcotest.fail "no fingerprint for a memory write receipt"
+  in
+  let first_raw = write () in
+  let first = Yojson.Safe.from_string first_raw in
+  let id = string_field "memory_id" first in
+  check_counts "a first insert has no past" ~inserted:1 ~retracted:0 first;
+  Alcotest.(check bool) "nothing was retracted yet" true
+    (json_field "last_retracted_at" (history first) = `Null);
+  check_counts "the retraction is counted with it" ~inserted:1 ~retracted:1 (retract id);
+  let second_raw = write () in
+  let second = Yojson.Safe.from_string second_raw in
+  Alcotest.(check string) "the re-insert is still an insert" "inserted"
+    (string_field "identity_disposition" second);
+  check_counts "but it says the id was inserted and retracted before"
+    ~inserted:2 ~retracted:1 second;
+  (match json_field "last_retracted_at" (history second) with
+   | `String _ -> ()
+   | _ -> Alcotest.fail "the re-insert names when the id was last retracted");
+  check_counts "the second retraction" ~inserted:2 ~retracted:2 (retract id);
+  let third_raw = write () in
+  check_counts "the third insert" ~inserted:3 ~retracted:2
+    (Yojson.Safe.from_string third_raw);
+  Alcotest.(check string) "the history stays out of the answer the repeat guard reads"
+    (fingerprint first_raw) (fingerprint third_raw);
+  ignore (fingerprint second_raw)
+;;
+
 let test_source_snapshot_commit_notifications () =
   let module Source = Masc.Keeper_memory_source_current in
   let module Notifications = Masc.Keeper_memory_commit_notifications in
@@ -3866,6 +3933,10 @@ let () =
             "retract records removal and survives re-adding the claim"
             `Quick
             test_retract_records_a_retraction
+        ; tool_case
+            "alternating write and retract receipts carry the id history"
+            `Quick
+            test_alternating_write_and_retract_receipts_carry_the_id_history
         ; tool_case
             "source parser accepts every supported value"
             `Quick

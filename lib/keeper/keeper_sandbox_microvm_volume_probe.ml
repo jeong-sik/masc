@@ -434,17 +434,3 @@ let remove_apple_volumes_by_names ~run ~timeout_sec ~volume_names =
             (Keeper_sandbox_exec_failure.status_label status)
             (output_for_log ~stdout ~stderr)))
 ;;
-
-(* Both volume names are exact, but same-named Keepers in other workspaces
-   may own the same volumes. The claims marker cannot prove that all owners
-   are recorded, and this operation checks no workspace itself. Each delete
-   is attempted whatever the other returned. A
-   delete's exit code cannot prove absence: an already-absent volume and one
-   a guest still holds can both exit non-zero. One listing after both deletes
-   settles it, the same way the trim helper's removal is settled. *)
-let remove_apple_keeper_volumes ~run ~timeout_sec ~keeper_name =
-  match work_volume_name ~keeper_name, build_volume_name ~keeper_name with
-  | Error detail, _ | _, Error detail -> Error detail
-  | Ok work, Ok build ->
-    remove_apple_volumes_by_names ~run ~timeout_sec ~volume_names:[ work; build ]
-;;

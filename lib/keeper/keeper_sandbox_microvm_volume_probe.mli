@@ -64,9 +64,3 @@ val remove_apple_volumes_by_names :
   -> (unit, string) result
 (** Delete each named Apple volume and confirm every name is absent in one
     settling [container volume list --format json] inventory. *)
-
-val remove_apple_keeper_volumes :
-  run:(timeout_sec:float -> string list -> Unix.process_status * string * string)
-  -> timeout_sec:float
-  -> keeper_name:string
-  -> (unit, string) result

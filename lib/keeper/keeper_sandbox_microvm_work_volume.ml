@@ -106,8 +106,6 @@ let build_output_dir_name = "_build"
     ([config/scripts/keeper-build-cleanup.py]) skips the same name. *)
 let build_keep_marker = ".masc-keep-build"
 
-let trim_guest_root = "/masc-trim"
-let trim_capabilities = [ "CAP_SYS_ADMIN" ]
 let work_volume_trim_name ~keeper_name =
   Keeper_sandbox_container_name.make
     (Keeper_sandbox_container_name.Micro_vm_work_volume_trim { keeper_name })
@@ -160,30 +158,7 @@ exit "$failed"|sh}
     build_output_dir_name
 ;;
 
-(* The only one-shot work-volume operation left: configure the ext4 default.
-   No build deletion, remount or whole-filesystem trim occurs in this helper. *)
-let discard_configuration_script_with ~findmnt ~tune2fs ~guest_root =
-  Printf.sprintf "work_device=$(%s --noheadings --output SOURCE --target %s)\n%s -o discard \"$work_device\""
-    (Filename.quote findmnt) (Filename.quote guest_root) (Filename.quote tune2fs)
-;;
-
-let work_volume_reclaim_script =
-  discard_configuration_script_with ~findmnt:"/usr/bin/findmnt"
-    ~tune2fs:"/usr/sbin/tune2fs" ~guest_root:trim_guest_root
-;;
-
-let apple_work_volume_trim_argv ~keeper_name ~volume_name ~image =
-  command_argv_for Backend.Apple_container
-  @ [ "run"; "--rm"; "--name"; work_volume_trim_name ~keeper_name
-    ; "--user"; "0"; "--cap-drop"; "ALL" ]
-  @ List.concat_map (fun capability -> [ "--cap-add"; capability ]) trim_capabilities
-  @ [ "--network"; "none"; "--read-only"
-    ; "--entrypoint"; "/bin/sh"
-    ; "--volume"; volume_name ^ ":" ^ trim_guest_root
-    ; image; "-eu"; "-c"; work_volume_reclaim_script ]
-;;
-
-(* The trim cleanup, the abandoned-guest sweep, Keeper status and the guest
+(* The helper cleanup, the abandoned-guest sweep, Keeper status and the guest
    probe read this one argv: they ask the same runtime the same question. *)
 let apple_container_list_argv () =
   command_argv_for Backend.Apple_container @ [ "list"; "--all"; "--format"; "json" ]
@@ -205,7 +180,7 @@ let apple_listing_row_id fields =
 ;;
 
 (* Remove a one-shot volume helper by its stable name and prove it is gone.
-   [helper] names it in the messages ("trim", "repair"). *)
+   [helper] names it in the messages ("repair"). *)
 let remove_apple_volume_helper ~run ~timeout_sec ~remove_timeout_sec ~name ~helper =
   (* Only the actual complete inventory authorizes absence. The legacy runner
      remains the deletion effect edge; its bounded output cannot prove it. *)
@@ -229,11 +204,6 @@ let remove_apple_volume_helper ~run ~timeout_sec ~remove_timeout_sec ~name ~help
            helper name (Keeper_sandbox_exec_failure.status_label removal_status)))
   | Ok (((Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _) as status), _stdout) ->
     unconfirmed (Keeper_sandbox_exec_failure.status_label status)
-;;
-
-let remove_apple_work_volume_trim ~run ~timeout_sec ~remove_timeout_sec ~keeper_name =
-  remove_apple_volume_helper ~run ~timeout_sec ~remove_timeout_sec
-    ~name:(work_volume_trim_name ~keeper_name) ~helper:"trim"
 ;;
 
 type discard_read_failure =
@@ -294,47 +264,11 @@ let discard_read_failure_message = function
   | Discard_image_unreadable failure -> Keeper_volume_filesystem.read_failure_to_string failure
 ;;
 
-type discard_configuration =
-  | Discard_already_set
-  | Discard_unreadable of discard_read_failure
-  | Discard_helper_finished of
-      { status : Unix.process_status; output : string; after : work_volume_discard_default }
-
-let reclaim_apple_work_volume ~run ~on_cleanup_error ~timeout_sec ~remove_timeout_sec
-    ~keeper_name ~volume_name ~image =
-  let initial = match work_volume_name ~keeper_name with
-    | Error detail -> Superblock_unreadable (Discard_volume_name_invalid detail)
-    | Ok expected when expected <> volume_name ->
-      Superblock_unreadable (Discard_volume_mismatch {expected; actual=volume_name})
-    | Ok _ -> read_work_volume_discard_default ~backend:Backend.Apple_container ~keeper_name ~timeout_sec in
-  match initial with
-  | Discard_default_set -> Ok Discard_already_set
-  | Superblock_unreadable failure -> Ok (Discard_unreadable failure)
-  | Discard_default_absent ->
-    let cleanup () = remove_apple_work_volume_trim ~run ~timeout_sec ~remove_timeout_sec ~keeper_name in
-    let released = ref (Ok ()) in
-    let result = Eio.Switch.run (fun sw ->
-      Eio.Switch.on_release sw (fun () ->
-        released := cleanup ();
-        match !released with Ok () -> () | Error detail -> on_cleanup_error detail);
-      let open Result.Syntax in
-      let* () = cleanup () in
-      let status, stdout, stderr = run ~timeout_sec
-          (apple_work_volume_trim_argv ~keeper_name ~volume_name ~image) in
-      Ok (status, output_for_log ~stdout ~stderr)) in
-    match !released, result with
-    | Error detail, _ | Ok (), Error detail -> Error detail
-    | Ok (), Ok (status, output) ->
-      let after = read_work_volume_discard_default ~backend:Backend.Apple_container ~keeper_name ~timeout_sec in
-      Ok (Discard_helper_finished {status; output; after})
-;;
-
 let volume_repair_guest_root = "/masc-repair"
 let volume_repair_capabilities = [ "CAP_SYS_ADMIN" ]
 
 (* util-linux and e2fsprogs paths in the catalog images, measured in
-   [masc-sandbox:general] on 2026-10-22 (e2fsck 1.47.0). The trim helper's
-   [tune2fs] comes from the same e2fsprogs package. *)
+   [masc-sandbox:general] on 2026-10-22 (e2fsck 1.47.0). *)
 let findmnt_guest_path = "/usr/bin/findmnt"
 let umount_guest_path = "/usr/bin/umount"
 let e2fsck_guest_path = "/usr/sbin/e2fsck"
@@ -401,11 +335,11 @@ type volume_repair_run =
   ; cleanup : (unit, string) result
   }
 
-(* The lifecycle of [reclaim_apple_work_volume]: a leftover helper is removed
-   first, and the release handler removes this one whatever happens. Once
-   the helper has run, a failed removal is reported beside its result, never
-   in place of it: e2fsck may have written the image. [run_helper] has no
-   timeout: cutting e2fsck short is worse than waiting for it. *)
+(* A leftover helper is removed first, and the release handler removes this
+   one whatever happens. Once the helper has run, a failed removal is
+   reported beside its result, never in place of it: e2fsck may have written
+   the image. [run_helper] has no timeout: cutting e2fsck short is worse than
+   waiting for it. *)
 let repair_apple_volume ~run ~run_helper ~on_start ~on_cleanup_error ~timeout_sec
     ~remove_timeout_sec ~keeper_name ~volume_name ~image =
   let cleanup () = remove_apple_volume_repair ~run ~timeout_sec ~remove_timeout_sec ~keeper_name in

@@ -240,6 +240,14 @@ if [ -n "$from_ref" ]; then
   exec bash "$deploy/scripts/install-local-build.sh" ${forward[@]+"${forward[@]}"}
 fi
 
+# Each step reports its wall-clock seconds, so a slow install names the step
+# that took the time. Bash's SECONDS counts whole seconds.
+step_started=$SECONDS
+step_done() {
+  echo "install-local-build: $1 took $((SECONDS - step_started))s"
+  step_started=$SECONDS
+}
+
 if [ "$skip_build" = false ]; then
   # Built through dune-local.sh, which stops before Dune runs when the active
   # switch's OCaml is not the one dune-project names, when an external pin
@@ -249,6 +257,7 @@ if [ "$skip_build" = false ]; then
   # older than the pin. --root: a worktree under .worktrees sits inside the
   # parent checkout's dune project, which excludes that directory.
   (cd "$repo" && scripts/dune-local.sh build --root "$repo" "${build_targets[@]}")
+  step_done build
 fi
 
 # Validate the browser Add-on programs before preflight, guest-shim replacement
@@ -409,6 +418,7 @@ PY
       ;;
   esac
 fi
+step_done "runtime.toml check"
 
 # The deployment preflight pair goes with the server, not behind it. The gate
 # resolves its helper beside itself first (check-runtime-deployment-preflight.sh
@@ -659,6 +669,7 @@ checkout_guest_shim() (
   echo "installed the $guest_arch guest exec shim built from $repo into $shim_dir (source identity $required_source; the previous one is kept as $previous).$sidecar_note The running server refuses it until masc restart."
 )
 checkout_guest_shim
+step_done "exec shim check"
 
 mkdir -p "$prefix"
 install -m 755 "$build_dir/main_eio.exe" "$prefix/masc"
@@ -688,6 +699,7 @@ else
 fi
 echo "install-local-build: a running server keeps its old build; masc restart replaces it with this one"
 echo "install-local-build: stored history was not audited; for storage-format changes, follow docs/guides/DURABLE-STORE-HARD-CUT.md before restarting"
+step_done "binary copy"
 
 # The TUI draws graphs and charts with the masc-pele that PATH finds, and drops
 # an answer without the protocol receipt it expects. An install that replaced
@@ -705,6 +717,7 @@ if [ -e "$prefix/masc-pele" ]; then
 else
   echo "install-local-build: no Pele in $prefix; none installed (scripts/install-pele.sh installs it)"
 fi
+step_done Pele
 
 # The dashboard bundle the workspace serves is not part of the binaries, and
 # the server picks it up on the next request without a restart (#49980). The
@@ -714,6 +727,7 @@ if [ "$workspace_kind" = directory ]; then
   . "$repo/scripts/lib/install-workspace-dashboard.sh"
   install_workspace_dashboard "$repo/assets/dashboard" "$workspace_root"
 fi
+step_done "dashboard bundle"
 
 # The masc just installed writes the browser Add-on package it carries into
 # the workspace and declares it when the workspace has none, so the server
@@ -736,6 +750,7 @@ elif [ "$workspace_kind" = directory ]; then
 else
   echo "install-local-build: the browser Add-on is not declared: workspace $workspace_root does not exist yet; run masc browser-lane-setup --mode addon --base-path $workspace_root once it does"
 fi
+step_done "browser Add-on"
 
 # The masc just installed writes the Exact worker packages it carries into
 # the workspace and builds their images, so a declaration that names one with
@@ -748,6 +763,8 @@ if [ "$workspace_kind" = directory ]; then
 else
   echo "install-local-build: the Exact worker packages are not installed: workspace $workspace_root does not exist yet; run masc exact-addon-setup --base-path $workspace_root once it does"
 fi
+step_done "Exact worker packages"
+echo "install-local-build: finished the steps above in ${SECONDS}s"
 
 if [ "$addon_failed" = true ]; then
   echo "install-local-build: the browser Add-on of $workspace_root is not set up; the programs above are installed" >&2

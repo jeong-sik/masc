@@ -76,12 +76,13 @@ def server_naming(build, version, source=BUILD_SOURCE):
 
 
 # A build whose server names [version] the way masc --version does.
-def build_naming(root, version=VERSION, source=BUILD_SOURCE):
+# [unnamed_workspace] is what the helper answers when --base-path is not given.
+def build_naming(root, version=VERSION, source=BUILD_SOURCE, unnamed_workspace=None):
     build = root / "build"
     build.mkdir()
     local_build.binaries(build)
     server_naming(build, version, source)
-    local_build.preflight_helper(build)
+    local_build.preflight_helper(build, unnamed_workspace=unnamed_workspace)
     return build
 
 
@@ -202,11 +203,14 @@ def shells():
     return list(found.values())
 
 
+# Without [base] the install names no workspace, as the operator's own call
+# does.
 def install(root, repo, build, base, *more, shell="bash"):
+    named = [] if base is None else ["--base-path", str(base)]
     return subprocess.run(
         [shell, str(repo / "scripts" / local_build.SCRIPT.name), "--skip-build",
          "--build-dir", str(build), "--prefix", str(root / "prefix"),
-         "--base-path", str(base), *more],
+         *named, *more],
         env=hooked_env(root), cwd=root, capture_output=True, text=True)
 
 
@@ -330,6 +334,24 @@ class CheckoutGuestShim(unittest.TestCase):
                 self.assertIn(f"installed the {arch} guest exec shim built from {repo}",
                               result.stdout)
                 self.assertTrue((root / "prefix/masc").is_file())
+
+    # The operator's own call names no workspace: the shim rebuilt is the one
+    # in the workspace masc would use.
+    def test_an_install_that_names_no_workspace_rebuilds_the_shim_of_the_one_masc_resolves(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            repo = checkout(root)
+            machine, arch = GUEST_ARCHES[0]
+            old = elf(machine, OTHER_SOURCE)
+            base, shim, _ = workspace_with_shim(root, content=old, sidecar=None)
+            build = build_naming(root, unnamed_workspace=(base, "persisted_default"))
+            result = install(root, repo, build, None)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(len(build_calls(repo)), 1, build_calls(repo))
+            self.assertEqual(shim.read_bytes(), elf(machine, BUILD_SOURCE))
+            self.assertEqual((shim.parent / PREVIOUS).read_bytes(), old)
+            self.assertIn(f"installed the {arch} guest exec shim built from {repo}",
+                          result.stdout)
 
     # A second rebuild replaces the previous copy instead of adding one, and
     # copies other hands left in the directory stay as they are.

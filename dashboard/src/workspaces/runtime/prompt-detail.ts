@@ -14,11 +14,11 @@
  */
 
 import { html } from 'htm/preact'
-import { useState } from 'preact/hooks'
+import { useLayoutEffect, useState } from 'preact/hooks'
 import { createTwoFilesPatch } from 'diff'
 import { UnifiedDiffView } from '../../components/common/unified-diff'
 import { Chip, SourceChip } from './prompt-chip'
-import { writeEndText, type PromptWrite } from './prompt-edits'
+import { markShownPrompt, unmarkShownPrompt, writeEndText, type PromptWrite } from './prompt-edits'
 import type { PromptEntry, PromptOverrideRequest } from './prompts-wire'
 
 type DetailView = 'text' | 'compare' | 'edit'
@@ -75,6 +75,15 @@ export function PromptDetail({ entry, canEdit, draft, onDraft, write, onSend }: 
     (chosenView === 'compare' && patch === null) || (chosenView === 'edit' && !canEdit) ? 'text' : chosenView
   const text = draft ?? entry.effective
   const dirty = draft !== undefined && draft !== entry.effective
+
+  // Synced as the render commits: an answer that arrives right after the view
+  // changes reads the view on screen. In any view but edit the outcome note is
+  // not drawn, so the outcome is told in a toast.
+  useLayoutEffect(() => {
+    if (view !== 'edit') return undefined
+    markShownPrompt(entry.key)
+    return () => unmarkShownPrompt(entry.key)
+  }, [view, entry.key])
 
   const send = async (request: PromptOverrideRequest) => {
     if (!(await onSend(request))) return

@@ -18,15 +18,17 @@
  *   With no answer, or a 5xx, the outcome is unknown and the operator is told
  *   so. Either way the catalog is read again; a refusal changed nothing.
  * - A write ends when the catalog read after it does, so the detail never
- *   shows the text a save just replaced.
+ *   shows the text a save just replaced. A later write's read replaces an
+ *   earlier one in the cache; the earlier write then waits for the later
+ *   read. What the operator is told says whether that read succeeded.
  * - Drafts and requests live in `prompt-edits.ts`, so they outlast the detail
- *   and the tab. An outcome for a prompt whose detail is not on screen is
- *   also told in a toast.
+ *   and the tab. An outcome is also told in a toast unless the detail of
+ *   that prompt shows it: open in the edit view, with the catalog read.
  */
 
 import { html } from 'htm/preact'
-import { useEffect, useLayoutEffect, useMemo, useState } from 'preact/hooks'
-import { apiGet, apiMutate, authSession, resourceCache, sessionEpoch } from '../../core'
+import { useEffect, useMemo, useState } from 'preact/hooks'
+import { apiGet, apiMutate, authSession, resourceCache, sessionEpoch, type Observed } from '../../core'
 import { MasterDetail } from '../../components/primitives/master-detail'
 import { RefreshButton } from '../../components/primitives'
 import { isAdminLockedForSession } from '../../routes/router'
@@ -37,7 +39,6 @@ import {
   beginPromptWrite,
   finishPromptWrite,
   isPromptShown,
-  markShownPrompt,
   promptEditsFor,
   setPromptDraft,
   writeEndText,
@@ -115,13 +116,6 @@ export function PromptsTab(_props: WorkspaceViewProps) {
     void loadPromptCatalog('mount')
   }, [epoch])
 
-  // Synced as the render commits, not after paint: an answer that arrives
-  // right after another prompt is picked, or after the tab is gone, is told
-  // in a toast.
-  useLayoutEffect(() => {
-    markShownPrompt(selectedKey)
-    return () => markShownPrompt(null)
-  }, [selectedKey])
 
   const catalog = catalogObs.kind === 'value' ? catalogObs.data : null
   const categories = useMemo(
@@ -141,9 +135,12 @@ export function PromptsTab(_props: WorkspaceViewProps) {
 
   const setDraft = (key: string, text: string | undefined) => setPromptDraft(epoch, key, text)
 
-  const reread = async () => {
+  const reread = async (): Promise<Observed<PromptCatalog>> => {
     resourceCache.invalidateTopic('prompts')
-    await loadPromptCatalog('manual')
+    const read = await loadPromptCatalog('manual')
+    // A read that a later one replaced answers with the cached value at once;
+    // `mount` joins the later read instead of starting another.
+    return read.kind === 'value' && read.stale ? loadPromptCatalog('mount') : read
   }
 
   /** Resolves to `true` once the server applied the request and the catalog read after it ended. */
@@ -152,16 +149,18 @@ export function PromptsTab(_props: WorkspaceViewProps) {
     if (!beginPromptWrite(epoch, key)) return false
     const res = await apiMutate<OverrideApplied>('POST', '/api/v1/prompts', request, { decode: decodeOverrideApplied })
     if (epoch !== sessionEpoch.peek()) return false
+    const failure = res.ok ? null : failureOutcome(res.error.kind)
+    // A refusal changed nothing; any other answer may have changed the text.
+    const read = failure === 'refused' ? null : await reread()
+    if (epoch !== sessionEpoch.peek()) return false
+    const readNote = read === null ? '' : read.kind === 'value' ? ' 목록을 다시 읽었어요.' : ' 목록도 다시 읽지 못했어요.'
     if (res.ok) {
-      await reread()
       finishPromptWrite(epoch, key, undefined, request.action === 'set')
-      pushShellToast(appliedToast(request, res.value), 'success')
+      pushShellToast(`${appliedToast(request, res.value)}${read?.kind === 'value' ? '' : readNote}`, 'success')
       return true
     }
-    const failure = failureOutcome(res.error.kind)
-    if (failure !== 'refused') await reread()
     const end: PromptWriteEnd | undefined = (() => {
-      switch (failure) {
+      switch (failureOutcome(res.error.kind)) {
         case 'applied':
           return undefined
         case 'refused':
@@ -172,10 +171,13 @@ export function PromptsTab(_props: WorkspaceViewProps) {
     })()
     finishPromptWrite(epoch, key, end, end === undefined && request.action === 'set')
     if (end === undefined) {
-      pushShellToast(`${key}: 서버가 요청을 받았지만 답을 읽지 못했어요 (${res.error.message}). 목록을 다시 읽었어요.`, 'warning')
+      pushShellToast(`${key}: 서버가 요청을 받았지만 답을 읽지 못했어요 (${res.error.message}).${readNote}`, 'warning')
       return true
     }
-    if (!isPromptShown(key)) pushShellToast(`${key}: ${writeEndText(end)}`, end.kind === 'refused' ? 'error' : 'warning')
+    // Without the catalog there is no detail to show the note.
+    if (!isPromptShown(key) || (read !== null && read.kind !== 'value')) {
+      pushShellToast(`${key}: ${writeEndText(end)}${readNote}`, end.kind === 'refused' ? 'error' : 'warning')
+    }
     return false
   }
 

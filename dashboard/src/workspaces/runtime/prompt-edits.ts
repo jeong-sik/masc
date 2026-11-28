@@ -31,7 +31,7 @@ export function writeEndText(end: PromptWriteEnd): string {
     case 'refused':
       return `${end.action === 'set' ? '저장하지' : 'override 를 지우지'} 못했어요: ${end.why}`
     case 'unknown':
-      return `결과를 알 수 없어요 (${end.why}). 목록을 다시 읽었어요.`
+      return `결과를 알 수 없어요 (${end.why}).`
   }
 }
 
@@ -93,13 +93,19 @@ export function finishPromptWrite(epoch: number, key: string, end: PromptWriteEn
   }
 }
 
-// The prompt whose detail is on screen. It is not part of the edits: an
-// answer reads it once, to decide whether the operator would see the outcome.
+// The prompt whose outcome note is on screen: its detail is mounted in the
+// edit view, the only view that draws the note. It is not part of the edits:
+// an answer reads it once, to decide whether the operator would see the
+// outcome without a toast.
 let shown: string | null = null
 
-/** Called by the mounted tab; `null` when no prompt detail is on screen. */
-export function markShownPrompt(key: string | null): void {
+export function markShownPrompt(key: string): void {
   shown = key
+}
+
+/** Clears the mark only if `key` still holds it, so a detail mounted after this one keeps its own. */
+export function unmarkShownPrompt(key: string): void {
+  if (shown === key) shown = null
 }
 
 export function isPromptShown(key: string): boolean {

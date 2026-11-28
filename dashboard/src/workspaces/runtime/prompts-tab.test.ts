@@ -330,6 +330,116 @@ describe('Runtime → Prompts', () => {
     expect(lastToast()?.message).not.toContain('keeper.worldview')
   })
 
+  it('tells a refused held-back clear in a toast while that prompt is open in the text view', async () => {
+    serve(
+      [prompt('keeper.worldview')],
+      () => jsonResponse({ ok: false, error: 'SERVER-REASON' }, 400),
+      [{ key: 'keeper.worldview', bytes: 12, reason: 'template variable {{post}} is no longer declared' }],
+    )
+    mount()
+    await pick('keeper.worldview')
+    expect(container.querySelector('textarea')).toBeNull()
+    click('[data-testid="prompts-held-back-clear"]')
+    await vi.waitFor(() => expect(lastToast()?.message).toContain('SERVER-REASON'))
+    expect(lastToast()?.tone).toBe('error')
+    expect(lastToast()?.message).toContain('override 를 지우지 못했어요')
+  })
+
+  it('tells an unknown outcome in a toast when the catalog cannot be read again either', async () => {
+    let wrote = false
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === 'POST') {
+        wrote = true
+        throw new TypeError('Failed to fetch')
+      }
+      if (String(input) === '/api/v1/prompts') {
+        if (wrote) throw new TypeError('Failed to fetch')
+        return jsonResponse({ prompts: [prompt('keeper.worldview')], held_back: [], runtime_assets: [] })
+      }
+      return jsonResponse({})
+    }) as typeof fetch
+    mount()
+    await pick('keeper.worldview')
+    click('[data-view="edit"]')
+    await flushUi()
+    await type('<world>maybe</world>')
+    click('[data-testid="prompt-save"]')
+    await vi.waitFor(() => expect(lastToast()?.message).toContain('결과를 알 수 없어요'))
+    expect(lastToast()?.tone).toBe('warning')
+    expect(lastToast()?.message).toContain('목록도 다시 읽지 못했어요')
+  })
+
+  it('keeps an earlier save going until a later save replaces its catalog read and that read answers', async () => {
+    const held: Array<() => void> = []
+    let posts = 0
+    const catalog = () => ({
+      prompts: [
+        prompt('keeper.worldview', posts > 0 ? { effective: 'WORLD NEW', source: 'override' } : {}),
+        prompt('keeper.identity', posts > 1 ? { effective: 'IDENTITY NEW', source: 'override' } : {}),
+      ],
+      held_back: [],
+      runtime_assets: [],
+    })
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === 'POST') {
+        posts += 1
+        const body = JSON.parse(String(init.body)) as { key: string }
+        return applied(body.key, 'override')
+      }
+      if (String(input) === '/api/v1/prompts') {
+        if (posts === 0) return jsonResponse(catalog())
+        return new Promise<Response>(resolve => { held.push(() => resolve(jsonResponse(catalog()))) })
+      }
+      return jsonResponse({})
+    }) as typeof fetch
+    mount()
+    await pick('keeper.worldview')
+    click('[data-view="edit"]')
+    await flushUi()
+    await type('WORLD NEW')
+    click('[data-testid="prompt-save"]')
+    await vi.waitFor(() => expect(held).toHaveLength(1))
+    await pick('keeper.identity')
+    click('[data-view="edit"]')
+    await flushUi()
+    await type('IDENTITY NEW')
+    click('[data-testid="prompt-save"]')
+    await vi.waitFor(() => expect(held).toHaveLength(2))
+    await pick('keeper.worldview')
+    expect(container.querySelector<HTMLTextAreaElement>('textarea')?.readOnly).toBe(true)
+    held[1]!()
+    await vi.waitFor(() => expect(container.querySelector<HTMLTextAreaElement>('textarea')?.readOnly).toBe(false))
+    expect(container.querySelector<HTMLTextAreaElement>('textarea')?.value).toBe('WORLD NEW')
+  })
+
+  it('names no prompt of the old session when the session changes while the catalog is read again', async () => {
+    let releaseRead: () => void = () => {}
+    let wrote = false
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === 'POST') {
+        wrote = true
+        return applied('keeper.worldview', 'override')
+      }
+      if (String(input) === '/api/v1/prompts') {
+        const body = { prompts: [prompt('keeper.worldview')], held_back: [], runtime_assets: [] }
+        return wrote ? new Promise<Response>(resolve => { releaseRead = () => resolve(jsonResponse(body)) }) : jsonResponse(body)
+      }
+      return jsonResponse({})
+    }) as typeof fetch
+    mount()
+    await pick('keeper.worldview')
+    click('[data-view="edit"]')
+    await flushUi()
+    await type('x')
+    click('[data-testid="prompt-save"]')
+    await flushUi(50)
+    bumpSessionEpoch()
+    releaseRead()
+    await flushUi(100)
+    expect(shellToasts.value.some(t => t.message.includes('세션이 바뀌어서'))).toBe(true)
+    expect(shellToasts.value.some(t => t.message.includes('keeper.worldview'))).toBe(false)
+  })
+
   it('keeps a draft when another prompt is picked and back again', async () => {
     serve([prompt('keeper.worldview'), prompt('keeper.identity')], () => jsonResponse({}))
     mount()

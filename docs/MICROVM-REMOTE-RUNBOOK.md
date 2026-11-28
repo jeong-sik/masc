@@ -215,7 +215,7 @@ ELF 헤더에서 읽는다. 옛 shim 은 옆에 `masc-exec-shim.previous` 로 �
 설치하고 바로 재시작한다. 재시작 전에 되돌리려면 `masc-exec-shim.previous` 를
 `masc-exec-shim` 으로 옮긴다. 옛 shim 이 릴리즈 shim 이었다면 sidecar 는 이미 지워져서
 되돌린 shim 은 sha256 대조 없이 돈다. sidecar 까지 되돌리려면
-`scripts/install.sh --version vX.Y.Z --force` 로 그 릴리즈를 다시 깐다.
+`scripts/install.sh --version vX.Y.Z --force --base-path <workspace>` 로 같은 작업 공간에 그 릴리즈를 다시 깐다.
 릴리즈 없이 지금 트리로 만들어야 할 때는 아래처럼 직접 빌드한다. 손으로 빌드한
 shim 에는 sidecar 가 없어야 한다. 없으면 부팅이 검증 없이 돌리고 로그에 그렇게
 적는다.

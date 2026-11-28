@@ -57,7 +57,7 @@ class Output:
             if kind == "snapshot":
                 first = event.get("first_retained_seq")
                 if isinstance(first, int) and first > 1:
-                    print(f"[{safe_text(keeper)}] earlier events before seq {first} are no longer retained", flush=True)
+                    print(f"[{safe_text(keeper)}] earlier events before seq {first} are not in this snapshot", flush=True)
                 active = event.get("active_count")
                 state = f"{active} active" if isinstance(active, int) and active else ("closed" if event.get("closed") else "open")
                 print(f"[{safe_text(keeper)}] snapshot: {state}", flush=True)

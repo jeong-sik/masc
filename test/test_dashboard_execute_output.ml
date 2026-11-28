@@ -37,8 +37,6 @@ let test_snapshot_merges_completed_output () =
     check string "keeper normalized" "alpha" snapshot.keeper;
     check (option string) "latest task" (Some "task-2") snapshot.task_id;
     check int "task count" 2 snapshot.task_count;
-    check string "stdout" "first\nsecond\n" snapshot.stdout_since;
-    check string "stderr" "err\n" snapshot.stderr_since;
     check int "stdout bytes" 13 snapshot.since_stdout;
     check int "stderr bytes" 4 snapshot.since_stderr;
     check bool "closed" true snapshot.closed
@@ -56,7 +54,6 @@ let test_snapshot_json_shape () =
   let open Yojson.Safe.Util in
   check string "type" "snapshot" (json |> member "type" |> to_string);
   check string "task" "task-123" (json |> member "task_id" |> to_string);
-  check string "stdout" "ok\n" (json |> member "stdout_since" |> to_string);
   check bool "closed" true (json |> member "closed" |> to_bool);
   check int "status code" 0 (json |> member "status" |> member "code" |> to_int)
 
@@ -109,9 +106,9 @@ let test_long_line_continues_in_next_rows () =
   check string "the rows spell the whole line" line
     (String.concat "" (List.map (fun (row : EO.output_line) -> row.text) rows))
 
-(* 270,000 bytes of Hangul, and the snapshot keeps the last 262,144: the ring
-   starts on the third byte of a syllable. That byte is skipped and counted as
-   dropped, so the text decodes and dropped + shown still covers the total. *)
+(* 270,000 bytes of Hangul, and the byte window keeps the last 262,144: the
+   ring starts on the third byte of a syllable. That byte is skipped and
+   counted as dropped. *)
 let test_snapshot_tail_starts_on_a_character () =
   EO.inject_for_testing
     ~keeper_name:"alpha"
@@ -122,13 +119,9 @@ let test_snapshot_tail_starts_on_a_character () =
   match EO.snapshot ~keeper_name:"alpha" with
   | None -> fail "expected snapshot"
   | Some snapshot ->
-    check bool "stdout_since decodes as UTF-8" true
-      (String_util.is_valid_utf8 snapshot.stdout_since);
     check int "total bytes" 270_000 snapshot.since_stdout;
     check int "the partial character counts as dropped" 7_857
-      snapshot.bytes_dropped_stdout;
-    check int "dropped + shown = total" snapshot.since_stdout
-      (snapshot.bytes_dropped_stdout + String.length snapshot.stdout_since)
+      snapshot.bytes_dropped_stdout
 
 let test_live_tail_subscriber_receives_line_and_close () =
   Eio_main.run (fun env ->
@@ -358,14 +351,24 @@ let test_malformed_output_has_utf8_snapshot_and_live_tail () =
   let snapshot = EO.event_json ~keeper_name:"alpha" in
   check bool "snapshot frame is UTF-8" true
     (String_util.is_valid_utf8 (EO.sse_frame snapshot));
-  List.iter (fun field ->
-    check string field displayed (snapshot |> member field |> to_string))
-    ["stdout_since"; "stderr_since"];
+  let shown stream =
+    snapshot |> member "lines" |> to_list
+    |> List.filter (fun line -> String.equal (line |> member "stream" |> to_string) stream)
+    |> List.map (fun line -> line |> member "text" |> to_string)
+    |> String.concat "\n"
+  in
+  List.iter (fun stream -> check string stream displayed (shown stream)) [ "stdout"; "stderr" ];
   (match EO.snapshot ~keeper_name:"alpha" with
    | None -> fail "expected raw snapshot"
    | Some retained ->
-     check string "raw stdout preserved" raw retained.stdout_since;
-     check string "raw stderr preserved" raw retained.stderr_since;
+     let kept stream =
+       retained.lines
+       |> List.filter (fun (line : EO.output_line) -> String.equal line.stream stream)
+       |> List.map (fun (line : EO.output_line) -> line.text)
+       |> String.concat "\n"
+     in
+     check string "raw stdout preserved" raw (kept "stdout");
+     check string "raw stderr preserved" raw (kept "stderr");
      check int "stdout byte count" (String.length raw) retained.since_stdout;
      check int "stderr byte count" (String.length raw) retained.since_stderr);
   Eio_main.run (fun env ->
@@ -595,6 +598,49 @@ let test_snapshot_discloses_evicted_live_history () =
   check int "completed byte counter does not pretend to count live evictions" 0
     (snapshot |> member "bytes_dropped_stdout" |> to_int)
 
+(* A stream's first frame from a log of 5,000 rows carries only the newest
+   [snapshot_line_limit] of them (#46909). [first_retained_seq] names the
+   first row sent, so a reader knows where the cut is. *)
+let test_first_frame_carries_newest_rows_up_to_limit () =
+  let row_count = EO.event_log_capacity in
+  let omitted = row_count - EO.snapshot_line_limit in
+  (* The task_opened marker takes seq 1, so row [k] has seq [k + 1]. *)
+  let row_seq k = k + 1 in
+  EO.record_stream_start ~stream_id:1 ~command:"" ~keeper_name:"alpha" ~task_id:None;
+  EO.append_stream_chunk ~stream_id:1 ~keeper_name:"alpha" ~stream:`Stdout
+    (numbered_lines ~count:row_count);
+  Eio_main.run (fun _env ->
+    match EO.subscribe ~keeper_name:"alpha" with
+    | None -> fail "expected subscriber"
+    | Some subscriber ->
+      Fun.protect ~finally:(fun () -> EO.unsubscribe subscriber) (fun () ->
+        let open Yojson.Safe.Util in
+        let initial = EO.initial_event_json subscriber in
+        let lines = initial |> member "lines" |> to_list in
+        check int "the log retains every row" row_count
+          (List.length (EO.output_lines_for_testing ~keeper_name:"alpha"));
+        check int "rows sent" EO.snapshot_line_limit (List.length lines);
+        check (list string) "the newest rows, in order"
+          (List.init EO.snapshot_line_limit (fun i ->
+             Printf.sprintf "row-%05d" (omitted + i + 1)))
+          (List.map (fun line -> line |> member "text" |> to_string) lines);
+        check int "first_retained_seq is the first row sent" (row_seq (omitted + 1))
+          (initial |> member "first_retained_seq" |> to_int);
+        check int "last seq" (row_seq row_count) (initial |> member "last_seq" |> to_int)))
+
+(* A log of exactly [snapshot_line_limit] rows is sent whole, and the frame
+   does not report a cut that did not happen. *)
+let test_first_frame_at_limit_reports_no_cut () =
+  EO.record_stream_start ~stream_id:1 ~command:"" ~keeper_name:"alpha" ~task_id:None;
+  EO.append_stream_chunk ~stream_id:1 ~keeper_name:"alpha" ~stream:`Stdout
+    (numbered_lines ~count:EO.snapshot_line_limit);
+  let open Yojson.Safe.Util in
+  let snapshot = EO.event_json ~keeper_name:"alpha" in
+  check int "every row" EO.snapshot_line_limit
+    (snapshot |> member "lines" |> to_list |> List.length);
+  check int "the frame covers the log from its first event" 1
+    (snapshot |> member "first_retained_seq" |> to_int)
+
 let test_sse_frame () =
   let frame = EO.sse_frame (`Assoc [ "type", `String "snapshot" ]) in
   check bool "event header" true (String.starts_with ~prefix:"event: output\n" frame);
@@ -821,6 +867,10 @@ let () =
             (with_fresh test_overlapping_streams_keep_identity_and_open_state)
         ; test_case "snapshot discloses evicted live history" `Quick
             (with_fresh test_snapshot_discloses_evicted_live_history)
+        ; test_case "first frame carries the newest rows up to the limit" `Quick
+            (with_fresh test_first_frame_carries_newest_rows_up_to_limit)
+        ; test_case "first frame at the limit reports no cut" `Quick
+            (with_fresh test_first_frame_at_limit_reports_no_cut)
         ; test_case "sse frame" `Quick test_sse_frame
         ; test_case "HTTP stream delivers while open and stops on disconnect" `Quick
             (with_fresh test_route_delivers_open_stream_and_releases_on_disconnect)

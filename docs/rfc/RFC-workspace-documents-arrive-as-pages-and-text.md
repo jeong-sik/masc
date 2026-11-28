@@ -94,6 +94,8 @@ ZIP 의 목차는 파일 끝에 있으므로, TUI 는 최대 크기 안에서 �
 - XML 은 이미 쓰는 `markup` 으로 읽는다. 부분 문자열로 찾지 않는다.
 - ZIP 은 `zipc`(ISC, 순수 OCaml)로 읽는다. 펼치는 항목은 `_rels/.rels`·`[Content_Types].xml`·`mimetype`·`META-INF/manifest.xml` 넷뿐이다.
   넷 모두 적힌 크기가 `part_max_bytes`(1 MiB)를 넘으면 펼치지 않고 깨진 컨테이너로 본다.
+  OPC 이름(`_rels/.rels`·`[Content_Types].xml`·주 part)은 대소문자를 가리지 않고 찾는다. 대소문자만 다른 항목이 둘이면 깨진 컨테이너다. HWPX 의 두 항목은 이름이 정확히 같아야 한다.
+  zipc 0.2.0 의 inflate 는 깨진 Deflate 에서 `Invalid_argument` 를 던진다. 판별은 그 호출에서만 이 예외를 깨진 항목으로 바꾼다. decompress 1.6.1 도 같은 종류의 예외를 던져서 inflate 를 바꾸지 않았다.
   펼친 크기가 central directory 에 적힌 크기와 달라도 깨진 컨테이너다.
 - CFB 를 읽는 OCaml 라이브러리는 찾지 못했다. 그래서 작은 reader 를 둔다.
   이 reader 는 header·FAT·miniFAT·디렉터리를 읽고, 이름이 정해진 stream 의 앞부분을 읽는다.
@@ -108,7 +110,7 @@ ZIP 의 목차는 파일 끝에 있으므로, TUI 는 최대 크기 안에서 �
 | DOC | `WordDocument` FibBase 의 `fEncrypted` bit | [MS-DOC] FibBase |
 | XLS | `Workbook` globals 의 BOF 다음에 `FilePass`(0x002F) 레코드가 있다. 그 사이에는 `WriteProtect`(0x0086) 하나만 올 수 있다 | [MS-XLS] Globals Substream, FilePass |
 | PPT | `Current User` stream 의 `headerToken` 이 `0xF3D1C4DF`. 암호가 없으면 `0xE391C05F` 이고, 다른 값은 깨진 파일이다 | [MS-PPT] CurrentUserAtom |
-| HWP | `FileHeader` 의 속성(36 바이트 위치, u32)에서 0x02 bit. 배포용 문서 bit(0x04)는 암호가 아니다. rhwp 가 배포용 문서를 연다 | 한글 문서 파일 형식 5.0 |
+| HWP | `FileHeader` 의 속성(36 바이트 위치, u32)에서 암호(0x02)·DRM(0x10)·인증서 암호화(0x100)·인증서 DRM(0x400) bit 중 하나. 배포용 문서 bit(0x04)와 전자 서명 bit(0x80)는 암호가 아니다. rhwp 가 배포용 문서를 연다 | 한글 문서 파일 형식 5.0, pyhwp `FileHeader.Flags` |
 | HWPX | `META-INF/manifest.xml` 에 ODF manifest 이름공간(`urn:oasis:names:tc:opendocument:xmlns:manifest:1.0`)의 `encryption-data` 요소가 있다 | ODF manifest. 공개 표본의 암호 HWPX 1개로 확인 |
 
 L2 가 이 표를 명세와 표본으로 시험 표에 고정한다.

@@ -41,7 +41,7 @@ import {
 import { isAdminLockedForSession, navigate, resolveRoute } from '../../routes/router'
 import { pushShellToast } from '../../shell/shell-state'
 import { WikiEmbedPicker, type WikiEmbedPages } from './wiki-embed-picker'
-import { wikiLintKindLabel } from './wiki-lint-kind'
+import { wikiLintCountLabel, wikiLintKindLabel } from './wiki-lint-kind'
 import {
   WIKI_LINK_KINDS,
   WIKI_SOURCES,
@@ -816,8 +816,8 @@ export function WikiTab(props: WorkspaceViewProps) {
             : html`
                 <div class="kn-chips">
                   ${Object.entries(lintData.counts ?? {}).map(([k, v]) => html`
-                    <span key=${k} class=${`kn-badge ${v > 0 ? 'kn-badge--warn' : 'kn-badge--ok'}`}>
-                      ${k}: ${v}
+                    <span key=${k} class=${`kn-badge ${v > 0 ? 'kn-badge--warn' : 'kn-badge--ok'}`} title=${k}>
+                      ${wikiLintCountLabel(k)}: ${v}
                     </span>
                   `)}
                 </div>

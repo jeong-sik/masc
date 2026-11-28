@@ -115,24 +115,25 @@ function readRelativeTimeInput(tsInput: number | string): RelativeTimeInput | nu
   return Number.isNaN(ms) ? { kind: 'unreadable', raw: tsInput } : { kind: 'instant', ms }
 }
 
-/** What a time ahead of now reads as. An event (a write, a post, a vote)
- *  cannot lie ahead, so one that does only shows the two clocks disagree and
- *  reads as now. A schedule's next run can lie ahead. */
-type AheadOfNow = 'reads_as_now' | 'reads_as_ahead'
+/** A server east of the viewer writes a calendar day that is already
+ *  tomorrow on the viewer's clock. */
+const SERVER_DATE_LEAD_DAYS = 1
 
-function formatInstantFromNow(diffSec: number, ahead: AheadOfNow): string {
+/** What a time is. An event (a write, a post, a vote) cannot lie ahead of
+ *  now. One that lies ahead by less than RECENT_SECONDS, or a calendar day
+ *  SERVER_DATE_LEAD_DAYS ahead, only shows two clocks disagreeing and reads
+ *  as now. Further ahead it reads as ahead, so a wrong clock or a bad value
+ *  stays visible. A schedule's next run can lie ahead and always reads so. */
+type TimeMeaning = 'event' | 'schedule'
+
+function formatInstantFromNow(diffSec: number, meaning: TimeMeaning): string {
   if (diffSec < 0) {
-    switch (ahead) {
-      case 'reads_as_now':
-        return '방금 전'
-      case 'reads_as_ahead': {
-        const aheadSec = -diffSec
-        if (aheadSec < SECONDS_PER_MINUTE) return `${aheadSec}초 후`
-        if (aheadSec < SECONDS_PER_HOUR) return `${Math.floor(aheadSec / SECONDS_PER_MINUTE)}분 후`
-        if (aheadSec < SECONDS_PER_DAY) return `${Math.floor(aheadSec / SECONDS_PER_HOUR)}시간 후`
-        return `${Math.floor(aheadSec / SECONDS_PER_DAY)}일 후`
-      }
-    }
+    const aheadSec = -diffSec
+    if (meaning === 'event' && aheadSec < RECENT_SECONDS) return '방금 전'
+    if (aheadSec < SECONDS_PER_MINUTE) return `${aheadSec}초 후`
+    if (aheadSec < SECONDS_PER_HOUR) return `${Math.floor(aheadSec / SECONDS_PER_MINUTE)}분 후`
+    if (aheadSec < SECONDS_PER_DAY) return `${Math.floor(aheadSec / SECONDS_PER_HOUR)}시간 후`
+    return `${Math.floor(aheadSec / SECONDS_PER_DAY)}일 후`
   }
   if (diffSec < RECENT_SECONDS) return '방금 전'
   if (diffSec < SECONDS_PER_HOUR) return `${Math.floor(diffSec / SECONDS_PER_MINUTE)}분 전`
@@ -140,21 +141,18 @@ function formatInstantFromNow(diffSec: number, ahead: AheadOfNow): string {
   return `${Math.floor(diffSec / SECONDS_PER_DAY)}일 전`
 }
 
-function formatDayFromToday(daysAgo: number, ahead: AheadOfNow): string {
+function formatDayFromToday(daysAgo: number, meaning: TimeMeaning): string {
   if (daysAgo < 0) {
-    switch (ahead) {
-      case 'reads_as_now':
-        return '오늘'
-      case 'reads_as_ahead':
-        return daysAgo === -1 ? '내일' : `${-daysAgo}일 후`
-    }
+    const daysAhead = -daysAgo
+    if (meaning === 'event' && daysAhead <= SERVER_DATE_LEAD_DAYS) return '오늘'
+    return daysAhead === 1 ? '내일' : `${daysAhead}일 후`
   }
   if (daysAgo === 0) return '오늘'
   if (daysAgo === 1) return '어제'
   return `${daysAgo}일 전`
 }
 
-function formatRelative(tsInput: number | string | null | undefined, nowMs: number, ahead: AheadOfNow): string {
+function formatRelative(tsInput: number | string | null | undefined, nowMs: number, meaning: TimeMeaning): string {
   if (tsInput === null || tsInput === undefined || tsInput === '') return '없음'
   const input = readRelativeTimeInput(tsInput)
   if (input === null) return '없음'
@@ -162,11 +160,11 @@ function formatRelative(tsInput: number | string | null | undefined, nowMs: numb
     case 'unreadable':
       return input.raw
     case 'instant':
-      return formatInstantFromNow(Math.round((nowMs - input.ms) / 1000), ahead)
+      return formatInstantFromNow(Math.round((nowMs - input.ms) / 1000), meaning)
     case 'day': {
       const today = new Date(nowMs)
       today.setHours(0, 0, 0, 0)
-      return formatDayFromToday(Math.round((today.getTime() - input.localMidnightMs) / MS_PER_DAY), ahead)
+      return formatDayFromToday(Math.round((today.getTime() - input.localMidnightMs) / MS_PER_DAY), meaning)
     }
   }
 }
@@ -175,17 +173,17 @@ function formatRelative(tsInput: number | string | null | undefined, nowMs: numb
  * How long ago an event happened, from unix seconds or milliseconds, an ISO
  * instant, or a calendar day: "방금 전", "3분 전", "어제", "4일 전". A calendar
  * day (`2026-11-28`) has no time of day, so it reads in whole days. A time
- * ahead of now reads as now. Returns "없음" without input and the text itself
- * when it is no time.
+ * just ahead of now reads as now (see {@link TimeMeaning}). Returns "없음"
+ * without input and the text itself when it is no time.
  */
 export function formatRelativeTime(tsInput: number | string | null | undefined, nowMs = Date.now()): string {
-  return formatRelative(tsInput, nowMs, 'reads_as_now')
+  return formatRelative(tsInput, nowMs, 'event')
 }
 
 /** {@link formatRelativeTime} for a time that can lie ahead, such as a
  *  schedule's next run: "3분 후", "내일", and "2분 전" once it has passed. */
 export function formatScheduledTime(tsInput: number | string | null | undefined, nowMs = Date.now()): string {
-  return formatRelative(tsInput, nowMs, 'reads_as_ahead')
+  return formatRelative(tsInput, nowMs, 'schedule')
 }
 
 /** Format elapsed seconds — "3초", "5분", "2시간". Returns NO_TIME_INFO for invalid. */

@@ -119,10 +119,12 @@ describe('formatRelativeTime', () => {
     expect(formatRelativeTime(fiveMinutesAgoMs / 1000, now)).toBe('5분 전')
   })
 
-  it('reads an event ahead of the local clock as now', () => {
+  it('reads an event just ahead of the local clock as now, and one further ahead as ahead', () => {
     const now = at(28, 15)
     expect(formatRelativeTime(new Date(at(28, 15, 0, 12)).toISOString(), now)).toBe('방금 전')
+    expect(formatRelativeTime(new Date(at(28, 15, 10)).toISOString(), now)).toBe('10분 후')
     expect(formatRelativeTime('2026-11-29', now)).toBe('오늘')
+    expect(formatRelativeTime('2026-12-01', now)).toBe('3일 후')
   })
 
   it('says 없음 without a time and shows text that is no time as written', () => {
@@ -143,5 +145,6 @@ describe('formatScheduledTime', () => {
     expect(formatScheduledTime(new Date(at(28, 14, 58)).toISOString(), now)).toBe('2분 전')
     expect(formatScheduledTime('2026-11-29', now)).toBe('내일')
     expect(formatScheduledTime('2026-12-01', now)).toBe('3일 후')
+    expect(formatScheduledTime('2026-11-27', now)).toBe('어제')
   })
 })

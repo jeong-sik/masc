@@ -1,6 +1,7 @@
 // The Korean name of each wiki lint kind. The keys are the wire names
 // `Wiki_lint.kind` writes in lib/wiki_lint.ml, in the order of its
-// `all_kinds`.
+// `all_kinds`. The lint `counts` object has one key per kind and one more,
+// `duplicate_title_candidates`, which counts pairs rather than findings.
 
 const WIKI_LINT_KIND_LABELS = {
   broken_link: '깨진 링크',
@@ -30,4 +31,11 @@ function isWikiLintKind(kind: string): kind is WikiLintKind {
  *  another kind's name. */
 export function wikiLintKindLabel(kind: string): string {
   return isWikiLintKind(kind) ? WIKI_LINT_KIND_LABELS[kind] : kind
+}
+
+const DUPLICATE_TITLE_COUNT_KEY = 'duplicate_title_candidates'
+
+/** The Korean name of a key of the lint `counts` object. */
+export function wikiLintCountLabel(key: string): string {
+  return key === DUPLICATE_TITLE_COUNT_KEY ? '중복 제목 후보' : wikiLintKindLabel(key)
 }

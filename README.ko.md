@@ -171,9 +171,10 @@ scripts/install-local-build.sh --base-path "$HOME/MASC"
 
 새 소스 설치에서는 설정 화면에서 Docker를 고릅니다. Apple Container를 쓰려면
 먼저 [같은 체크아웃에서 Linux ARM64 게스트 shim을 빌드해 같은 작업 공간에 설치합니다](docs/MICROVM-REMOTE-RUNBOOK.md#shim-받기).
-로컬 설치기는 새 작업 공간에 shim을 추가하지 않으며, 기존 릴리스 shim은 기본적으로 보존합니다.
-서버·shim 변경을 microVM 에 배포하거나 `remote_shim_outdated` 를 해결할 때만
-`--refresh-guest-shim` 을 붙이세요. 기존 릴리즈 shim 을 갱신합니다.
+로컬 설치기는 새 작업 공간에 shim을 추가하지 않습니다. 이미 있는 shim 이 새 빌드와 다른
+소스 신원을 적었으면, 릴리즈가 놓은 shim 이어도 서버를 바꾸기 전에 같은 체크아웃에서 다시
+빌드합니다(Docker 필요). 빌드가 실패하면 아무것도 설치하지 않습니다.
+`--refresh-guest-shim` 은 기존 릴리즈 shim 을 빌드가 말하는 릴리즈의 자산으로 바꿉니다.
 아무것도 바꾸기 전에 새 빌드로 작업 공간의 `runtime.toml`을 검사합니다.
 경로가 해석되고 아직 존재하지 않는다고 확인되면 새 작업 공간으로 취급하고 검사는
 미실행으로 표시합니다. 경로를 해석하거나 관측할 수 없으면 교체 전에

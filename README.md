@@ -180,10 +180,12 @@ scripts/install-local-build.sh --base-path "$HOME/MASC"
 
 For a new source installation, choose Docker in setup. To use Apple Container,
 first [build and install the Linux ARM64 guest shim from the same checkout](docs/MICROVM-REMOTE-RUNBOOK.md#shim-받기),
-using the same workspace path. The source installer keeps existing release shims by default.
-Use `--refresh-guest-shim` when deploying a server/shim change to microVM Keepers
-or addressing `remote_shim_outdated`; it refreshes an existing release shim
-(`docs/MICROVM-REMOTE-RUNBOOK.md`). When that release's shim declares another
+using the same workspace path. When the workspace's guest shim declares another
+source identity than the build, the source installer rebuilds it from this
+checkout before it replaces the server (`scripts/remote-ssh/build-shim.sh`,
+which needs Docker), whether or not a release placed that shim; a failed rebuild
+installs nothing. `--refresh-guest-shim` takes an existing release shim from the
+release the build names instead (`docs/MICROVM-REMOTE-RUNBOOK.md`). When that release's shim declares another
 source identity than the build (always, for a checkout build), it installs
 nothing and names the source build (`scripts/remote-ssh/build-shim.sh`) to use
 instead.

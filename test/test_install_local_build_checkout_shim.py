@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""A local install rebuilds a guest shim of another source from its checkout (#53164)."""
+"""A local install rebuilds a workspace guest shim of another source from its checkout (#53164, #53296)."""
+import hashlib
 import os
 from pathlib import Path
 import shutil
@@ -8,10 +9,16 @@ import tempfile
 import unittest
 
 import test_install_local_build as local_build
-import test_install_local_build_guest_shim as guest_shim
 
-BUILD_SOURCE = guest_shim.BUILD_SOURCE
-OTHER_SOURCE = guest_shim.OTHER_SOURCE
+SCRIPT = local_build.SCRIPT
+VERSION = "9.8.7"
+ARM64 = "masc-exec-shim-linux-arm64"
+OLD_SHIM = b"shim of an older release\n"
+# The source identity the fixture build declares. Its own value, so a test
+# cannot pass by agreeing with this checkout's Source_identity.current.
+BUILD_SOURCE = "a" * 40 + "/clean"
+# A release cut from another source.
+OTHER_SOURCE = "b" * 40 + "/modified:" + "c" * 40
 # The source of a later commit, for a second rebuild.
 LATER_SOURCE = "d" * 40 + "/clean"
 PREVIOUS = "masc-exec-shim.previous"
@@ -49,6 +56,63 @@ cp "$top/fixture-shim-$arch" "$top/$out/masc-exec-shim-linux-$arch"
 '''
 
 
+# The literal a binary built from [source] carries (RFC
+# host-and-shim-share-one-build-identity).
+def declaring(source):
+    return f"MASC_SOURCE_IDENTITY={source};".encode()
+
+
+def sha256(content):
+    return hashlib.sha256(content).hexdigest()
+
+
+# The server binary links the same Source_identity as the shim, so it carries
+# the same declaration; [source] None is a build that carries none.
+def server_naming(build, version, source=BUILD_SOURCE):
+    server = build / "main_eio.exe"
+    declaration = "" if source is None else f"# {declaring(source).decode()}\n"
+    server.write_text(f'#!/bin/sh\n{declaration}if [ "$1" = --version ]; then echo {version}; fi\n')
+    server.chmod(0o755)
+
+
+# A build whose server names [version] the way masc --version does.
+def build_naming(root, version=VERSION, source=BUILD_SOURCE):
+    build = root / "build"
+    build.mkdir()
+    local_build.binaries(build)
+    server_naming(build, version, source)
+    local_build.preflight_helper(build)
+    return build
+
+
+# The sidecar the release installer writes: the release's SHA256SUMS line for
+# the asset it installed.
+def sidecar_line(content, asset=ARM64):
+    return f"{sha256(content)}  {asset}\n"
+
+
+# The workspace's shim directory as the release installer leaves it: the
+# binary, and beside it the sidecar. Without [sidecar] it is what
+# scripts/remote-ssh/build-shim.sh leaves: a source build.
+def workspace_with_shim(root, content=OLD_SHIM, sidecar: str | None = sidecar_line(OLD_SHIM)):
+    base = local_build.workspace(root)
+    directory = base / ".masc/microvm/shim"
+    directory.mkdir(parents=True)
+    shim = directory / "masc-exec-shim"
+    shim.write_bytes(content)
+    shim.chmod(0o755)
+    if sidecar is not None:
+        (directory / "masc-exec-shim.sha256").write_text(sidecar)
+    return base, shim, directory / "masc-exec-shim.sha256"
+
+
+def shim_directory(shim):
+    return sorted(path.name for path in shim.parent.iterdir())
+
+
+PAIR = ["masc-exec-shim", "masc-exec-shim.sha256"]
+
+
 # The first bytes of a 64-bit ELF executable for [machine], then the source
 # declaration a shim of [source] carries, or none when [source] is None.
 def elf(machine, source, little_endian=True):
@@ -56,7 +120,7 @@ def elf(machine, source, little_endian=True):
     order = "little" if little_endian else "big"
     header = (b"\x7fELF" + bytes([2, data, 1, 0]) + bytes(8)
               + (2).to_bytes(2, order) + machine.to_bytes(2, order))
-    declaration = b"" if source is None else guest_shim.declaring(source)
+    declaration = b"" if source is None else declaring(source)
     return header + declaration + b"\nshim\n"
 
 
@@ -80,22 +144,19 @@ def checkout(root, built=lambda machine: elf(machine, BUILD_SOURCE), build_fails
     return repo
 
 
-# curl records that it was asked, so a case can show no release was read.
-def no_release_env(root):
+# The install's environment, with a hooks directory first on PATH where a
+# case can put a stand-in for a program the script runs.
+def hooked_env(root):
     hooks = root / "hooks"
     hooks.mkdir(exist_ok=True)
-    curl = hooks / "curl"
-    curl.write_text(f'#!/bin/sh\ntouch "{root / "release-requested"}"\nexit 99\n')
-    curl.chmod(0o755)
     env = local_build.unnamed_env(root)
     env["PATH"] = str(hooks) + os.pathsep + env["PATH"]
-    env["MASC_RELEASE_BASE_URL"] = (root / "no-releases").as_uri()
     return env
 
 
 # An mv that refuses the one rename whose source and target match the shell
 # patterns [source] and [target], and is the real mv for every other.
-# no_release_env puts the hooks directory first on PATH.
+# hooked_env puts the hooks directory first on PATH.
 def refusing_mv(root, source, target):
     hooks = root / "hooks"
     hooks.mkdir(exist_ok=True)
@@ -146,7 +207,7 @@ def install(root, repo, build, base, *more, shell="bash"):
         [shell, str(repo / "scripts" / local_build.SCRIPT.name), "--skip-build",
          "--build-dir", str(build), "--prefix", str(root / "prefix"),
          "--base-path", str(base), *more],
-        env=no_release_env(root), cwd=root, capture_output=True, text=True)
+        env=hooked_env(root), cwd=root, capture_output=True, text=True)
 
 
 def build_calls(repo):
@@ -168,29 +229,80 @@ class CheckoutGuestShim(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("nothing installed", result.stderr)
         self.assertEqual(shim.read_bytes(), content)
-        self.assertEqual(guest_shim.shim_directory(shim), ["masc-exec-shim"])
+        self.assertEqual(shim_directory(shim), ["masc-exec-shim"])
         self.assertEqual(leftover_builds(repo), [])
         self.assertFalse((root / "prefix").exists(),
                          "the server was replaced beside a shim it refuses")
 
     def test_a_shim_of_this_build_is_kept_and_nothing_is_built(self):
-        for more in ((), ("--refresh-guest-shim",)):
-            with self.subTest(more=more), tempfile.TemporaryDirectory() as temporary:
-                root = Path(temporary).resolve()
-                repo = checkout(root)
-                current = elf(EM_AARCH64, BUILD_SOURCE)
-                base, shim, _ = guest_shim.workspace_with_shim(root, content=current, sidecar=None)
-                inode = shim.stat().st_ino
-                result = install(root, repo, guest_shim.build_naming(root), base, *more)
-                self.assertEqual(result.returncode, 0, result.stderr)
-                self.assertEqual(build_calls(repo), [])
-                self.assertEqual(shim.stat().st_ino, inode, "a current shim was replaced")
-                self.assertEqual(guest_shim.shim_directory(shim), ["masc-exec-shim"])
-                self.assertIn(f"already declares this build's source identity {BUILD_SOURCE}",
-                              result.stdout)
-                self.assertFalse((root / "release-requested").exists(),
-                                 "a source-built shim asked for a release")
-                self.assertTrue((root / "prefix/masc").is_file())
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            repo = checkout(root)
+            current = elf(EM_AARCH64, BUILD_SOURCE)
+            base, shim, _ = workspace_with_shim(root, content=current, sidecar=None)
+            inode = shim.stat().st_ino
+            result = install(root, repo, build_naming(root), base)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(build_calls(repo), [])
+            self.assertEqual(shim.stat().st_ino, inode, "a current shim was replaced")
+            self.assertEqual(shim_directory(shim), ["masc-exec-shim"])
+            self.assertIn(f"already declares this build's source identity {BUILD_SOURCE}",
+                          result.stdout)
+            self.assertTrue((root / "prefix/masc").is_file())
+
+    def test_a_workspace_without_a_shim_is_given_none(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            repo = checkout(root)
+            base = local_build.workspace(root)
+            result = install(root, repo, build_naming(root), base)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(build_calls(repo), [])
+            self.assertFalse((base / ".masc/microvm").exists())
+            self.assertNotIn("guest exec shim", result.stdout + result.stderr)
+
+    # The browser Add-on programs are checked before the shim step, so a
+    # refused install leaves the shim, its sidecar and the prefix as they were.
+    def test_invalid_browser_addon_inputs_leave_installed_programs_and_guest_shim_untouched(self):
+        for program in local_build.BROWSER_ADDON_PROGRAMS:
+            for invalid in ("missing", "not_executable", "directory"):
+                with self.subTest(program=program, invalid=invalid), tempfile.TemporaryDirectory() as temporary:
+                    root = Path(temporary).resolve()
+                    repo = checkout(root)
+                    base, shim, sidecar = workspace_with_shim(root)
+                    build = build_naming(root)
+                    for name in local_build.BROWSER_ADDON_PROGRAMS:
+                        local_build.executable(build / f"{name}.exe", name)
+                    bad = build / f"{program}.exe"
+                    if invalid == "not_executable":
+                        bad.chmod(0o600)
+                    else:
+                        bad.unlink()
+                        if invalid == "directory":
+                            bad.mkdir()
+                    prefix = root / "prefix"
+                    prefix.mkdir()
+                    old_server = local_build.executable(prefix / "masc", "old-server")
+                    old_worker = local_build.executable(prefix / "masc-browser-addon-worker", "old-worker")
+                    before = {p: p.read_bytes() for p in (shim, sidecar, old_server, old_worker)}
+                    result = install(root, repo, build, base)
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn(str(bad), result.stderr)
+                    for path, content in before.items():
+                        self.assertEqual(path.read_bytes(), content, str(path))
+                    self.assertEqual(build_calls(repo), [])
+                    self.assertEqual(local_build.helper_calls(build), [])
+                    self.assertEqual(local_build.addon_calls(prefix), [])
+
+    def test_help_prints_the_usage_block_and_nothing_else(self):
+        result = subprocess.run(["bash", str(SCRIPT), "--help"], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.stderr, "")
+        lines = result.stdout.splitlines()
+        self.assertTrue(lines[0].startswith("# Usage: scripts/install-local-build.sh"), lines[0])
+        for option in ("--prefix", "--skip-build", "--build-dir",
+                       "--base-path", "--no-browser-addon", "--print-build-targets"):
+            self.assertEqual(sum(line.startswith(f"#   {option} ") for line in lines), 1, option)
 
     # The architecture is the old shim's, read from its ELF header, and the
     # old shim stays beside the new one as the one previous copy.
@@ -202,8 +314,8 @@ class CheckoutGuestShim(unittest.TestCase):
                 root = Path(temporary).resolve()
                 repo = checkout(root)
                 old = elf(machine, old_source)
-                base, shim, sidecar = guest_shim.workspace_with_shim(root, content=old, sidecar=None)
-                result = install(root, repo, guest_shim.build_naming(root), base)
+                base, shim, sidecar = workspace_with_shim(root, content=old, sidecar=None)
+                result = install(root, repo, build_naming(root), base)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 [call] = build_calls(repo)
                 self.assertTrue(call.startswith(
@@ -212,7 +324,7 @@ class CheckoutGuestShim(unittest.TestCase):
                 self.assertTrue(os.access(shim, os.X_OK),
                                 "the guest cannot run a shim without the execute bit")
                 self.assertFalse(sidecar.exists(), "a source-built shim was given a sidecar")
-                self.assertEqual(guest_shim.shim_directory(shim), ["masc-exec-shim", PREVIOUS])
+                self.assertEqual(shim_directory(shim), ["masc-exec-shim", PREVIOUS])
                 self.assertEqual((shim.parent / PREVIOUS).read_bytes(), old)
                 self.assertEqual(leftover_builds(repo), [])
                 self.assertIn(f"installed the {arch} guest exec shim built from {repo}",
@@ -226,23 +338,23 @@ class CheckoutGuestShim(unittest.TestCase):
             root = Path(temporary).resolve()
             repo = checkout(root)
             old = elf(EM_AARCH64, OTHER_SOURCE)
-            base, shim, _ = guest_shim.workspace_with_shim(root, content=old, sidecar=None)
+            base, shim, _ = workspace_with_shim(root, content=old, sidecar=None)
             hand_copies = {shim.parent / "masc-exec-shim.bak-20261118T234400Z": b"hand swap\n",
                            shim.parent / "masc-exec-shim.sha256.20261118": b"old sidecar\n"}
             for path, content in hand_copies.items():
                 path.write_bytes(content)
-            first = install(root, repo, guest_shim.build_naming(root), base)
+            first = install(root, repo, build_naming(root), base)
             self.assertEqual(first.returncode, 0, first.stderr)
             self.assertEqual((shim.parent / PREVIOUS).read_bytes(), old)
             later = root / "later"
             later.mkdir()
             (repo / "fixture-shim-arm64").write_bytes(elf(EM_AARCH64, LATER_SOURCE))
-            second = install(root, repo, guest_shim.build_naming(later, source=LATER_SOURCE), base)
+            second = install(root, repo, build_naming(later, source=LATER_SOURCE), base)
             self.assertEqual(second.returncode, 0, second.stderr)
             self.assertEqual(len(build_calls(repo)), 2)
             self.assertEqual(shim.read_bytes(), elf(EM_AARCH64, LATER_SOURCE))
             self.assertEqual((shim.parent / PREVIOUS).read_bytes(), elf(EM_AARCH64, BUILD_SOURCE))
-            self.assertEqual(guest_shim.shim_directory(shim),
+            self.assertEqual(shim_directory(shim),
                              sorted(["masc-exec-shim", PREVIOUS, *(p.name for p in hand_copies)]))
             for path, content in hand_copies.items():
                 self.assertEqual(path.read_bytes(), content, str(path))
@@ -254,8 +366,8 @@ class CheckoutGuestShim(unittest.TestCase):
             root = Path(temporary).resolve()
             repo = checkout(root, build_fails=True)
             old = elf(EM_AARCH64, OTHER_SOURCE)
-            base, shim, _ = guest_shim.workspace_with_shim(root, content=old, sidecar=None)
-            result = install(root, repo, guest_shim.build_naming(root), base)
+            base, shim, _ = workspace_with_shim(root, content=old, sidecar=None)
+            result = install(root, repo, build_naming(root), base)
             self.refused(old, result, root, repo, shim)
             self.assertEqual(len(build_calls(repo)), 1)
             self.assertIn("Cannot connect to the Docker daemon", result.stderr)
@@ -283,8 +395,8 @@ class CheckoutGuestShim(unittest.TestCase):
                 root = Path(temporary).resolve()
                 repo = checkout(root, built=lambda machine, source=source: elf(machine, source))
                 old = elf(EM_AARCH64, OTHER_SOURCE)
-                base, shim, _ = guest_shim.workspace_with_shim(root, content=old, sidecar=None)
-                result = install(root, repo, guest_shim.build_naming(root), base)
+                base, shim, _ = workspace_with_shim(root, content=old, sidecar=None)
+                result = install(root, repo, build_naming(root), base)
                 self.refused(old, result, root, repo, shim)
                 declared = "none" if source is None else source
                 self.assertIn(f"declares {declared} instead", result.stderr)
@@ -302,9 +414,9 @@ class CheckoutGuestShim(unittest.TestCase):
                 root = Path(temporary).resolve()
                 repo = checkout(root)
                 old = elf(machine, old_source)
-                base, shim, sidecar = guest_shim.workspace_with_shim(
-                    root, content=old, sidecar=guest_shim.sidecar_line(old))
-                result = install(root, repo, guest_shim.build_naming(root), base)
+                base, shim, sidecar = workspace_with_shim(
+                    root, content=old, sidecar=sidecar_line(old))
+                result = install(root, repo, build_naming(root), base)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 [call] = build_calls(repo)
                 self.assertTrue(call.startswith(
@@ -312,11 +424,9 @@ class CheckoutGuestShim(unittest.TestCase):
                 self.assertEqual(shim.read_bytes(), elf(machine, BUILD_SOURCE))
                 self.assertFalse(sidecar.exists(),
                                  "the sidecar of the replaced shim stayed beside a shim it does not describe")
-                self.assertEqual(guest_shim.shim_directory(shim), ["masc-exec-shim", PREVIOUS])
+                self.assertEqual(shim_directory(shim), ["masc-exec-shim", PREVIOUS])
                 self.assertEqual((shim.parent / PREVIOUS).read_bytes(), old)
                 self.assertIn(f"{sidecar} described the replaced shim and was removed", result.stdout)
-                self.assertFalse((root / "release-requested").exists(),
-                                 "a default install requested a release")
                 self.assertTrue((root / "prefix/masc").is_file())
 
     # The sidecar still describes these bytes, so it stays with them.
@@ -324,24 +434,22 @@ class CheckoutGuestShim(unittest.TestCase):
     # a digest alone, or one after a blank line, verifies the shim as well.
     def test_a_release_shim_of_this_build_keeps_its_sidecar_and_nothing_is_built(self):
         current = elf(EM_AARCH64, BUILD_SOURCE)
-        digest = guest_shim.sha256(current)
+        digest = sha256(current)
         for label, recorded in (
-                ("the release line", guest_shim.sidecar_line(current)),
+                ("the release line", sidecar_line(current)),
                 ("the digest alone", digest),
                 ("after a blank line", f"\n\t{digest} \n")):
             with self.subTest(label), tempfile.TemporaryDirectory() as temporary:
                 root = Path(temporary).resolve()
                 repo = checkout(root)
-                base, shim, sidecar = guest_shim.workspace_with_shim(root, content=current, sidecar=recorded)
+                base, shim, sidecar = workspace_with_shim(root, content=current, sidecar=recorded)
                 inode = shim.stat().st_ino
-                result = install(root, repo, guest_shim.build_naming(root), base)
+                result = install(root, repo, build_naming(root), base)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertEqual(build_calls(repo), [])
                 self.assertEqual(shim.stat().st_ino, inode, "a current shim was replaced")
                 self.assertEqual(sidecar.read_text(), recorded)
-                self.assertEqual(guest_shim.shim_directory(shim), guest_shim.PAIR)
-                self.assertFalse((root / "release-requested").exists(),
-                                 "a default install requested a release")
+                self.assertEqual(shim_directory(shim), PAIR)
                 self.assertTrue((root / "prefix/masc").is_file())
 
     # A shim built from this checkout was put over a release shim by hand and
@@ -350,21 +458,21 @@ class CheckoutGuestShim(unittest.TestCase):
     # the release bytes that are gone.
     def test_a_shim_of_this_build_loses_a_sidecar_that_names_other_bytes(self):
         for label, written in (
-                ("the sha256 of other bytes", guest_shim.sidecar_line(elf(EM_AARCH64, OTHER_SOURCE))),
+                ("the sha256 of other bytes", sidecar_line(elf(EM_AARCH64, OTHER_SOURCE))),
                 ("no sha256", "not a checksum line\n"),
                 ("empty", "")):
             with self.subTest(label), tempfile.TemporaryDirectory() as temporary:
                 root = Path(temporary).resolve()
                 repo = checkout(root)
                 current = elf(EM_AARCH64, BUILD_SOURCE)
-                base, shim, sidecar = guest_shim.workspace_with_shim(root, content=current, sidecar=written)
+                base, shim, sidecar = workspace_with_shim(root, content=current, sidecar=written)
                 inode = shim.stat().st_ino
-                result = install(root, repo, guest_shim.build_naming(root), base)
+                result = install(root, repo, build_naming(root), base)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertEqual(build_calls(repo), [])
                 self.assertEqual(shim.stat().st_ino, inode, "a current shim was replaced")
                 self.assertFalse(sidecar.exists(), "a sidecar the server refuses the shim for stayed")
-                self.assertEqual(guest_shim.shim_directory(shim), ["masc-exec-shim"])
+                self.assertEqual(shim_directory(shim), ["masc-exec-shim"])
                 self.assertIn(f"removed {sidecar}", result.stdout)
                 self.assertTrue((root / "prefix/masc").is_file())
 
@@ -375,14 +483,14 @@ class CheckoutGuestShim(unittest.TestCase):
             root = Path(temporary).resolve()
             repo = checkout(root, build_fails=True)
             old = elf(EM_AARCH64, OTHER_SOURCE)
-            recorded = guest_shim.sidecar_line(old)
-            base, shim, sidecar = guest_shim.workspace_with_shim(root, content=old, sidecar=recorded)
-            result = install(root, repo, guest_shim.build_naming(root), base)
+            recorded = sidecar_line(old)
+            base, shim, sidecar = workspace_with_shim(root, content=old, sidecar=recorded)
+            result = install(root, repo, build_naming(root), base)
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("nothing installed", result.stderr)
             self.assertEqual(shim.read_bytes(), old)
             self.assertEqual(sidecar.read_text(), recorded)
-            self.assertEqual(guest_shim.shim_directory(shim), guest_shim.PAIR)
+            self.assertEqual(shim_directory(shim), PAIR)
             self.assertEqual(leftover_builds(repo), [])
             self.assertFalse((root / "prefix").exists(),
                              "the server was replaced beside a shim it refuses")
@@ -404,18 +512,18 @@ class CheckoutGuestShim(unittest.TestCase):
                 root = Path(temporary).resolve()
                 repo = checkout(root)
                 old = elf(EM_AARCH64, OTHER_SOURCE)
-                recorded = guest_shim.sidecar_line(old)
-                base, shim, sidecar = guest_shim.workspace_with_shim(root, content=old, sidecar=recorded)
+                recorded = sidecar_line(old)
+                base, shim, sidecar = workspace_with_shim(root, content=old, sidecar=recorded)
                 refusing_mv(root, source, target)
-                result = install(root, repo, guest_shim.build_naming(root), base)
+                result = install(root, repo, build_naming(root), base)
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn("fixture: mv refused", result.stderr)
                 self.assertIn(said, result.stderr)
                 self.assertIn("nothing installed", result.stderr)
                 self.assertEqual(shim.read_bytes(), old)
                 self.assertEqual(sidecar.read_text(), recorded)
-                self.assertEqual(guest_shim.shim_directory(shim),
-                                 sorted([*guest_shim.PAIR, PREVIOUS]))
+                self.assertEqual(shim_directory(shim),
+                                 sorted([*PAIR, PREVIOUS]))
                 self.assertEqual(leftover_builds(repo), [])
                 self.assertFalse((root / "prefix").exists(),
                                  "the server was replaced beside a shim it refuses")
@@ -444,19 +552,19 @@ class CheckoutGuestShim(unittest.TestCase):
                         root = Path(temporary).resolve()
                         repo = checkout(root)
                         old = elf(EM_AARCH64, OTHER_SOURCE)
-                        recorded = guest_shim.sidecar_line(old)
-                        base, shim, sidecar = guest_shim.workspace_with_shim(
+                        recorded = sidecar_line(old)
+                        base, shim, sidecar = workspace_with_shim(
                             root, content=old, sidecar=recorded)
                         signalling_mv(root, signal, renames)
-                        result = install(root, repo, guest_shim.build_naming(root), base, shell=shell)
+                        result = install(root, repo, build_naming(root), base, shell=shell)
                         self.assertEqual(result.returncode, status, result.stderr)
                         if swapped:
                             self.assertEqual(shim.read_bytes(), elf(EM_AARCH64, BUILD_SOURCE))
-                            self.assertEqual(guest_shim.shim_directory(shim), ["masc-exec-shim", PREVIOUS])
+                            self.assertEqual(shim_directory(shim), ["masc-exec-shim", PREVIOUS])
                         else:
                             self.assertEqual(shim.read_bytes(), old)
-                            self.assertEqual(guest_shim.shim_directory(shim),
-                                             sorted([*guest_shim.PAIR, PREVIOUS]))
+                            self.assertEqual(shim_directory(shim),
+                                             sorted([*PAIR, PREVIOUS]))
                             self.assertEqual(sidecar.read_text(), recorded)
                         self.assertEqual(leftover_builds(repo), [])
                         self.assertFalse((root / "prefix").exists(),
@@ -466,15 +574,15 @@ class CheckoutGuestShim(unittest.TestCase):
     # refused before anything is built.
     def test_an_unknown_guest_architecture_installs_nothing(self):
         for label, content, found in (
-                ("not an ELF file", b"#!/bin/sh\n" + guest_shim.declaring(OTHER_SOURCE), "not an ELF file"),
+                ("not an ELF file", b"#!/bin/sh\n" + declaring(OTHER_SOURCE), "not an ELF file"),
                 ("32-bit ARM", elf(EM_ARM, OTHER_SOURCE), "ELF machine 0x28"),
                 ("big-endian", elf(EM_AARCH64, OTHER_SOURCE, little_endian=False),
                  "not a little-endian ELF file")):
             with self.subTest(label), tempfile.TemporaryDirectory() as temporary:
                 root = Path(temporary).resolve()
                 repo = checkout(root)
-                base, shim, _ = guest_shim.workspace_with_shim(root, content=content, sidecar=None)
-                result = install(root, repo, guest_shim.build_naming(root), base)
+                base, shim, _ = workspace_with_shim(root, content=content, sidecar=None)
+                result = install(root, repo, build_naming(root), base)
                 self.refused(content, result, root, repo, shim)
                 self.assertEqual(build_calls(repo), [])
                 self.assertIn(f"names no guest architecture this install can build ({found})",
@@ -489,8 +597,8 @@ class CheckoutGuestShim(unittest.TestCase):
             root = Path(temporary).resolve()
             repo = checkout(root)
             old = elf(EM_AARCH64, OTHER_SOURCE)
-            base, shim, _ = guest_shim.workspace_with_shim(root, content=old, sidecar=None)
-            result = install(root, repo, guest_shim.build_naming(root, source=None), base)
+            base, shim, _ = workspace_with_shim(root, content=old, sidecar=None)
+            result = install(root, repo, build_naming(root, source=None), base)
             self.refused(old, result, root, repo, shim)
             self.assertEqual(build_calls(repo), [])
             self.assertIn("does not declare exactly one source identity (found: none)", result.stderr)

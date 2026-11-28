@@ -185,6 +185,7 @@ let has_get_health cmds =
               | Cmd.Get_keeper_provider_input_part _
               | Cmd.Get_keeper_cache_outcome _
               | Cmd.Get_keeper_next_request _
+              | Cmd.Get_keeper_last_prompt _
               | Cmd.Get_keeper_turn_transcript _
               | Cmd.Get_keeper_tool_stats _
               | Cmd.Get_keeper_tool_calls _
@@ -18416,6 +18417,112 @@ let test_timeout_detail_retryable_and_update_parity () =
         "Response timed out (30.0s · /api/v1/infra/sandboxes/probe)"
         (Say.resolve Say.Lang_en toast.message))
 
+(* A turn records page with one turn whose blocks are [blocks_json]. *)
+let prompt_block_turn_page ~trace_id ~absolute_turn ~blocks_json =
+  let json =
+    Printf.sprintf
+      {|{
+        "keeper": "k", "count": 1, "skipped_rows": 0, "health": "healthy",
+        "live_turn_in_progress": false,
+        "entries": [ { "diff_vs_prev": null, "record": {
+          "execution_ids": [], "keeper": "k", "agent_name": "k",
+          "turn_kind": "direct", "trace_id": "%s", "absolute_turn": %d,
+          "turn_ref": "%s#%d", "blocks": %s, "input_components": [],
+          "request_observations": [], "runtime_profile": "p",
+          "request_runtime_profile": "p", "request_body_bytes": 10,
+          "transmitted_atoms": null, "total_atoms": null,
+          "model_input_measurement": null, "model_input_front": null,
+          "response_observed_model_input": null, "refused_model_input": null,
+          "raw_trace_run_ref": null, "selected_model": "m",
+          "finish_reason": "end_turn", "context_window": 1000,
+          "provider_context_window": 1000, "request_latency_ms": 1,
+          "input_tokens": 1, "cache_creation_input_tokens": 0,
+          "cache_read_input_tokens": 0, "output_tokens": 1,
+          "usage_scope": "per_request", "input_provenance": "measured_request",
+          "ts": 1795252000.0 } } ]
+      }|}
+      trace_id absolute_turn trace_id absolute_turn blocks_json
+  in
+  match Wire_keeper_context.decode_turn_records (Yojson.Safe.from_string json) with
+  | Ok page -> page
+  | Error e -> Alcotest.fail ("decode_turn_records failed: " ^ e)
+
+(* A turn record keeps a block's sha256; the capture keeps the last
+   assembly's text. A block reads the captured text when the id and the digest
+   match; on the capture's own turn another digest reads as the server's
+   rewritten copy, and on another turn it reads as different. *)
+let test_prompt_block_text_joins_by_digest () =
+  let capture =
+    match
+      Wire_keeper_context.decode_last_prompt_capture
+        (Yojson.Safe.from_string
+           {|{"keeper":"k","captured_at":1.0,"trace_id":"t","absolute_turn":3,
+              "blocks":[{"id":"keeper_instructions","bytes":5,"text":"hello"}]}|})
+    with
+    | Ok capture -> capture
+    | Error e -> Alcotest.fail e
+  in
+  let hello = "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824" in
+  let other = String.make 64 'a' in
+  let record ~trace_id ~absolute_turn =
+    match
+      (prompt_block_turn_page ~trace_id ~absolute_turn ~blocks_json:"[]")
+        .Wire_keeper_context.entries
+    with
+    | entry :: _ -> entry.Wire_keeper_context.record
+    | [] -> Alcotest.fail "the fixture page has one entry"
+  in
+  let same_turn = record ~trace_id:"t" ~absolute_turn:3 in
+  let later_turn = record ~trace_id:"t" ~absolute_turn:4 in
+  let block id digest : Turn_record.prompt_block =
+    { block = id; bytes = 5; digest }
+  in
+  let read r b = Keeper_context_store.block_text_in_capture capture r b in
+  let label = function
+    | Keeper_context_store.Block_text t -> "text " ^ t
+    | Keeper_context_store.Block_text_rewritten t -> "rewritten " ^ t
+    | Keeper_context_store.Block_text_differs -> "differs"
+    | Keeper_context_store.Block_text_not_captured -> "not captured"
+  in
+  Alcotest.(check string) "the same id and digest read the captured text"
+    "text hello"
+    (label (read later_turn (block Prompt_block_id.Keeper_instructions hello)));
+  Alcotest.(check string)
+    "another digest on the capture's own turn reads the server's copy"
+    "rewritten hello"
+    (label (read same_turn (block Prompt_block_id.Keeper_instructions other)));
+  Alcotest.(check string) "another digest on another turn reads as different"
+    "differs"
+    (label (read later_turn (block Prompt_block_id.Keeper_instructions other)));
+  Alcotest.(check string) "a block the capture lacks is not captured"
+    "not captured"
+    (label (read same_turn (block Prompt_block_id.Dynamic_context hello)))
+
+(* When new turn records move the selection to another turn, the block cursor
+   starts at the top of that turn's list. *)
+let test_prompt_block_selection_resets_on_a_new_turn () =
+  let t0 = Clock.Mono.of_ns 1_000_000_000L in
+  let blocks_json =
+    {|[{"block":"keeper_instructions","bytes":5,"digest":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+       {"block":"dynamic_context","bytes":5,"digest":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},
+       {"block":"active_goals","bytes":5,"digest":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}]|}
+  in
+  let kc =
+    Keeper_context_store.empty
+    |> Keeper_context_store.apply_turn_records ~observed_at:t0 ~keeper:"k"
+         (prompt_block_turn_page ~trace_id:"t" ~absolute_turn:3 ~blocks_json)
+    |> Keeper_context_store.move_block_selection ~keeper:"k" ~delta:2
+  in
+  Alcotest.(check int) "the cursor moved to the third block" 2
+    (Keeper_context_store.get_keeper ~keeper:"k" kc).selected_block_idx;
+  let kc =
+    Keeper_context_store.apply_turn_records ~observed_at:t0 ~keeper:"k"
+      (prompt_block_turn_page ~trace_id:"t" ~absolute_turn:4 ~blocks_json)
+      kc
+  in
+  Alcotest.(check int) "a new selected turn starts at the first block" 0
+    (Keeper_context_store.get_keeper ~keeper:"k" kc).selected_block_idx
+
 let test_lazy_keeper_context_fetches_and_sidebar_workspace_discovery () =
   let keeper = "alpha" in
   let tr_json =
@@ -18547,6 +18654,18 @@ let test_lazy_keeper_context_fetches_and_sidebar_workspace_discovery () =
     (has_get is_provider_in cmds_resp);
   Alcotest.(check bool) "Ctx_response skips cache-outcome" false
     (has_get is_cache_out cmds_resp);
+  (* 4b. Ctx_prompt_blocks reads the keeper's last prompt capture and nothing per turn *)
+  let is_last_prompt = function Cmd.Get_keeper_last_prompt _ -> true | _ -> false in
+  let cmds_blocks =
+    View_fetches.fetches_for_current_view
+      (model_for_subtab Keeper_context_store.Ctx_prompt_blocks)
+  in
+  Alcotest.(check bool) "Ctx_prompt_blocks requests last-prompt" true
+    (has_get is_last_prompt cmds_blocks);
+  Alcotest.(check bool) "Ctx_prompt_blocks skips provider-input" false
+    (has_get is_provider_in cmds_blocks);
+  Alcotest.(check bool) "Ctx_composition skips last-prompt" false
+    (has_get is_last_prompt cmds_comp);
   (* 5. Ctrl+T Drawer_context still fetches next-request + cache-outcome without provider-input/transcript *)
   let m_dive, _ =
     Update_nav.jump_to_keeper ~preserve_return:false ~zoomed:true
@@ -25158,6 +25277,10 @@ let () =
           Alcotest.test_case
             "Lazy Keeper Context fetches per subtab & sidebar/palette Workspace/Repos discovery"
             `Quick test_lazy_keeper_context_fetches_and_sidebar_workspace_discovery;
+          Alcotest.test_case "prompt block text joins the capture by digest"
+            `Quick test_prompt_block_text_joins_by_digest;
+          Alcotest.test_case "a new turn resets the prompt block cursor" `Quick
+            test_prompt_block_selection_resets_on_a_new_turn;
           Alcotest.test_case
             "Wave 4 Layer 1: SSE context auto-refresh, live retry/checkpoint stream & /ctl keeper control"
             `Quick

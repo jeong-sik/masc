@@ -1096,6 +1096,7 @@ let test_poller_loader_and_sse_suppression () =
         Cmd.Get_chat_operation_events
           { keeper = "alpha"; operation_id = "op-1"; from = Wire_chat_journal.From_start } );
       ("Get_keeper_next_request", Cmd.Get_keeper_next_request { keeper = "alpha" });
+      ("Get_keeper_last_prompt", Cmd.Get_keeper_last_prompt { keeper = "alpha" });
     ];
 
   (* #28 P1-2: Worker-allowed Tool/Tool_actor routes (CanReadState / CanBroadcast / mutating_tool) *)
@@ -2662,6 +2663,16 @@ let test_bootstrap_and_inplace_demotion_cleanup () =
                 candidates = [];
               };
           next_request_absent = true;
+          last_prompt =
+            Observed.value ~observed_at:t0
+              {
+                Wire_keeper_context.lp_keeper = "alpha";
+                lp_trace_id = "tr-1";
+                lp_absolute_turn = 1;
+                lp_captured_at_unix = 1.0;
+                lp_blocks = [];
+              };
+          last_prompt_absent = true;
         }
       in
       {
@@ -2826,6 +2837,10 @@ let test_bootstrap_and_inplace_demotion_cleanup () =
     true
     (Option.is_none (Observed.to_option ks_demoted.next_request)
      && not ks_demoted.next_request_absent);
+  Alcotest.(check bool) "Demotion purges Keeper last_prompt & last_prompt_absent"
+    true
+    (Option.is_none (Observed.to_option ks_demoted.last_prompt)
+     && not ks_demoted.last_prompt_absent);
   Alcotest.(check bool) "Demotion purges Knowledge keeper_memory_activity (#28 P1-1)"
     true
     (Knowledge_store.String_map.is_empty m_demoted.knowledge.keeper_memory_activity);

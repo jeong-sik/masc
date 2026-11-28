@@ -8,15 +8,10 @@ let theme_of_model (model : Model.t) = Theme.of_preset model.theme_preset
 let default_caps = Presenter.default_capabilities
 let say (model : Model.t) ~ko ~en = Say.resolve model.lang (Say.make ~ko ~en)
 
-let layout_bp (model : Model.t) =
-  match model.breakpoint with
-  | Model.Wide -> Layout.Wide
-  | Model.Standard -> Layout.Standard
-  | Model.Compact -> Layout.Compact
-  | Model.Micro -> Layout.Micro
+let layout_bp = Model.layout_breakpoint
 
 let pad_x_for ~(model : Model.t) (rect : Rect.t) =
-  Layout.card_pad_x_for_width (layout_bp model) rect.w
+  Model.card_pad_x model ~width:rect.w
 
 let contains_ci = Text_util.contains_ci
 

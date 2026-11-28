@@ -12835,7 +12835,7 @@ let apply_move (m : Model.t) dir =
               let ch = max 1 (raw_ch - trace_hdr_h) in
               let hdr_h = 2 + if ch >= 6 then 1 else 0 in
               let body_h = max 1 (ch - hdr_h) in
-              let pad_x = if cw >= 88 then 2 else 1 in
+              let pad_x = Model.card_pad_x m ~width:cw in
               let inner_w = max 1 (cw - (2 * pad_x)) in
               let theme = Theme.of_preset m.theme_preset in
               let keeper_context =
@@ -12900,6 +12900,55 @@ let apply_move (m : Model.t) dir =
                         ~delta:(scroll_delta dir) m.keeper_context
                     else
                       Keeper_context_store.move_part_selection ~keeper:name
+                        ~delta:(move_delta dir) m.keeper_context
+                | Keeper_context_store.Ctx_prompt_blocks ->
+                    let scroll_text =
+                      (if embedded then m.nav.pane_index = 2
+                       else m.nav.pane_index = 1)
+                      ||
+                      match dir with
+                      | Keymap.Page_up | Keymap.Page_down -> true
+                      | Keymap.Up | Keymap.Down | Keymap.Left | Keymap.Right
+                      | Keymap.Home | Keymap.End ->
+                          false
+                    in
+                    if scroll_text then
+                      let max_scroll_of block_text text =
+                        let layout =
+                          Keeper_context_store.prompt_blocks_layout
+                            (Rect.make ~x:0 ~y:0 ~w:inner_w ~h:body_h)
+                        in
+                        let text_r =
+                          Keeper_context_store.prompt_block_text_rect
+                            layout.Keeper_context_store.pb_text block_text
+                        in
+                        markdown_max_scroll ~theme ~width:(max 1 text_r.w)
+                          ~height:(max 1 text_r.h) text
+                      in
+                      let max_scroll =
+                        match
+                          ( Keeper_context_store.selected_turn_entry ks,
+                            Keeper_context_store.selected_prompt_block ks,
+                            Observed.to_option ks.last_prompt )
+                        with
+                        | Some entry, Some block, Some capture -> (
+                            let block_text =
+                              Keeper_context_store.block_text_in_capture
+                                capture entry.record block
+                            in
+                            match block_text with
+                            | Keeper_context_store.Block_text text
+                            | Keeper_context_store.Block_text_rewritten text ->
+                                max_scroll_of block_text text
+                            | Keeper_context_store.Block_text_differs
+                            | Keeper_context_store.Block_text_not_captured ->
+                                0)
+                        | Some _, Some _, None | Some _, None, _ | None, _, _ -> 0
+                      in
+                      Keeper_context_store.move_scroll ~keeper:name ~max_scroll
+                        ~delta:(scroll_delta dir) m.keeper_context
+                    else
+                      Keeper_context_store.move_block_selection ~keeper:name
                         ~delta:(move_delta dir) m.keeper_context
                 | Keeper_context_store.Ctx_composition ->
                     let max_scroll =

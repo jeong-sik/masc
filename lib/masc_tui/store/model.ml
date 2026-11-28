@@ -1543,6 +1543,16 @@ let dive_work_json_pane_index m =
               else Some (if task_dive_has_two_main_panes m tk.id then 2 else 1)
         else None
 
+let layout_breakpoint m =
+  match m.breakpoint with
+  | Wide -> Masc_tui_ui.Layout.Wide
+  | Standard -> Masc_tui_ui.Layout.Standard
+  | Compact -> Masc_tui_ui.Layout.Compact
+  | Micro -> Masc_tui_ui.Layout.Micro
+
+let card_pad_x m ~width =
+  Masc_tui_ui.Layout.card_pad_x_for_width (layout_breakpoint m) width
+
 let keeper_preview_has_inner_split m =
   match selected_keeper_name m with
   | None -> false
@@ -1554,9 +1564,16 @@ let keeper_preview_has_inner_split m =
           in
           match ks.trace_section with
           | Keeper_context_store.Trace_tool_calls -> true
-          | Keeper_context_store.Trace_context ->
-              Keeper_context_store.equal_context_subtab ks.subtab
-                Keeper_context_store.Ctx_exact_input
+          | Keeper_context_store.Trace_context -> (
+              match ks.subtab with
+              | Keeper_context_store.Ctx_exact_input
+              | Keeper_context_store.Ctx_prompt_blocks ->
+                  true
+              | Keeper_context_store.Ctx_composition
+              | Keeper_context_store.Ctx_flow
+              | Keeper_context_store.Ctx_input_map
+              | Keeper_context_store.Ctx_response ->
+                  false)
           | Keeper_context_store.Trace_metrics_logs
           | Keeper_context_store.Trace_runtime ->
               false)
@@ -2277,6 +2294,23 @@ let active_focus_label m =
                           .trace_section
                   | None -> None
                 in
+                let prompt_blocks_shown =
+                  match selected_keeper_name m with
+                  | Some name -> (
+                      match
+                        (Keeper_context_store.get_keeper ~keeper:name
+                           m.keeper_context)
+                          .subtab
+                      with
+                      | Keeper_context_store.Ctx_prompt_blocks -> true
+                      | Keeper_context_store.Ctx_composition
+                      | Keeper_context_store.Ctx_flow
+                      | Keeper_context_store.Ctx_exact_input
+                      | Keeper_context_store.Ctx_input_map
+                      | Keeper_context_store.Ctx_response ->
+                          false)
+                  | None -> false
+                in
                 if is_zoomed_active m then
                   if board_recovery_active then
                     Say.make ~ko:"확대 · 격리 복구" ~en:"ZOOM · Quarantine"
@@ -2287,7 +2321,11 @@ let active_focus_label m =
                           pane_prefix ~ko:"확대 · 상세" ~en:"ZOOM · Detail"
                         else pane_prefix ~ko:"확대 · 호출" ~en:"ZOOM · Calls"
                     | Nav.Keeper_trace, Some Keeper_context_store.Trace_context ->
-                        if m.nav.pane_index = 1 then
+                        if prompt_blocks_shown then
+                          if m.nav.pane_index = 1 then
+                            pane_prefix ~ko:"확대 · 블록 본문" ~en:"ZOOM · Block Text"
+                          else pane_prefix ~ko:"확대 · 블록" ~en:"ZOOM · Blocks"
+                        else if m.nav.pane_index = 1 then
                           pane_prefix ~ko:"확대 · 원문" ~en:"ZOOM · Prompt"
                         else pane_prefix ~ko:"확대 · 섹션" ~en:"ZOOM · Sections"
                     | ( Nav.Keeper_trace
@@ -2316,7 +2354,9 @@ let active_focus_label m =
                   | Nav.Keeper_trace, Some Keeper_context_store.Trace_tool_calls ->
                       pane_prefix ~ko:"도구 상세" ~en:"Call Detail"
                   | Nav.Keeper_trace, Some Keeper_context_store.Trace_context ->
-                      pane_prefix ~ko:"원문 상세" ~en:"Prompt Detail"
+                      if prompt_blocks_shown then
+                        pane_prefix ~ko:"블록 본문" ~en:"Block Text"
+                      else pane_prefix ~ko:"원문 상세" ~en:"Prompt Detail"
                   | ( Nav.Keeper_trace
                     , ( Some
                           ( Keeper_context_store.Trace_metrics_logs
@@ -2337,7 +2377,9 @@ let active_focus_label m =
                     | Nav.Keeper_trace, Some Keeper_context_store.Trace_tool_calls ->
                         pane_prefix ~ko:"도구 호출" ~en:"Tool Calls"
                     | Nav.Keeper_trace, Some Keeper_context_store.Trace_context ->
-                        pane_prefix ~ko:"컨텍스트 파트" ~en:"Prompt Parts"
+                        if prompt_blocks_shown then
+                          pane_prefix ~ko:"프롬프트 블록" ~en:"Prompt Blocks"
+                        else pane_prefix ~ko:"컨텍스트 파트" ~en:"Prompt Parts"
                     | ( Nav.Keeper_trace
                       , ( Some
                             ( Keeper_context_store.Trace_metrics_logs

@@ -4897,7 +4897,7 @@ let test_wave2_live_wire_codecs () =
         "runtime_profile": "claude-sonnet-4",
         "captured_at": 1795252000.0,
         "wire": {
-          "phase": "settled",
+          "phase": "Pre_dispatch_serialization",
           "capture_id": "cap-42",
           "provider": "anthropic",
           "model": "claude-sonnet-4",
@@ -4941,6 +4941,53 @@ let test_wave2_live_wire_codecs () =
   in
   Alcotest.(check string) "provider input part text" "You are alpha keeper."
     part_c.text;
+
+  (* 2b. Last prompt capture: the block id is one of the server's words, the
+     digest is computed from the text, and a size that is not the text's
+     length is refused. *)
+  let lp =
+    expect_ok "decode_last_prompt_capture"
+      (Wire_keeper_context.decode_last_prompt_capture
+         (parse_json
+            {|{
+              "keeper": "alpha",
+              "dashboard_surface": "/api/v1/keepers/:name/last-prompt",
+              "captured_at": 1795000000.25,
+              "trace_id": "trace-abc",
+              "absolute_turn": 42,
+              "blocks": [
+                { "id": "keeper_instructions", "bytes": 5, "text": "hello" },
+                { "id": "dynamic_context", "bytes": 0, "text": "" }
+              ],
+              "assembled": "",
+              "assembled_bytes": 0,
+              "system_prompt": null,
+              "system_prompt_partition": null
+            }|}))
+  in
+  Alcotest.(check int) "last prompt turn" 42 lp.lp_absolute_turn;
+  Alcotest.(check (list string)) "block digests in assembly order"
+    [
+      "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824";
+      "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+    ]
+    (List.map
+       (fun (b : Wire_keeper_context.captured_block) -> b.cb_sha256)
+       lp.lp_blocks);
+  let capture_with_block block =
+    parse_json
+      ({|{"keeper":"alpha","captured_at":1.0,"trace_id":"t","absolute_turn":1,"blocks":[|}
+      ^ block ^ {|]}|})
+  in
+  Alcotest.(check bool) "a block id the server removed is refused" true
+    (Result.is_error
+       (Wire_keeper_context.decode_last_prompt_capture
+          (capture_with_block
+             {|{"id":"admitted_scheduled_input","bytes":1,"text":"x"}|})));
+  Alcotest.(check bool) "bytes that are not the text length are refused" true
+    (Result.is_error
+       (Wire_keeper_context.decode_last_prompt_capture
+          (capture_with_block {|{"id":"dynamic_context","bytes":2,"text":"x"}|})));
 
   (* 3. Cache outcome (reusing live Keeper_cache_outcome_reading.of_json) *)
   let co_json =

@@ -3853,8 +3853,223 @@ let test_wave2_keeper_context_tool_calls_and_schedules () =
              || contains_sub ~needle:"BYTES" txt)
       | Keeper_context_store.Ctx_response ->
           Alcotest.(check bool) "Response subtab renders" true
-            (contains_sub ~needle:"Response" txt || contains_sub ~needle:"Transcript" txt))
+            (contains_sub ~needle:"Response" txt || contains_sub ~needle:"Transcript" txt)
+      | Keeper_context_store.Ctx_prompt_blocks ->
+          Alcotest.(check bool) "Prompt blocks subtab lists the turn's blocks" true
+            (contains_sub ~needle:"assembly order" txt
+             || contains_sub ~needle:"조립 순서" txt))
     Keeper_context_store.all_context_subtabs;
+  (* Prompt Blocks: the fixture's digests are not the captured texts' digests,
+     so a capture of this very turn reads as the server's copy and a capture of
+     another turn reads as different. The scroll end the store layout allows
+     shows the text's last line. *)
+  let keeper = "e-masc-the-leader" in
+  let long_text =
+    String.concat "\n\n"
+      (List.init 100 (fun i -> Printf.sprintf "line-%03d" (i + 1)))
+  in
+  let capture_of ~trace_id ~absolute_turn =
+    let json =
+      `Assoc
+        [
+          ("keeper", `String keeper);
+          ("captured_at", `Float 1.0);
+          ("trace_id", `String trace_id);
+          ("absolute_turn", `Int absolute_turn);
+          ( "blocks",
+            `List
+              [
+                `Assoc
+                  [
+                    ("id", `String "keeper_instructions");
+                    ("bytes", `Int (String.length long_text));
+                    ("text", `String long_text);
+                  ];
+              ] );
+        ]
+    in
+    match Wire_keeper_context.decode_last_prompt_capture json with
+    | Ok c -> c
+    | Error e -> Alcotest.fail ("decode_last_prompt_capture failed: " ^ e)
+  in
+  let blocks_model ~auth_session capture =
+    {
+      m_ctx with
+      auth_session;
+      keeper_context =
+        m_ctx.keeper_context
+        |> Keeper_context_store.set_subtab ~keeper
+             Keeper_context_store.Ctx_prompt_blocks
+        |> Keeper_context_store.apply_last_prompt ~observed_at:t0 ~keeper capture;
+    }
+  in
+  let blocks_rect = Rect.make ~x:0 ~y:0 ~w:140 ~h:40 in
+  let draw_blocks (m : Model.t) =
+    let st = Keeper_context_store.get_keeper ~keeper m.keeper_context in
+    let grid = Cell_grid.create ~cols:140 ~rows:40 in
+    Keeper_prompt_blocks_view.draw grid ~rect:blocks_rect
+      ~theme:(Theme.of_preset m.theme_preset) ~model:m ~st;
+    grid_all_text grid
+  in
+  let m_same =
+    blocks_model ~auth_session:m_ctx.auth_session
+      (capture_of ~trace_id:"tr-900" ~absolute_turn:90)
+  in
+  let txt_same = draw_blocks m_same in
+  Alcotest.(check bool) "the capture's own turn shows the server's copy" true
+    (contains_sub ~needle:"The server's copy" txt_same
+     && contains_sub ~needle:"line-001" txt_same);
+  let max_scroll =
+    let st = Keeper_context_store.get_keeper ~keeper m_same.keeper_context in
+    let block_text =
+      match
+        ( Keeper_context_store.selected_turn_entry st,
+          Keeper_context_store.selected_prompt_block st,
+          Observed.to_option st.last_prompt )
+      with
+      | Some entry, Some block, Some capture ->
+          Keeper_context_store.block_text_in_capture capture entry.record block
+      | Some _, Some _, None | Some _, None, _ | None, _, _ ->
+          Alcotest.fail "the fixture selects a turn, a block and a capture"
+    in
+    let content =
+      Card.pad_inner
+        ~pad_x:(Ops_common.pad_x_for ~model:m_same blocks_rect)
+        blocks_rect
+    in
+    let layout = Keeper_context_store.prompt_blocks_layout content in
+    let text_r =
+      Keeper_context_store.prompt_block_text_rect
+        layout.Keeper_context_store.pb_text block_text
+    in
+    let lines =
+      Markdown.render_lines
+        ~theme:(Theme.of_preset m_same.theme_preset)
+        ~width:text_r.w long_text
+    in
+    Int.max 0 (List.length lines - text_r.h)
+  in
+  Alcotest.(check bool) "the text is longer than the pane" true (max_scroll > 0);
+  let m_end =
+    {
+      m_same with
+      keeper_context =
+        Keeper_context_store.move_scroll ~keeper ~max_scroll ~delta:100_000
+          m_same.keeper_context;
+    }
+  in
+  let txt_end = draw_blocks m_end in
+  Alcotest.(check bool) "the scroll end shows the last line" true
+    (contains_sub ~needle:"line-100" txt_end
+     && not (contains_sub ~needle:"line-001" txt_end));
+  let txt_other =
+    draw_blocks
+      (blocks_model ~auth_session:m_ctx.auth_session
+         (capture_of ~trace_id:"tr-899" ~absolute_turn:89))
+  in
+  Alcotest.(check bool) "a capture of another turn reads as different" true
+    (contains_sub ~needle:"This turn's text is not kept" txt_other
+     && not (contains_sub ~needle:"line-001" txt_other));
+  let txt_worker =
+    draw_blocks
+      (blocks_model ~auth_session:Rbac.single_user_local_worker
+         (capture_of ~trace_id:"tr-900" ~absolute_turn:90))
+  in
+  Alcotest.(check bool) "a session without admin reads no block text" true
+    (contains_sub ~needle:"needs an admin session" txt_worker
+     && not (contains_sub ~needle:"line-001" txt_worker));
+  (* End through the key path lands where the view's text ends. The split
+     preview at a Standard width is narrower than 88 cells, where key handling
+     once padded 1 cell while the view pads 2; with wrapped paragraphs the
+     two widths give different ends. *)
+  let wrapped_text =
+    String.concat "\n\n"
+      (List.init 40 (fun i ->
+           String.concat " "
+             (List.init 40 (fun j -> Printf.sprintf "w%02d-%02d" i j))))
+  in
+  let wrapped_capture =
+    match
+      Wire_keeper_context.decode_last_prompt_capture
+        (`Assoc
+          [
+            ("keeper", `String keeper);
+            ("captured_at", `Float 1.0);
+            ("trace_id", `String "tr-900");
+            ("absolute_turn", `Int 90);
+            ( "blocks",
+              `List
+                [
+                  `Assoc
+                    [
+                      ("id", `String "keeper_instructions");
+                      ("bytes", `Int (String.length wrapped_text));
+                      ("text", `String wrapped_text);
+                    ];
+                ] );
+          ])
+    with
+    | Ok c -> c
+    | Error e -> Alcotest.fail ("decode_last_prompt_capture failed: " ^ e)
+  in
+  let m_split =
+    let m = blocks_model ~auth_session:m_ctx.auth_session wrapped_capture in
+    {
+      m with
+      viewport = { Model.cols = 120; rows = 40 };
+      breakpoint = Model.Standard;
+      fleet =
+        m.fleet
+        |> Fleet_store.select_keeper keeper
+        |> Fleet_store.set_keeper_dive_tab Nav.Keeper_trace;
+      nav = { m.nav with workspace = Nav.Keepers; zoomed = false; pane_index = 2 };
+    }
+  in
+  Alcotest.(check int) "the split preview has the list and the text pane" 3
+    (Model.focusable_pane_count m_split);
+  let m_split_end, _ = Update_nav.apply_move m_split Keymap.End in
+  let cw, raw_ch =
+    Chat_transcript.keeper_content_rect_size ~embedded:true ~model:m_split_end
+  in
+  Alcotest.(check bool) "the preview is between 44 and 88 cells wide" true
+    (cw >= 44 && cw < 88);
+  (* The rows the trace section pills and the context header take above the
+     subtab body, as Keeper_dive.render_trace_tab and draw_context_tab draw. *)
+  let trace_hdr_h = if raw_ch >= 6 then 2 else if raw_ch >= 2 then 1 else 0 in
+  let ch = Int.max 1 (raw_ch - trace_hdr_h) in
+  let body_h = Int.max 1 (ch - (2 + if ch >= 6 then 1 else 0)) in
+  let body = Rect.make ~x:0 ~y:0 ~w:cw ~h:body_h in
+  let content =
+    Card.pad_inner ~pad_x:(Ops_common.pad_x_for ~model:m_split_end body) body
+  in
+  let layout = Keeper_context_store.prompt_blocks_layout content in
+  let st = Keeper_context_store.get_keeper ~keeper m_split_end.keeper_context in
+  let expected_end =
+    match
+      ( Keeper_context_store.selected_turn_entry st,
+        Keeper_context_store.selected_prompt_block st,
+        Observed.to_option st.last_prompt )
+    with
+    | Some entry, Some block, Some capture ->
+        let text_r =
+          Keeper_context_store.prompt_block_text_rect
+            layout.Keeper_context_store.pb_text
+            (Keeper_context_store.block_text_in_capture capture entry.record
+               block)
+        in
+        let lines =
+          Markdown.render_lines
+            ~theme:(Theme.of_preset m_split_end.theme_preset)
+            ~width:(Int.max 1 text_r.w) wrapped_text
+        in
+        Int.max 0 (List.length lines - Int.max 1 text_r.h)
+    | Some _, Some _, None | Some _, None, _ | None, _, _ ->
+        Alcotest.fail "the fixture selects a turn, a block and a capture"
+  in
+  Alcotest.(check bool) "the wrapped text is longer than the pane" true
+    (expected_end > 0);
+  Alcotest.(check int) "End stops at the view's last line" expected_end
+    st.scroll_offset;
   (* 401/403 permission notice on Exact_input renders gracefully without crashing *)
   let m_denied =
     {

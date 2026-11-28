@@ -408,6 +408,10 @@ type http_reply =
       keeper : string;
       result : (Wire_keeper_context.next_request_forecast, http_error) result;
     }
+  | Reply_keeper_last_prompt of {
+      keeper : string;
+      result : (Wire_keeper_context.last_prompt_capture, http_error) result;
+    }
   | Reply_keeper_turn_transcript of {
       keeper : string;
       turn_ref : string;

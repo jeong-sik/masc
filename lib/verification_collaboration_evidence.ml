@@ -80,8 +80,10 @@ let cursor_parts = function
 (* The same wire budget used by the verifier's bridge. Pages carry exact
    JSON text, not an excerpt; the digest pins every cursor to one observation.
    [select] is the comment arguments that chose this page; the next cursor
-   carries them. A cursor carries a selection exactly when the page has one,
-   and it must be this page's. *)
+   carries them. A cursor that carries a selection continues a page that has
+   the same one. A page with a selection is also continued by a cursor that
+   carries none: the caller then selected the page itself, and the digest
+   still pins the bytes. *)
 let page_source ~args ~select source =
   let bytes = Yojson.Safe.to_string source in
   let total = String.length bytes in
@@ -97,9 +99,9 @@ let page_source ~args ~select source =
       else if offset > 0 && offset < total
         && String_util.utf8_char_boundary bytes offset = offset
         && (match select, carried with
-            | None, None -> true
+            | None, None | Some _, None -> true
             | Some select, Some carried -> Yojson.Safe.equal select carried
-            | None, Some _ | Some _, None -> false)
+            | None, Some _ -> false)
       then Ok (Some offset)
       else Error (Invalid_request "invalid source cursor") in
   match cursor with

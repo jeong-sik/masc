@@ -99,6 +99,11 @@ val failure_next_move : Tool_result.tool_failure_class -> string option
     ([config/prompts/tool_failure.<class>.md]); [None] when that asset is
     absent from every source, which is logged. *)
 
+val fits_inline :
+  model_projection:Tool_output.model_projection -> Tool_result.result -> bool
+(** {!Tool_projection.fits_inline}: whether a result whose data names no
+    artifact reaches the model whole. *)
+
 val to_agent_core_typed_result :
   ?base_path:string ->
   ?answer_reader:(string -> Yojson.Safe.t option) ->

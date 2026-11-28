@@ -36,6 +36,7 @@ let artifact_manifest_reference = Tool_projection.artifact_manifest_reference
 let artifact_result_envelope = Tool_projection.artifact_result_envelope
 let maybe_externalize = Tool_projection.maybe_externalize
 let failure_next_move = Tool_projection.failure_next_move
+let fits_inline = Tool_projection.fits_inline
 let to_agent_core_typed_result = Tool_projection.to_agent_core_typed_result
 
 (** {1 Schema Conversion}

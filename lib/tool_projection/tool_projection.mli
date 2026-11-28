@@ -90,11 +90,14 @@ val failure_next_move : Tool_result.tool_failure_class -> string option
 
 val fits_inline :
   model_projection:Tool_output.model_projection -> Tool_result.result -> bool
-(** Whether the text {!to_agent_core_typed_result} projects for this result is
-    within the ceiling of [model_projection], so a result whose data names no
-    artifact reaches the model whole and not as a reference to a stored copy
-    of itself. A producer that can store part of its result asks this before
-    it decides which part to store (#55433). *)
+(** Whether a result whose data names no artifact reaches the model whole
+    and not as a reference to a stored copy of itself. It is the comparison
+    {!to_agent_core_typed_result} makes, on the text that function sends, so
+    the two cannot give different answers for the same [model_projection]. A
+    producer that can store part of its result asks this before it decides
+    which part to store (#55433). For a result whose data names an artifact
+    the projection compares the artifact envelope instead, which this
+    function does not build. *)
 
 val to_agent_core_typed_result :
   ?base_path:string ->

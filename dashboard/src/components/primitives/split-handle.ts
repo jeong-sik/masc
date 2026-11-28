@@ -13,7 +13,7 @@
 import { html } from 'htm/preact'
 import type { Signal } from '@preact/signals'
 import { useCallback, useEffect, useRef } from 'preact/hooks'
-import { persistentSignal } from '../../lib/persistent-signal'
+import { persistentSignal } from '../../lib/persisted-ui-signal'
 
 export type SplitOrientation = 'vertical' | 'horizontal'
 

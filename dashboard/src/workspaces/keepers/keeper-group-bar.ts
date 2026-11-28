@@ -13,7 +13,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { fetchConfigSchemaApi, postConfigPatchApi } from '../../api/config-schema'
 import { authSession, isSingleUserMember, sessionEpoch } from '../../core/auth'
 import { apiGet } from '../../core/transport'
-import { persistentSignal } from '../../lib/persistent-signal'
+import { persistentSignal } from '../../lib/persisted-ui-signal'
 import { isAdminLockedForSession } from '../../routes/router'
 import type { KeeperRosterItem } from './types'
 

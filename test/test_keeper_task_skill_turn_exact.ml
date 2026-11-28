@@ -695,7 +695,10 @@ let test_instruction_tool_reads_by_name_and_refuses_a_written_mismatch () =
       ~config:(Masc.Workspace.default_config (Sys.getcwd ()))
       ~instruction_skills:
         [ carried first_guide ~description:"first guide row" ~body:"FIRST_BODY"
-        ; carried second_guide ~description:"second guide row" ~body:"SECOND_BODY"
+        ; carried
+            second_guide
+            ~description:"second guide row\n  later: line of it"
+            ~body:"SECOND_BODY"
         ; carried solo ~description:"solo row" ~body:"SOLO_BODY"
         ]
       ()
@@ -708,6 +711,10 @@ let test_instruction_tool_reads_by_name_and_refuses_a_written_mismatch () =
   in
   check bool "a row of the list is the name and the description" true
     (has tool.schema.description "\nsolo: solo row");
+  check bool "a description that spans lines stays on its row" true
+    (has tool.schema.description "\nguide: second guide row later: line of it");
+  check bool "and leaves no line that reads as a row of its own" false
+    (has tool.schema.description "\nlater: ");
   check bool "a row carries no source or package" false
     (has
        tool.schema.description
@@ -758,10 +765,28 @@ let test_instruction_tool_reads_by_name_and_refuses_a_written_mismatch () =
   in
   check bool "the revision tells the two apart" true
     (has pinned "FIRST_BODY" && not (has pinned "SECOND_BODY"));
+  let neither = call [ "source_id", `String "third"; "name", `String "guide" ] in
+  check bool "a source neither Skill of that name has reads nothing" false
+    (has neither "FIRST_BODY" || has neither "SECOND_BODY");
+  check bool "and the refusal prints both to choose from" true
+    (has neither (revision first_guide) && has neither (revision second_guide));
   let unknown = call [ "name", `String "absent" ] in
   check bool "a name the list does not hold names what is carried" true (has unknown "solo");
   check bool "and prints no reference" false
-    (has unknown (revision solo) || has unknown (revision first_guide))
+    (has unknown (revision solo) || has unknown (revision first_guide));
+  let unicode = call [ "name", `String "\xed\x95\x9c\xea\xb8\x80" ] in
+  check bool "a name outside ASCII comes back as it was written" true
+    (has unicode "\xed\x95\x9c\xea\xb8\x80");
+  let asks_for_the_name output = has output "identity.name" && has output "solo" in
+  let nameless = call [ "source_id", `String "first" ] in
+  check bool "an identity without a name is told to pass one" true
+    (asks_for_the_name nameless);
+  let stray = call [ "name", `String "solo"; "path", `String "guide" ] in
+  check bool "a field identity does not have reads nothing" true
+    (asks_for_the_name stray && not (has stray "SOLO_BODY"));
+  let untyped = call [ "name", `String "solo"; "source_id", `Null ] in
+  check bool "a source that is not a string reads nothing" true
+    (asks_for_the_name untyped && not (has untyped "SOLO_BODY"))
 ;;
 
 let test_resolved_body_stays_frozen_after_new_snapshot () =

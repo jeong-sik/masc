@@ -18,10 +18,13 @@ description = "The Skill to read. `name` is one row of the Available list."
 # name it holds twice and prints the references to choose from.
 #
 # Both were required, and the Available list printed all three on every row.
-# Of 56 refused calls (2026-11-21..27, 1,164 calls), 48 wrote the right name
-# with another source_id or package_id: 19 wrote one configured source for a
-# Skill of another, 18 wrote a source id as the package_id. None left a field
-# out. The 64 rows of that list held 64 names, each with package_id = name.
+# Of 56 refused calls (2026-11-21..27, 1,164 calls), 49 wrote an identity the
+# Keeper did not carry. In 47 of those the name was in that Keeper's own list
+# (its nearest stored request) and source_id or package_id differed; in 2 the
+# name was not in it. 32 wrote the id of another configured source as the
+# source_id, 18 wrote a source id as the package_id. None left a field out.
+# No stored list of November (63 distinct) held a name twice, and every row
+# had package_id = name.
 #
 # A field the call writes is still matched exactly and refused on a mismatch.
 [[params.params]]
@@ -54,15 +57,16 @@ min_length = 1
 # quietly replaced.
 #
 # It was required because the call was meant to pin what it read. That pin also
-# has to be typed, and nothing hands it to the caller outside this tool's own
-# Available list — of 292 tasks recorded on this workspace, 0 named a Skill,
+# has to be typed, and the Available list never printed it: it reaches the
+# caller in a Task's Skill reference, a keeper_capability_search result or
+# this tool's refusal — of 292 tasks recorded on this workspace, 0 named a Skill,
 # and 126 of those were made through masc_add_task, which has carried a skills
 # parameter all along.
 [[params]]
 name = "content_revision"
 type = "string"
 required = false
-description = "Optional canonical domain-separated SHA-256 content revision of the exact frozen SKILL.md bytes: 64 lowercase hex characters. Omit it to read whichever revision this turn's Skill list carries under that name; pass it to pin one, copied verbatim from the Task skill reference or this tool's Available list."
+description = "Optional canonical domain-separated SHA-256 content revision of the exact frozen SKILL.md bytes: 64 lowercase hex characters. Omit it to read whichever revision this turn's Skill list carries under that name; pass it to pin one, copied verbatim from the Task skill reference, a `keeper_capability_search` result or this tool's refusal. The Available list does not print it."
 
 [[params]]
 name = "file"

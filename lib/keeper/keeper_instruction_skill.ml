@@ -48,19 +48,33 @@ let instruction_skills_of_catalog skill_catalog =
        | None -> None)
 ;;
 
+(* A row is one line. A description that spans lines would leave its later
+   lines under the row, and one of the shape "word: text" reads as a row of its
+   own now that a row starts with a name. *)
+let on_one_line text =
+  String.split_on_char '\n' text
+  |> List.map String.trim
+  |> List.filter (fun line -> not (String.equal line ""))
+  |> String.concat " "
+;;
+
 let instruction_skill_description (instruction_skills : instruction_skill list) =
   let listed =
     instruction_skills
     |> List.map (fun (skill : instruction_skill) ->
-         Printf.sprintf "%s: %s" skill.reference.identity.name skill.description)
+         Printf.sprintf
+           "%s: %s"
+           skill.reference.identity.name
+           (on_one_line skill.description))
     |> String.concat "\n"
   in
   skill_tool_schema.description ^ "\n\nAvailable:\n" ^ listed
 ;;
 
 (* A refusal names what the call could have meant and nothing else. The whole
-   list is already in the description; printing every carried reference made
-   one refusal 13,551 bytes at the median (55 refusals, 2026-11-21..27). *)
+   list is already in the description. Of 56 refusals on 2026-11-21..27, 49
+   printed every reference the Keeper carried: 10,418 to 13,685 bytes each,
+   13,551 at the median. *)
 let carried_names_text (instruction_skills : instruction_skill list) =
   match instruction_skills with
   | [] -> "(none)"
@@ -72,6 +86,10 @@ let carried_names_text (instruction_skills : instruction_skill list) =
 
 (* Each reference prints as the [identity] and [content_revision] a call
    passes, so a refusal that shows one can be copied into the next call. *)
+(* The name as the caller wrote it. [%S] would print a name outside ASCII as
+   decimal byte escapes. *)
+let quoted_name name = Yojson.Safe.to_string (`String name)
+
 let references_text (skills : instruction_skill list) =
   String.concat
     ", "
@@ -453,14 +471,14 @@ let make_instruction_skill_tool
                      with
                      | [] ->
                        Printf.sprintf
-                         "no instruction Skill is named %S; this keeper carries: %s"
-                         selector.name
+                         "no instruction Skill is named %s; this keeper carries: %s"
+                         (quoted_name selector.name)
                          (carried_names_text instruction_skills)
                      | _ :: _ as named ->
                        Printf.sprintf
-                         "a Skill named %S is carried, and it does not have every \
+                         "a Skill named %s is carried, and it does not have every \
                           field the call wrote. A field left out is not compared. \
                           Carried under that name: %s"
-                         selector.name
+                         (quoted_name selector.name)
                          (references_text named)))))))
 ;;

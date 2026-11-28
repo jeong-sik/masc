@@ -115,16 +115,20 @@ let stub_message ~enabled ~min_bytes ~names ~first (message : Types.message) =
     first, if changed then Some { message with content } else None)
 ;;
 
-let apply ~enabled ~min_bytes messages =
-  let (_names, _first, changed), stubbed =
+let apply ?(is_transmitted = fun (_ : int) -> true) ~enabled ~min_bytes messages =
+  let (_index, _names, _first, changed), stubbed =
     List.fold_left_map
-      (fun (names, first, changed) (message : Types.message) ->
+      (fun (index, names, first, changed) (message : Types.message) ->
          let first = if starts_turn message then String_map.empty else first in
          let names = record_tool_names names message in
-         match stub_message ~enabled ~min_bytes ~names ~first message with
-         | first, None -> (names, first, changed), message
-         | first, Some message -> (names, first, true), message)
-      (String_map.empty, String_map.empty, false)
+         let index_after = index + 1 in
+         if is_transmitted index
+         then (
+           match stub_message ~enabled ~min_bytes ~names ~first message with
+           | first, None -> (index_after, names, first, changed), message
+           | first, Some message -> (index_after, names, first, true), message)
+         else (index_after, names, first, changed), message)
+      (0, String_map.empty, String_map.empty, false)
       messages
   in
   if changed then stubbed else messages

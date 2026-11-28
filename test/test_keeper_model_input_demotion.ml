@@ -2519,6 +2519,33 @@ let a_repeat_in_the_running_turn_leaves_as_a_pointer () =
     on.Try_provider.history_atom_count
 ;;
 
+let a_repeat_is_whole_when_its_original_atom_is_omitted () =
+  let messages = turn_with_a_repeat () in
+  let first_result_atom = Window.first_atom_at_or_after messages ~message_index:1 in
+  let second_result_atom = Window.first_atom_at_or_after messages ~message_index:3 in
+  let compose ~first_atom ~dropped_current_turn_atoms =
+    Try_provider.For_testing.compose_carried_model_input
+      ~same_turn_result_as_pointer:(String.equal repeated_tool)
+      ~dropped_current_turn_atoms
+      ~measure_message_bytes
+      ~measure_wire_bytes:stored_wire_bytes
+      ~front:None ~accepted:None
+      ~history_digest_at:(Window.atom_opening_digest messages)
+      ~current_turn_results:Try_provider.Current_turn_verbatim
+      ~base_path:""
+      ~turn_boundary:(Masc.Keeper_carried_front.Turn_boundary { end_atom = first_atom })
+      messages
+  in
+  let check label composed =
+    Alcotest.(check (list string)) label [ repeated_body ]
+      (markers composed.Try_provider.projection.Window.messages)
+  in
+  check "the carried range starts after the original result"
+    (compose ~first_atom:second_result_atom ~dropped_current_turn_atoms:[]);
+  check "explicit current-turn eviction drops the original result"
+    (compose ~first_atom:0 ~dropped_current_turn_atoms:[ first_result_atom ])
+;;
+
 (* The pointer a request sent while the turn ran is the pointer it sends
    after the turn ended: the plan that turns the ended turn's results into
    markers takes the first result and leaves the pointer. *)
@@ -3241,6 +3268,10 @@ let () =
             "a repeat in the running turn leaves as a pointer"
             `Quick
             a_repeat_in_the_running_turn_leaves_as_a_pointer
+        ; Alcotest.test_case
+            "a repeat stays whole when the original result is omitted"
+            `Quick
+            a_repeat_is_whole_when_its_original_atom_is_omitted
         ; Alcotest.test_case
             "a pointer stays after its turn ended"
             `Quick

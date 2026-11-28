@@ -1536,6 +1536,17 @@ let working_state_message text : Agent_core.Types.message =
    or a turn boundary always carries the newest atom
    ({!Keeper_carried_front.clamp}); an unknown boundary carries that atom
    alone. *)
+let projection_start ~atom_count = function
+  | From_covered { end_atom; working_state = _ } -> end_atom, true
+  | Past_librarian_point { accepted = seed; _ } | From_seed seed ->
+    ( Keeper_carried_front.clamp_seed ~atom_count seed
+    , Model_input_front.permits_empty seed.Keeper_carried_front.front )
+  | From_turn_boundary (Keeper_carried_front.Turn_boundary { end_atom }) ->
+    Keeper_carried_front.clamp ~atom_count end_atom, false
+  | From_turn_boundary (Keeper_carried_front.Turn_boundary_unknown _) ->
+    Keeper_carried_front.newest_atom ~atom_count, false
+;;
+
 let project_range_start_with_anchor
       ?compaction_anchor
       ~has_dropped_current_turn_atoms
@@ -1545,17 +1556,7 @@ let project_range_start_with_anchor
       start
       messages
   =
-  let first_atom, allow_empty_history =
-    match start with
-    | From_covered { end_atom; working_state = _ } -> end_atom, true
-    | Past_librarian_point { accepted = seed; _ } | From_seed seed ->
-      ( Keeper_carried_front.clamp_seed ~atom_count seed
-      , Model_input_front.permits_empty seed.Keeper_carried_front.front )
-    | From_turn_boundary (Keeper_carried_front.Turn_boundary { end_atom }) ->
-      Keeper_carried_front.clamp ~atom_count end_atom, false
-    | From_turn_boundary (Keeper_carried_front.Turn_boundary_unknown _) ->
-      Keeper_carried_front.newest_atom ~atom_count, false
-  in
+  let first_atom, allow_empty_history = projection_start ~atom_count start in
   match working_state, compaction_anchor with
   | Some text, _ ->
     Runtime_model_input_tail_window.project_from_atom
@@ -1693,7 +1694,7 @@ let compose_carried_model_input_internal
       ~history_digest_at ~turn_boundary ~this_turn_start
   in
   (* A result whose text repeats an earlier result of its own turn leaves as
-     a pointer to that turn's first one, for the tools that declare it
+     a pointer to that turn's first transmitted one, for the tools that declare it
      (RFC-0510). It runs after the range start is chosen, because the carried
      position is a digest of the checkpoint history as stored, and before the
      demotion plan: the plan then sees the pointer, which is below
@@ -1702,8 +1703,17 @@ let compose_carried_model_input_internal
      would go as the whole text during its turn and as a blob marker after.
      The atoms, the messages and every block but the replaced results are
      the ones [messages] holds. *)
+  let first_atom, _allow_empty_history = projection_start ~atom_count:history_atom_count start in
+  let source_labels = Array.of_list (List.map snd source_labelled) in
+  let is_transmitted index =
+    match source_labels.(index) with
+    | Runtime_model_input_tail_window.Pinned -> true
+    | Runtime_model_input_tail_window.Atom atom ->
+      atom >= first_atom && not (Message_indices.mem atom dropped_atoms)
+  in
   let messages =
     Keeper_same_turn_result_stub.apply
+      ~is_transmitted
       ~enabled:same_turn_result_as_pointer
       ~min_bytes:aged_result_min_bytes
       messages

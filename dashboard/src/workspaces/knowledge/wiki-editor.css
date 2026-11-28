@@ -1,0 +1,176 @@
+/* MASC Dashboard — Wiki Editor Authoring UX (100% OKLCH SSOT tokens, 4px scale, 0 raw hex, 0 inline style=) */
+
+.kn-editor-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  padding: var(--sp-1) var(--sp-2);
+  border: 1px solid var(--line-1);
+  border-radius: var(--radius-sm);
+  background: var(--bg-2);
+  min-width: 0;
+}
+
+.kn-editor-toolbar-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-1);
+  min-width: 0;
+}
+
+.kn-editor-file-input {
+  display: none;
+}
+
+.kn-editor-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--sp-3);
+  min-width: 0;
+}
+
+.kn-editor-workspace--split {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: stretch;
+}
+
+.kn-editor-dropzone {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  border-radius: var(--radius-sm);
+}
+
+.kn-editor-dropzone[data-drag-active="true"] .kn-textarea--editor {
+  border-color: var(--info-border);
+  box-shadow: var(--focus-ring);
+}
+
+.kn-editor-drop-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--sp-4);
+  border: 2px dashed var(--info-border);
+  border-radius: var(--radius-sm);
+  background: color-mix(in oklch, var(--bg-1) 88%, transparent);
+  color: var(--info-fg);
+  font-size: var(--fs-13);
+  font-weight: 600;
+  text-align: center;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.kn-editor-preview-pane {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  min-width: 0;
+  min-height: 260px;
+  max-height: 560px;
+  overflow-y: auto;
+}
+
+.kn-editor-preview-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  padding-bottom: var(--sp-1);
+  border-bottom: 1px solid var(--line-1);
+  font-size: var(--fs-11);
+  font-weight: 600;
+  color: var(--fg-3);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.kn-editor-hint {
+  font-size: var(--fs-11);
+  color: var(--fg-3);
+}
+
+/* Quick Embed Picker Popover */
+.kn-embed-picker-popover {
+  width: 320px;
+  max-width: min(360px, 90vw);
+  padding: var(--sp-2);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.kn-embed-picker-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  max-height: 240px;
+  overflow-y: auto;
+  min-width: 0;
+}
+
+.kn-embed-picker-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: var(--sp-1) var(--sp-2);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-1);
+  text-align: left;
+  cursor: pointer;
+  min-width: 0;
+}
+
+.kn-embed-picker-item:hover,
+.kn-embed-picker-item:focus-visible {
+  background: var(--bg-3);
+  border-color: var(--line-2);
+  outline: none;
+}
+
+.kn-embed-picker-item:focus-visible {
+  box-shadow: var(--focus-ring);
+}
+
+.kn-embed-picker-title {
+  font-size: var(--fs-12);
+  font-weight: 600;
+  color: var(--fg-1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kn-embed-picker-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  font-size: var(--fs-11);
+  color: var(--fg-3);
+  min-width: 0;
+}
+
+@media (max-width: 960px) {
+  .kn-editor-workspace--split {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.kn-embed-picker-overflow {
+  padding: var(--sp-1) var(--sp-2);
+  font-size: var(--fs-11);
+  color: var(--fg-3);
+  text-align: center;
+  border-top: 1px dashed var(--line-1);
+}

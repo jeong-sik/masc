@@ -239,7 +239,9 @@ export function reduceTerminalEvent(
         const line = decodeLineObject(item)
         if (line) decodedLines.push(line)
       }
-      const capped = appendCapped([], decodedLines, 0, cap)
+      // The server sends only its newest rows and counts the older rows it
+      // still holds but left out in `lines_omitted`.
+      const capped = appendCapped([], decodedLines, asNum(rawEvent.lines_omitted) ?? 0, cap)
       const activeCommand = pickActiveCommand(rawEvent)
       const firstRetained = asNum(rawEvent.first_retained_seq)
       const lastSeq = asNum(rawEvent.last_seq) ?? decodedLines.at(-1)?.seq ?? state.lastSeq

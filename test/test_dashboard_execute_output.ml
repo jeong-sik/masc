@@ -599,8 +599,9 @@ let test_snapshot_discloses_evicted_live_history () =
     (snapshot |> member "bytes_dropped_stdout" |> to_int)
 
 (* A stream's first frame from a log of 5,000 rows carries only the newest
-   [snapshot_line_limit] of them (#46909). [first_retained_seq] names the
-   first row sent, so a reader knows where the cut is. *)
+   [snapshot_line_limit] of them (#46909) and counts the rest in
+   [lines_omitted]. [first_retained_seq] still names the oldest event the
+   server holds, so a reader does not mistake the cut for server loss. *)
 let test_first_frame_carries_newest_rows_up_to_limit () =
   let row_count = EO.event_log_capacity in
   let omitted = row_count - EO.snapshot_line_limit in
@@ -624,7 +625,11 @@ let test_first_frame_carries_newest_rows_up_to_limit () =
           (List.init EO.snapshot_line_limit (fun i ->
              Printf.sprintf "row-%05d" (omitted + i + 1)))
           (List.map (fun line -> line |> member "text" |> to_string) lines);
-        check int "first_retained_seq is the first row sent" (row_seq (omitted + 1))
+        check int "rows left out" omitted (initial |> member "lines_omitted" |> to_int);
+        check int "first row sent" (row_seq (omitted + 1))
+          (List.hd lines |> member "seq" |> to_int);
+        (* 5,001 events in a log of 5,000: only the task_opened marker is gone. *)
+        check int "first_retained_seq is the server's oldest event" (row_seq 1)
           (initial |> member "first_retained_seq" |> to_int);
         check int "last seq" (row_seq row_count) (initial |> member "last_seq" |> to_int)))
 
@@ -638,7 +643,8 @@ let test_first_frame_at_limit_reports_no_cut () =
   let snapshot = EO.event_json ~keeper_name:"alpha" in
   check int "every row" EO.snapshot_line_limit
     (snapshot |> member "lines" |> to_list |> List.length);
-  check int "the frame covers the log from its first event" 1
+  check int "no row left out" 0 (snapshot |> member "lines_omitted" |> to_int);
+  check int "the server still holds the first event" 1
     (snapshot |> member "first_retained_seq" |> to_int)
 
 let test_sse_frame () =

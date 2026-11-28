@@ -33,12 +33,13 @@ type snapshot = {
   lines : output_line list;
       (** The newest {!snapshot_line_limit} rows the log retains, oldest
           first. *)
+  lines_omitted : int;
+      (** How many older rows the log still retains but [lines] leaves out
+          for {!snapshot_line_limit}. *)
   active_streams : active_stream list;
   first_retained_seq : int;
-      (** Number of the oldest event [lines] covers: every retained row from
-          here through [last_seq] is in [lines] and no earlier row is. It is
-          the log's oldest retained number, or the first row's number when
-          older rows were left out for {!snapshot_line_limit}. *)
+      (** Number of the oldest event the log still retains. Events before it
+          are gone from the server. *)
   last_seq : int;
       (** Newest log number at the time [lines] was read; [0] when the
           keeper has logged nothing. *)
@@ -63,7 +64,7 @@ val event_log_capacity : int
 val snapshot_line_limit : int
 (** How many of the newest retained rows a snapshot carries. The dashboard
     terminal keeps this many rows, so a longer first frame would be parsed
-    only to be dropped. *)
+    only to be dropped. The snapshot counts the rest in [lines_omitted]. *)
 
 val record_completed :
   keeper_name:string ->

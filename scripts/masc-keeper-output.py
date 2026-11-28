@@ -2,7 +2,8 @@
 """Watch redacted Keeper Execute output from a MASC server.
 
 This is an observation client. Reconnecting repeats a read, never an Execute.
-The server's in-memory history is bounded, and a new snapshot can replay rows.
+The server's in-memory history is bounded, a snapshot carries only its newest
+rows, and a new snapshot can replay rows.
 """
 from __future__ import annotations
 
@@ -57,7 +58,10 @@ class Output:
             if kind == "snapshot":
                 first = event.get("first_retained_seq")
                 if isinstance(first, int) and first > 1:
-                    print(f"[{safe_text(keeper)}] earlier events before seq {first} are not in this snapshot", flush=True)
+                    print(f"[{safe_text(keeper)}] earlier events before seq {first} are no longer retained", flush=True)
+                omitted = event.get("lines_omitted")
+                if isinstance(omitted, int) and omitted > 0:
+                    print(f"[{safe_text(keeper)}] {omitted} older retained rows are not in this snapshot", flush=True)
                 active = event.get("active_count")
                 state = f"{active} active" if isinstance(active, int) and active else ("closed" if event.get("closed") else "open")
                 print(f"[{safe_text(keeper)}] snapshot: {state}", flush=True)

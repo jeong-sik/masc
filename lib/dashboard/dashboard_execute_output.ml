@@ -32,6 +32,7 @@ type snapshot = {
   task_id : string option;
   task_count : int;
   lines : output_line list;
+  lines_omitted : int;
   active_streams : active_stream list;
   first_retained_seq : int;
   last_seq : int;
@@ -371,23 +372,21 @@ let closed_status_text status =
           ; "reason", `String "status_exceeds_display_limit"
           ])
 
-(* The newest [limit] rows of the log, oldest first, and the number of the
-   oldest event they cover: every retained row from that number on is in the
-   list and no earlier row is. The number is the log's oldest retained one
-   unless an older row was left out for [limit]; then it is the first row's. *)
+(* The newest [limit] rows of the log, oldest first, and how many older
+   retained rows were left out for [limit]. *)
 let retained_lines_locked ?(include_status = false) ~limit keeper =
   match Hashtbl.find_opt logs keeper with
-  | None -> [], first_seq
+  | None -> [], 0
   | Some log ->
     let oldest = oldest_retained_seq log in
-    let rec collect seq acc kept covered_from =
+    let rec collect seq acc kept omitted =
       if seq < oldest
-      then acc, oldest
+      then acc, omitted
       else (
         let keep line =
           if kept < limit
-          then collect (seq - 1) (line :: acc) (kept + 1) seq
-          else acc, covered_from
+          then collect (seq - 1) (line :: acc) (kept + 1) omitted
+          else collect (seq - 1) acc kept (omitted + 1)
         in
         match log.slots.(seq mod event_log_capacity) with
         | Line_event { line; _ } -> keep line
@@ -400,9 +399,9 @@ let retained_lines_locked ?(include_status = false) ~limit keeper =
           keep { seq; stream_id; task_id; ts_ms = ts_ms_of_unix generated_at
                ; stream = "status"; text; ansi = false }
         | Task_opened_event _ | Task_closed_event _ ->
-          collect (seq - 1) acc kept covered_from)
+          collect (seq - 1) acc kept omitted)
     in
-    collect (log.next_seq - 1) [] 0 log.next_seq
+    collect (log.next_seq - 1) [] 0 0
 
 (* A close is recorded before its completed-output entry, and failures may
    never have such an entry. The marker is the actual observed lifecycle
@@ -423,7 +422,7 @@ let last_transition_locked keeper =
 let snapshot_state keeper_name =
   let keeper = normalize_keeper keeper_name in
   if keeper = ""
-  then "", [], [], first_seq - 1, [], None, first_seq
+  then "", [], ([], 0), first_seq - 1, [], None, first_seq
   else
     with_lock (fun () ->
       let entries =
@@ -431,10 +430,11 @@ let snapshot_state keeper_name =
         | None -> []
         | Some q -> queue_to_list q
       in
-      let lines, first_retained_seq =
-        retained_lines_locked ~include_status:true ~limit:snapshot_line_limit keeper
-      in
-      keeper, entries, lines, last_logged_seq_locked keeper,
+      let first_retained_seq = match Hashtbl.find_opt logs keeper with
+        | None -> first_seq | Some log -> oldest_retained_seq log in
+      keeper, entries,
+      retained_lines_locked ~include_status:true ~limit:snapshot_line_limit keeper,
+      last_logged_seq_locked keeper,
       List.map (fun state -> state.active) (active_streams_locked keeper),
       last_transition_locked keeper, first_retained_seq)
 
@@ -454,7 +454,8 @@ let add_stream_chunks entries select =
   , Exec_buffer.bytes_dropped buffer + (String.length ring_tail - String.length tail) )
 
 let snapshot ~keeper_name =
-  let keeper, entries, lines, last_seq, active_streams, transition, first_retained_seq =
+  let keeper, entries, (lines, lines_omitted), last_seq, active_streams, transition,
+      first_retained_seq =
     snapshot_state keeper_name
   in
   let latest = match List.rev entries with [] -> None | entry :: _ -> Some entry in
@@ -482,6 +483,7 @@ let snapshot ~keeper_name =
       ; task_id
       ; task_count = List.length entries
       ; lines
+      ; lines_omitted
       ; active_streams
       ; first_retained_seq
       ; last_seq
@@ -529,6 +531,7 @@ let snapshot_json (s : snapshot) =
     ; "task_id", option_json (fun value -> `String value) s.task_id
     ; "task_count", `Int s.task_count
     ; "lines", `List (List.map output_line_json s.lines)
+    ; "lines_omitted", `Int s.lines_omitted
     ; ( "active_streams"
       , `List (List.map (fun (stream : active_stream) ->
           `Assoc
@@ -663,8 +666,8 @@ let initial_event_json subscriber =
   match snapshot ~keeper_name:subscriber.keeper with
   | None -> no_task_json subscriber.keeper
   | Some s ->
-    (* The snapshot holds every retained line up to [s.last_seq], so the live
-       tail starts after it and no line reaches the viewer twice. *)
+    (* The snapshot holds the newest retained lines up to [s.last_seq], so the
+       live tail starts after it and no line reaches the viewer twice. *)
     with_lock (fun () -> subscriber.delivered_seq <- s.last_seq);
     snapshot_json s
 

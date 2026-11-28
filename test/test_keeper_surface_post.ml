@@ -535,7 +535,14 @@ let test_replay_connector_post_preserves_discord_and_slack_coordinates () =
        check bool "Slack replay completed" true
          (slack_result.disposition = Tool_result.Completed ());
        match Store.load ~base_dir:base_path ~keeper_name:meta.name with
-       | [ discord_row; slack_row ] ->
+       (* The text post, the file post and the Slack post each persist a row;
+          the two refused posts persist none. *)
+       | [ discord_row; file_row; slack_row ] ->
+         check string "the file post's row carries its text" "악보와 그림이에요"
+           file_row.content;
+         check (option string) "the file post stays in the Discord conversation"
+           (Some "discord:guild-42:channel:discord-thread-9")
+           file_row.conversation_id;
          check (option string) "Discord conversation_id preserved"
            (Some "discord:guild-42:channel:discord-thread-9")
            discord_row.conversation_id;
@@ -568,7 +575,7 @@ let test_replay_connector_post_preserves_discord_and_slack_coordinates () =
               (Some "1700000000.000100") thread_ts
           | _ -> fail "expected Slack surface on persisted row")
        | rows ->
-         failf "expected 2 persisted assistant rows, got %d" (List.length rows))
+         failf "expected 3 persisted assistant rows, got %d" (List.length rows))
 
 let test_slack_mentions_require_stable_ids () =
   let args =

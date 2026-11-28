@@ -517,7 +517,7 @@ let discover ~binary ~sw:_ ~net ~base_path request =
           ; reasoning_efforts = None; supports_image_input = Some true }
         ; { id = "kimi-code/kimi-for-coding"; label = "Kimi for Coding (ACP)"; context = Some 1048576
           ; reasoning_efforts = None; supports_image_input = Some true }
-        ; { id = "kimi-code/kimi-for-coding-highspeed"; label = "Kimi for Coding Highspeed (ACP)"; context = Some 1048576
+        ; { id = "kimi-code/kimi-for-coding-highspeed"; label = "Kimi for Coding Highspeed (ACP)"; context = Some 262144
           ; reasoning_efforts = None; supports_image_input = Some true }
         ]
       in

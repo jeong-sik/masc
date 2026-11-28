@@ -1,5 +1,74 @@
 ## [Unreleased]
 
+## [0.83.11] - 2026-11-28
+
+### Upgrade notes
+
+- `MASC_STARTUP_WATCHDOG_SEC` is renamed `MASC_STARTUP_STALL_SEC`, and the old
+  name is no longer read. An installation that set the old variable sets the
+  new one; with neither set the limit is 240 seconds (#55278).
+- The server no longer reads or writes `.masc/artifact_app_data/`. A workspace that has this directory can delete it (#55385).
+
+### Changed
+
+- The startup watchdog ends the server only after the boot reports no progress
+  for the stall limit (`MASC_STARTUP_STALL_SEC`, default 240 seconds, range 30
+  to 600). Before, it ended any boot that was not ready 240 seconds after the
+  watchdog started, so a slow start that kept moving was killed. The log line
+  names the boot step the server stopped in (#55278).
+- `/health/ready` names the boot step in a `step` field while the server is not
+  ready, and `masc restart` shows it next to the phase, for example
+  `starting: blocking (closing_open_turns)`. The body of a ready server is
+  unchanged. The `startup` object of the authenticated health answer carries
+  `step`, `idle_sec` and `stall_timeout_sec` in place of `watchdog_timeout_sec`
+  (#55278).
+- `keeper_artifact_draft` results no longer include `presence_active`, its `leave` action is removed, and it no longer refuses a call that arrives without an owning Keeper turn scope. Find, open, read, select, resolve, edit, discuss and checkpoint are unchanged (#55387).
+- **Board**: a posts refusal for a torn tail or a second hard link is no longer read again at each write. It lasts until a restart, also after the file was repaired, as it already did for the other four sources. A write whose outcome is unknown still needs a restart, and no source is read again while a deletion is pending (#55460, follow-up #55465).
+
+### Removed
+
+- The unused imported-project source and build stores (`Artifact_project_source_store`, `Artifact_project_build_store`) and their tool blob sweep scope entries. No server path ever wrote `.masc/artifact_project_sources/` or `.masc/artifact_project_builds/` (#55383).
+- The `tools/artifact-project` Node CLI, which built packages for the project stores removed in #55383. No workflow or script ran it (#55384).
+- `GET` and `POST /api/v1/artifact-app-data` and the per-actor application input store behind them. No Dashboard view or other client called these routes; they now answer 404 (#55385).
+- The shared-draft HTTP routes `GET /api/v1/artifact-drafts/<id>`, `POST /api/v1/artifact-drafts`, `POST /api/v1/artifact-draft-checkpoints`, `GET /api/v1/artifact-draft-events/<id>` and `POST /api/v1/artifact-draft-presence`. The Dashboard draft editor that called them was retired on 2026-11-24. Keepers still read and edit shared drafts through `keeper_artifact_draft` (#55386).
+- The in-memory shared-draft live room (`Artifact_draft_live`) and the Keeper turn presence scope (`Keeper_artifact_draft_scope`). Nothing subscribed to the room after the draft event route was removed in #55386 (#55387).
+- **Keeper tools**: code left behind when #54361 removed the composition tools (`keeper_compose_<skill>`) and that no `lib` or `bin` code called: `skill_compositions_block`, and `Keeper_task_skill_turn.partition`, which only tests called and whose composition list was empty for every input. The interfaces of `Keeper_tool_definition_source` and `Tool_loading_declarations` no longer describe composition tools as present, and two tests no longer assert them; both had failed on main since #54361 (#55468, refs #55431).
+- **Keeper tools**: more leftovers of the composition tools #54361 removed. A selected Task Skill no longer carries a `diagnostic` field: its one construction site set `None`, so the warning that read it never ran. Turn setup no longer computes `Keeper_task_skill_turn.executable_selection` and discards it; the function, whose only other caller was a test, is gone. The turn hooks no longer build a list of tool names whenever a model surface is active, only to discard it, and the hook context fields nothing read (`all_tool_names`, `agent_name`) are gone (#55472, refs #55431).
+- **Keeper tools**: the effective tool surface no longer carries `composition_skills`, always the empty list since #54361, nor the tool origins `composition_skill` and `composition_control`, which no code constructed. The dashboard response for a Keeper's surface loses the `composition_skills` key. `Keeper_skill_catalog.provenance_to_yojson`, used only by the removed origin, is gone, with the `identity` and `source` fields of `provenance` that only it read (#55474, refs #55431).
+
+### Fixed
+
+- A microVM keeper now sees its guest folder (`/masc-work/<keeper>/...`)
+  where it used to see the host bookkeeping path: the Execute cwd and output,
+  the prompt's workspace, the status default cwd, and the path in successful
+  Read, Grep, Write and Edit results. A `pwd` it runs prints a folder its next
+  command can use. The path check, Execute, Read, Grep, Write and Edit accept
+  a guest path as the same file the host path names. A cwd outside that
+  folder is refused with `microvm_remote_path_jail_violation` naming the
+  guest folder; the SSH refusal wording is unchanged (#55113).
+- Work › Inbox lists its queue longest wait first across kinds, and each row says its wait ("12분째 대기"); a tool approval row says first when its held call times out (#55137).
+- Dashboard Memory recovery accepts decimal offsets and item indices. A store
+  now requires an explicit item index. Enter `0` to select the first item. (#55141)
+- The Pulse "Tasks Done/24h" tile no longer shows "0" or "없음" for a 24h done count the
+  server did not report ("미보고"), nor "검증 대기 없음" for an unreported verify count
+  ("검증 대기 미확인"); the empty attention queue names what it covers, and
+  Done/Cancelled task filters are counted separately in the task list. (#55141)
+- The startup watchdog sees progress after each Keeper in the slow boot loops
+  (owner installation, transcript tail recovery, closing open turns, restart
+  settlements). A boot over a long Keeper history is no longer ended while it
+  is moving through them (#55279).
+- **Board**: a comments, votes, reactions or sub-board source refused because another writer moved its file is read again before the next Board operation, as the posts source already was. On 2026-11-24 every comment write was refused for 123 minutes, until the restart. The first write after the other writer's is still refused once; that refusal is what shows the file moved. The read happens where a Dispatch operation takes the store (`Board_dispatch.backend`), so every Board operation starts from it, including the comment read of a Keeper's world observation and the target check of a comment vote. Persistence is taken only for a read; a store with nothing due costs a look at its fields. One predicate, `Board_posts_source.fresh_read_can_clear`, says which refusals are read again: a cursor or content mismatch, a path that changed during the operation, and a lock another writer held (#55460, refs #55449).
+- **Keeper tools**: `Execute` decides whether its output travels inline by the result that would carry it, not by the output's own size. Output just under the lane's ceiling made a result over it once JSON escaping and the status fields were added; the whole result was then stored and the model read a preview of escaped JSON (204 calls in the seven days to 2026-11-27). `Execute` now asks the projection about the result (`Tool_projection.fits_inline`, the comparison `to_agent_core_typed_result` itself makes) and stores the output when the answer is no. The model then reads the exit status and location beside the output's reference whenever that smaller result fits its lane, which it would have for each of the 204 calls. When the output cannot be stored, the result keeps it inline as before (#55466, refs #55433).
+- The TUI Board now says an audio or MIDI file attached by `attachment_ids` cannot be played there and points to the dashboard (#55469)
+- TUI Board posts now list audio and MIDI entries passed through `masc_board_post`'s typed `attachments` argument and say they cannot be played there; entries of other kinds are still not listed (#55475).
+- `surfaces.css` no longer uses off-grid `1px`/`2px` padding literals: the four rules added by #55334 now use the `--sp-0` hairline token, so the off-grid spacing check in `design-system/tokens/source.test.ts` passes again on main (#55479)
+
+### Documentation
+
+- The Keeper user manuals drop the section on resuming a
+  `Counterpart_input_capacity_refused` read; that refusal, history questions
+  and message-floor steps do not exist (#55125).
+
 ## [0.83.10] - 2026-11-28
 
 ### Upgrade notes

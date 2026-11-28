@@ -3,7 +3,7 @@
  *
  * Left:   Vercel-style Account & Workspace Switcher (`[Avatar · @principal (role) / Workspace ▾]`)
  *         — zero conflation with LLM Providers; workspace switch calls `selectWorkspace()` (bumps `sessionEpoch`).
- * Center: L1 Sub-Tabs (max 5, strict 2-level cap) + Global `[24h | 7d | 30d]` Time-Window Pill
+ * Center: L1 Sub-Tabs (a workspace's sub-tabs, or a Keeper's entity tabs) + Global `[24h | 7d | 30d]` Time-Window Pill
  *         (visible on telemetry routes `/pulse`, `/runtime/*`, `/knowledge/memory`, `/work/candle`).
  * Right:  TUI Top Rail parity pills: `[⌘K]`, honest Provenance pill (`● LIVE SSE | ◐ SYNCED | ○ SNAPSHOT | STREAM_GAP`
  *         with build-commit/connection popover — killing the permanent amber top banner!), `[Inbox (N)]`,
@@ -526,7 +526,7 @@ export function TopBar(): VNode {
   const win = timeWindow.value
   const diskPressure = diskPressureSummary.value
 
-  // L1 sub-tabs: workspace subtabs (max 5) OR Keeper entity tabs when on `/keepers/:name/*`.
+  // L1 sub-tabs: workspace subtabs OR Keeper entity tabs when on `/keepers/:name/*`.
   // Account subtabs (Profile / PATs / Members / Invites / Allowlist) only apply when
   // signed into a multi-account session; other auth states ignore subroutes in AccountWorkspace.
   const subtabs = route.workspace === 'keepers' && route.entityId

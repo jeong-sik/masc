@@ -11,6 +11,7 @@
 
 import type { ComponentChildren } from 'preact'
 import { decodeAttachmentRef, dedupeAttachments, type AttachmentRef } from '../../api/attachments'
+import { boardTypedMedia, normalizeBoardAttachments, type BoardTypedMedia } from '../../api/board'
 import type { TimeWindow } from '../../core/time-window'
 import { err, ok, type Result } from '../../lib/result'
 
@@ -153,6 +154,8 @@ export interface BoardPostItem {
   readonly reactions: readonly BoardReactionSummary[]
   readonly supportedReactionEmojis: readonly string[]
   readonly attachments: readonly AttachmentRef[]
+  /** Audio and MIDI entries of the post's typed `meta.attachments`. */
+  readonly typedMedia: readonly BoardTypedMedia[]
   readonly closed: BoardPostCloseState | null
   readonly isSignal: boolean
 }
@@ -440,6 +443,7 @@ export function decodeBoardPost(raw: unknown): BoardPostItem | null {
     reactions,
     supportedReactionEmojis: asStringArray(raw.supported_reaction_emojis),
     attachments: decodeBoardAttachments(raw),
+    typedMedia: boardTypedMedia(normalizeBoardAttachments(isRecord(raw.meta) ? raw.meta.attachments : undefined)),
     closed,
     isSignal: isSignalBoardPost({
       postKind,

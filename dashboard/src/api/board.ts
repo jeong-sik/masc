@@ -9,7 +9,7 @@ import type {
   BoardActorIdentity, BoardPost, BoardPostOrigin, BoardPostCloseState, BoardComment, BoardReactionSummary,
   BoardReactionState, BoardReactionTargetType, BoardReactionToggleResult, BoardSortMode,
   BoardVoteDirection,
-    BoardAttachmentDecode, BoardAttachmentKind,
+    BoardAttachment, BoardAttachmentDecode, BoardAttachmentKind,
     BoardCurationSnapshot, BoardKarmaLedger, BoardKarmaLedgerEvent, BoardKarmaTotal,
     KeeperApprovalQueueItem, KeeperExactAttemptState,
     KeeperExactAttemptStatus, KeeperExactAttemptQuarantineCause,
@@ -564,6 +564,37 @@ export function normalizeBoardAttachments(raw: unknown): BoardAttachmentDecode[]
   if (!Array.isArray(raw)) return [{ ok: false, raw }]
   const entries = raw.map(normalizeBoardAttachment)
   return entries.length > 0 ? entries : undefined
+}
+
+export interface BoardTypedMedia {
+  readonly kind: 'audio' | 'midi'
+  readonly label: string
+  readonly source:
+    | { readonly kind: 'url'; readonly url: string }
+    | { readonly kind: 'artifact'; readonly sha256: string; readonly bytes: number }
+}
+
+function typedMediaOf(attachment: BoardAttachment): BoardTypedMedia | null {
+  const { kind, source } = attachment
+  if (kind !== 'audio' && kind !== 'midi') return null
+  if (source.kind === 'url') {
+    return { kind, label: source.name || source.url, source: { kind: 'url', url: source.url } }
+  }
+  return {
+    kind,
+    label: source.name || `sha256:${source.sha256.slice(0, 12)}`,
+    source: { kind: 'artifact', sha256: source.sha256, bytes: source.bytes },
+  }
+}
+
+/** Keeps the audio and MIDI entries; other kinds and malformed entries are not drawn here. */
+export function boardTypedMedia(
+  entries: readonly BoardAttachmentDecode[] | undefined,
+): readonly BoardTypedMedia[] {
+  return (entries ?? []).flatMap((entry) => {
+    const media = entry.ok ? typedMediaOf(entry.attachment) : null
+    return media ? [media] : []
+  })
 }
 
 function normalizeBoardActorIdentity(

@@ -7324,10 +7324,10 @@ let ui_pad_content ~bp ?(pad_y = 0) (r : Rect.t) =
     ~pad_x:(Masc_tui_ui.Layout.card_pad_x_for_width bp r.w)
     ~pad_y r
 
-let markdown_max_scroll ~theme ~width ~height text =
+let markdown_max_scroll ~theme ~width ~height ?embeds text =
   if width <= 0 || height <= 0 then 0
   else
-    let lines = Masc_tui_ui.Markdown.render_lines ~width ~theme text in
+    let lines = Masc_tui_ui.Markdown.render_lines ~width ~theme ?embeds text in
     max 0 (List.length lines - height)
 
 let parse_json_or_wrap_store ~key raw =
@@ -7981,7 +7981,7 @@ let wiki_page_markdown_rect ~bp (frame : Wiki_card_layout.frame) =
     (Masc_tui_ui.Card.inner_rect frame.preview)
   |> Wiki_card_layout.page_markdown
 
-let wiki_preview_max_scroll ~bp ~theme (frame : Wiki_card_layout.frame)
+let wiki_preview_max_scroll ~bp ~theme ~lang (frame : Wiki_card_layout.frame)
     (k : Knowledge_store.t) =
   let inner = Masc_tui_ui.Card.inner_rect frame.preview in
   if Rect.is_empty inner then 0
@@ -7992,13 +7992,15 @@ let wiki_preview_max_scroll ~bp ~theme (frame : Wiki_card_layout.frame)
       | Some s -> Observed.to_option (Knowledge_store.wiki_page_for ~slug:s.slug k)
       | None -> None
     in
-    let max_scroll_in (r : Rect.t) text =
-      markdown_max_scroll ~theme ~width:r.w ~height:r.h text
+    let max_scroll_in ?embeds (r : Rect.t) text =
+      markdown_max_scroll ~theme ~width:r.w ~height:r.h ?embeds text
     in
     match page_detail with
     | Some d -> (
         match wiki_page_markdown_rect ~bp frame with
-        | Some r -> max_scroll_in r d.body_markdown
+        | Some r ->
+            max_scroll_in ~embeds:(Knowledge_store.wiki_markdown_embeds ~lang k d) r
+              d.body_markdown
         | None -> 0)
     | None -> (
         match sel_summary with
@@ -9377,7 +9379,7 @@ let knowledge_detail_max_scroll (m : Model.t) =
               let eff_h = if has_indicator then rem - 1 else rem in
               max 0 (total_lines - max 1 eff_h))
   | Nav.Knowledge_wiki ->
-      wiki_preview_max_scroll ~bp ~theme (wiki_preview_frame m) k
+      wiki_preview_max_scroll ~bp ~theme ~lang:m.lang (wiki_preview_frame m) k
   | Nav.Knowledge_artifacts -> (
       match Knowledge_store.selected_artifact k with
       | None -> 0
@@ -9491,7 +9493,9 @@ let step_wiki_link ~now ~delta (m : Model.t) =
     ->
       let theme = Theme.of_preset m.theme_preset in
       let lines =
-        Masc_tui_ui.Markdown.render_lines ~theme ~width detail.body_markdown
+        Masc_tui_ui.Markdown.render_lines ~theme ~width
+          ~embeds:(Knowledge_store.wiki_markdown_embeds ~lang:m.lang k detail)
+          detail.body_markdown
       in
       let page_links = Knowledge_store.wiki_page_links k detail in
       let links =

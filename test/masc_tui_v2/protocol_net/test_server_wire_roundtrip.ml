@@ -748,6 +748,107 @@ let test_wiki_page_links_roundtrip () =
           Alcotest.(check (list (pair string link_target)))
             "every link shape decodes to its kind" expected decoded)
 
+(* GET /api/v1/wiki/:slug lists the embeds the server found, outside code,
+   and the TUI decodes each kind the server sends. *)
+let test_wiki_page_embeds_roundtrip () =
+  let base = Filename.temp_dir "masc_tui_wiki_embeds_" "" in
+  Fun.protect
+    ~finally:(fun () -> rm_rf base)
+    (fun () ->
+      mkdir_p (Filename.concat base ".masc/config/keepers");
+      mkdir_p (Filename.concat base ".masc/keepers");
+      let config = Masc.Workspace.default_config base in
+      let base_path = config.Masc.Workspace.base_path in
+      let slug = "embed-shapes" in
+      let sha = String.make 64 'a' in
+      let artifact = "artifact-" ^ String.make 32 'b' in
+      let page_body =
+        String.concat "\n"
+          [
+            "![[wiki:embed-shapes|Self]]";
+            "![[wiki:missing-page]]";
+            "![[media:" ^ sha ^ "|Chart]]";
+            "![Chart](/api/v1/media/" ^ sha ^ ")";
+            "![Att](/api/v1/attachments/att_" ^ sha ^ ")";
+            "![[artifact:" ^ artifact ^ "]]";
+            "![[nope:x]]";
+            "![[media:not-a-token]]";
+            "`![[wiki:embed-shapes]]` in code is not an embed";
+          ]
+      in
+      let put_body =
+        Yojson.Safe.to_string
+          (`Assoc
+             [
+               ("title", `String "Embed shapes");
+               ("source", `String "observation");
+               ("summary", `String "Every embed shape the wiki reads");
+               ("tags", `List [ `String "wiki" ]);
+               ("body", `String page_body);
+             ])
+      in
+      let now = 1795252092.0 in
+      (match
+         Server_dashboard_http_wiki.put_page_json ~now ~config ~actor:"tester"
+           ~slug ~body_str:put_body ()
+       with
+      | Ok _ -> ()
+      | Error (_, json) ->
+          Alcotest.fail ("wiki PUT failed: " ^ Yojson.Safe.to_string json));
+      let page_json =
+        match
+          Server_dashboard_http_wiki.get_page_json ~now ~base_path ~slug ()
+        with
+        | Ok json -> json
+        | Error (_, json) ->
+            Alcotest.fail ("wiki GET failed: " ^ Yojson.Safe.to_string json)
+      in
+      match Wire_knowledge.decode_wiki_page_detail page_json with
+      | Error e -> Alcotest.fail ("wiki page decode failed: " ^ e)
+      | Ok page ->
+          let shape (embed : Wire_knowledge.wiki_embed) =
+            let syntax =
+              match embed.syntax with
+              | Wire_knowledge.Embed_obsidian -> "obsidian"
+              | Wire_knowledge.Embed_markdown_media -> "markdown"
+            in
+            let target =
+              match embed.target with
+              | Wire_knowledge.Embed_media { sha256; exists } ->
+                  Printf.sprintf "media %s %s" sha256
+                    (Option.fold ~none:"unknown" ~some:Bool.to_string exists)
+              | Wire_knowledge.Embed_wiki { slug; exists } ->
+                  Printf.sprintf "wiki %s %b" slug exists
+              | Wire_knowledge.Embed_artifact { id; _ } -> "artifact " ^ id
+              | Wire_knowledge.Embed_invalid -> "invalid"
+              | Wire_knowledge.Embed_unsupported -> "unsupported"
+            in
+            (embed.raw, (syntax, target, embed.label))
+          in
+          let embed_shape = Alcotest.(triple string string (option string)) in
+          Alcotest.(check (list (pair string embed_shape)))
+            "every embed outside code decodes to its kind"
+            (List.sort compare
+               [
+                 ("![[wiki:embed-shapes|Self]]",
+                  ("obsidian", "wiki embed-shapes true", Some "Self"));
+                 ("![[wiki:missing-page]]",
+                  ("obsidian", "wiki missing-page false", None));
+                 ("![[media:" ^ sha ^ "|Chart]]",
+                  ("obsidian", "media " ^ sha ^ " false", Some "Chart"));
+                 (* A Markdown image's raw is its URL, not the whole image. *)
+                 ("/api/v1/media/" ^ sha,
+                  ("markdown", "media " ^ sha ^ " false", Some "Chart"));
+                 (* An attachment URL names the same SHA-256 media. *)
+                 ("/api/v1/attachments/att_" ^ sha,
+                  ("markdown", "media " ^ sha ^ " false", Some "Att"));
+                 ("![[artifact:" ^ artifact ^ "]]",
+                  ("obsidian", "artifact " ^ artifact, None));
+                 ("![[nope:x]]", ("obsidian", "unsupported", None));
+                 ("![[media:not-a-token]]", ("obsidian", "invalid", None));
+               ])
+            (List.sort compare (List.map shape page.embeds)))
+
 (* POST /api/v1/tools/masc_goal_transition refuses a body without
    [expected_workspace]. The check it then runs accepts the pair the TUI sends
    and strips it, so the Goal tool reads only the transition itself. *)
@@ -2152,6 +2253,8 @@ let () =
             test_published_artifact_roundtrip;
           Alcotest.test_case "wiki page links -> decode_wiki_page_detail"
             `Quick test_wiki_page_links_roundtrip;
+          Alcotest.test_case "wiki page embeds -> decode_wiki_page_detail"
+            `Quick test_wiki_page_embeds_roundtrip;
           Alcotest.test_case "wiki PUT answer -> decode_wiki_put_result" `Quick
             test_wiki_put_roundtrip;
         ] );

@@ -879,6 +879,92 @@ let test_fit_content_columns () =
     (List.fold_left ( + ) 6 widths <= 40);
   Alcotest.(check (list int)) "no columns" [] (Layout.fit_content ~total:40 ~gap:3 [])
 
+(* Embeds the server found are drawn from its list, never from code. *)
+let test_markdown_embeds () =
+  let theme = Theme.default in
+  let spans ?(width = 60) embeds text =
+    Markdown.render_lines ~theme ~width ~embeds text
+    |> List.concat_map (fun (line : Markdown.rendered_line) -> line.spans)
+  in
+  let page =
+    {
+      Markdown.raw = "![[wiki:a|A page]]";
+      shown = Markdown.Embed_link { label = "A page"; uri = "a.md" };
+    }
+  in
+  (* Wrapping splits a span at its spaces, so text is read from the joined spans. *)
+  let joined spans =
+    String.concat "" (List.map (fun (span : Markdown.styled_span) -> span.text) spans)
+  in
+  let in_text = spans [ page ] "see ![[wiki:a|A page]] here" in
+  Alcotest.(check string) "a page embed is a link to that page" "A page"
+    (joined
+       (List.filter
+          (fun (span : Markdown.styled_span) ->
+            Option.equal String.equal span.hyperlink (Some "a.md"))
+          in_text));
+  Alcotest.(check bool) "the embed source is not shown" false
+    (contains_sub ~needle:"![[" ~haystack:(joined in_text));
+  let in_code = spans [ page ] "`![[wiki:a|A page]]`" in
+  Alcotest.(check bool) "an embed written in code stays code" true
+    (List.for_all (fun (span : Markdown.styled_span) -> Option.is_none span.hyperlink) in_code
+    && contains_sub ~needle:"![[wiki:a|A page]]" ~haystack:(joined in_code));
+  let path = "/api/v1/media/" ^ String.make 64 'a' in
+  let image ?(rows = 3) raw =
+    {
+      Markdown.raw;
+      shown = Markdown.Embed_image { Markdown.label = "Chart"; path; rows; fallback = "loading" };
+    }
+  in
+  let retained embeds text =
+    Markdown.render_lines ~theme ~width:60 ~embeds text
+    |> List.filter_map (fun (line : Markdown.rendered_line) ->
+           match line.image_part with
+           | Some
+               {
+                 Cell_grid.rows =
+                   { Cell_grid.source = Cell_grid.Retained_image { path; mime_type = None }; count };
+                 _;
+               } ->
+               Some (path, count)
+           | Some
+               {
+                 Cell_grid.rows =
+                   {
+                     Cell_grid.source =
+                       ( Cell_grid.Mermaid _ | Cell_grid.Pele_scene _ | Cell_grid.Embedded_png _
+                       | Cell_grid.Retained_png _
+                       | Cell_grid.Retained_image { mime_type = Some _; _ } );
+                     _;
+                   };
+                 _;
+               }
+           | None ->
+               None)
+  in
+  let obsidian = "![[media:" ^ String.make 64 'a' ^ "|Chart]]" in
+  Alcotest.(check (list (pair string int)))
+    "an image embed alone in a paragraph asks for the retained image"
+    [ (path, 3); (path, 3); (path, 3) ]
+    (retained [ image obsidian ] obsidian);
+  (* The server gives a Markdown image's URL as its raw, and the image is found
+     by its destination. *)
+  let markdown = "![Chart](" ^ path ^ ")" in
+  Alcotest.(check (list (pair string int)))
+    "a Markdown media image alone in a paragraph asks for the same image"
+    [ (path, 3); (path, 3); (path, 3) ]
+    (retained [ image path ] markdown);
+  let attachment_url = "/api/v1/attachments/att_" ^ String.make 64 'a' in
+  Alcotest.(check (list (pair string int)))
+    "a Markdown image written with an attachment URL asks for its media image"
+    [ (path, 3); (path, 3); (path, 3) ]
+    (retained [ image attachment_url ] ("![Chart](" ^ attachment_url ^ ")"));
+  Alcotest.(check (list (pair string int))) "an image embed inside text asks for nothing" []
+    (retained [ image obsidian ] ("before " ^ obsidian ^ " after"));
+  Alcotest.(check (list (pair string int)))
+    "without image rows the embed shows its label only" []
+    (retained [ image ~rows:0 obsidian ] obsidian)
+
 (* --- 6. Table Responsive Column Priority & CJK Safety --- *)
 
 let test_table_priority_and_cjk () =
@@ -2767,6 +2853,8 @@ let () =
             `Quick test_json_tree_telemetry_vs_secrets;
           Alcotest.test_case "Markdown OSC 8 links & fenced code" `Quick
             test_markdown_osc8_and_fence;
+          Alcotest.test_case "Markdown draws server-found embeds outside code" `Quick
+            test_markdown_embeds;
           Alcotest.test_case
             "Markdown inline ```mermaid blocks (adaptive LR->TD, parity & guards)"
             `Quick test_markdown_inline_mermaid_blocks;

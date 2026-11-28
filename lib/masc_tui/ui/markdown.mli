@@ -20,10 +20,37 @@ type rendered_line = {
   image_part : Cell_grid.document_image_part option;
 }
 
+type embed_image = {
+  label : string;
+  path : string;  (** Server path the retained image is fetched from. *)
+  rows : int;  (** Rows the image takes below [label]; [0] shows [label] only. *)
+  fallback : string;  (** Shown in those rows until the image is drawn. *)
+}
+
+type embed_shown =
+  | Embed_link of { label : string; uri : string }
+      (** Drawn as a link to [uri], so it is picked and followed like one. *)
+  | Embed_image of embed_image
+      (** A paragraph that holds only this embed shows [label] and then the
+          image rows. Inside other text it shows [label] muted. *)
+  | Embed_note of string  (** Shown muted; it goes nowhere. *)
+
+type embed = {
+  raw : string;
+      (** What the server found outside code. An Obsidian embed's [raw] is the
+          embed as written, and each place it occurs in a text run is drawn as
+          [shown]. A Markdown image's [raw] is only its URL as written, so a
+          Markdown image is found by its destination instead. That URL can
+          differ from an [Embed_image]'s [path]: an attachment URL is fetched
+          from its SHA-256 media path. *)
+  shown : embed_shown;
+}
+
 val render_lines :
   theme:Theme.t ->
   width:int ->
   ?osc8:bool ->
+  ?embeds:embed list ->
   ?base_style:Style.t ->
   string ->
   rendered_line list
@@ -76,6 +103,7 @@ val draw :
   ?osc8:bool ->
   ?scroll:int ->
   ?selected_link:string ->
+  ?embeds:embed list ->
   string ->
   int
 (** Render Markdown directly onto [Cell_grid.t], interning OSC 8 hyperlinks in

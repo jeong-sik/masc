@@ -4212,6 +4212,7 @@ let test_p0_actions_settings_safety_and_wired_cmds () =
       sha256 = "sha-w3";
       body_markdown = "# Guide\nBody text";
       outgoing_links = [];
+      embeds = [];
       backlinks = [];
       lint_findings = [];
     }
@@ -9534,6 +9535,7 @@ let test_wiki_index_reply_requests_selected_page () =
       sha256 = "sha-w3";
       body_markdown = "# Guide\nBody text";
       outgoing_links = [];
+      embeds = [];
       backlinks = [];
       lint_findings = [];
     }
@@ -13554,6 +13556,7 @@ let test_ux_batch2_modals_settings_overlays () =
       sha256 = "sha256-ko";
       body_markdown = "본문";
       outgoing_links = [];
+      embeds = [];
       backlinks = [];
       lint_findings = [];
     }
@@ -14283,6 +14286,7 @@ let test_ux_batch4_knowledge_runtime_infra () =
       body_markdown = "# Heading\nLine 2\nLine 3";
       backlinks = [];
       outgoing_links = [];
+      embeds = [];
       lint_findings = [];
     }
   in
@@ -24620,6 +24624,7 @@ let test_wiki_body_link_follow_and_back () =
       sha256 = "sha-" ^ slug;
       body_markdown = body;
       outgoing_links;
+      embeds = [];
       backlinks = [];
       lint_findings = [];
     }
@@ -24642,7 +24647,27 @@ let test_wiki_body_link_follow_and_back () =
         link "gone" "page-gone" false "page-gone.md";
       ]
   in
-  let page_b = page "page-b" "Body of page B." [] in
+  (* Page B embeds page A, which the index lists, and a page that is gone. *)
+  let embed slug exists label : Wire_knowledge.wiki_embed =
+    let raw =
+      match label with
+      | Some label -> Printf.sprintf "![[wiki:%s|%s]]" slug label
+      | None -> Printf.sprintf "![[wiki:%s]]" slug
+    in
+    {
+      target = Wire_knowledge.Embed_wiki { slug; exists };
+      label;
+      syntax = Wire_knowledge.Embed_obsidian;
+      raw;
+    }
+  in
+  let page_b =
+    {
+      (page "page-b" "Body of page B. Back to ![[wiki:page-a|the start]], not ![[wiki:page-gone]]." [])
+      with
+      embeds = [ embed "page-a" true (Some "the start"); embed "page-gone" false None ];
+    }
+  in
   let summary (d : Wire_knowledge.wiki_page_detail) :
       Wire_knowledge.wiki_page_summary =
     {
@@ -24757,7 +24782,17 @@ let test_wiki_body_link_follow_and_back () =
   Alcotest.(check bool) "and still zoomed" true (Model.is_zoomed_active m4);
   let m5, _ = step m4 (key Keymap.Input.Escape) in
   Alcotest.(check bool) "with no trail left, Esc unzooms as before" false
-    (Model.is_zoomed_active m5)
+    (Model.is_zoomed_active m5);
+  let m_b, _ = Update_nav.jump_to_knowledge_wiki ~zoomed:true m5 "page-b" in
+  let m6, _ = step m_b (char_key ">") in
+  Alcotest.(check (option string)) "> selects an embed of a listed page as its link"
+    (Some "page-a.md") (link_of m6 "page-b");
+  let m7, _ = step m6 (char_key ">") in
+  Alcotest.(check (option string)) "an embed of a missing page is not selectable"
+    (Some "page-a.md") (link_of m7 "page-b");
+  let m8, _ = step m7 (key Keymap.Input.Enter) in
+  Alcotest.(check (option string)) "Enter opens the embedded page" (Some "page-a")
+    (shown m8)
 
 (* The GET paths a command list sends. Every other command sends no GET. *)
 let rec sent_get_paths (cmd : Cmd.t) =

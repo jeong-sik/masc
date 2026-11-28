@@ -661,7 +661,15 @@ val wiki_page_links : t -> Wire_knowledge.wiki_page_detail -> (string * string) 
 (** Body links the server resolved to an existing page that the loaded index
     lists, as (target as written, page slug). The index lists readable pages
     only, so a page the tab cannot open is left out. The target as written is
-    the hyperlink the Markdown renderer gives the link. *)
+    the hyperlink the Markdown renderer gives the link. A page embed of such a
+    page counts too, as the link {!wiki_markdown_embeds} draws for it. *)
+
+val wiki_markdown_embeds :
+  lang:Say.lang -> t -> Wire_knowledge.wiki_page_detail -> Masc_tui_ui.Markdown.embed list
+(** How the page body shows the embeds the server found. A page embed of a
+    listed page is a link; an image is a retained image when the terminal draws
+    graphics, and its label otherwise; other embeds are muted notes. Embeds the
+    server could not parse are left as written. *)
 
 val selected_wiki_link : slug:string -> t -> string option
 (** The selected body link of wiki page [slug]. *)

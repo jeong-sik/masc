@@ -2124,6 +2124,10 @@ let wiki_index_lists ~slug t =
         idx.pages
   | None -> false
 
+(* A page embed is drawn as a link written the way a body link to that page
+   is, so picking, following and the subtitle treat both alike. *)
+let wiki_embed_uri slug = slug ^ ".md"
+
 let wiki_page_links t (detail : Wire_knowledge.wiki_page_detail) =
   List.filter_map
     (fun (link : Wire_knowledge.wiki_outgoing_link) ->
@@ -2137,6 +2141,86 @@ let wiki_page_links t (detail : Wire_knowledge.wiki_page_detail) =
       | Wire_knowledge.Link_unsupported _ ->
           None)
     detail.outgoing_links
+  @ List.filter_map
+      (fun (embed : Wire_knowledge.wiki_embed) ->
+        match embed.target with
+        | Wire_knowledge.Embed_wiki { slug; exists = true } when wiki_index_lists ~slug t ->
+            Some (wiki_embed_uri slug, slug)
+        | Wire_knowledge.Embed_wiki _
+        | Wire_knowledge.Embed_media _
+        | Wire_knowledge.Embed_artifact _
+        | Wire_knowledge.Embed_invalid
+        | Wire_knowledge.Embed_unsupported ->
+            None)
+      detail.embeds
+
+(* Rows a retained image takes under its label, as in the chat transcript. *)
+let wiki_image_rows = 6
+
+let wiki_markdown_embeds ~lang t (detail : Wire_knowledge.wiki_page_detail) =
+  let say ~ko ~en = Say.resolve lang (Say.make ~ko ~en) in
+  let named ~ko ~en name = Printf.sprintf "%s: %s" (say ~ko ~en) name in
+  let title_of slug =
+    Option.bind (Observed.to_option t.wiki_index) (fun (idx : Wire_knowledge.wiki_index) ->
+        List.find_map
+          (fun (p : Wire_knowledge.wiki_page_summary) ->
+            if String.equal p.slug slug then Some p.title else None)
+          idx.pages)
+  in
+  let graphics =
+    match (Masc_tui_term.Probe.current_observation ()).graphics with
+    | Some Masc_tui_term.Probe.Graphics_supported -> true
+    | Some (Masc_tui_term.Probe.Graphics_refused _) | None -> false
+  in
+  List.filter_map
+    (fun (embed : Wire_knowledge.wiki_embed) ->
+      let shown : Masc_tui_ui.Markdown.embed_shown option =
+        match embed.target with
+        | Wire_knowledge.Embed_wiki { slug; exists = true } when wiki_index_lists ~slug t ->
+            let label =
+              match embed.label with
+              | Some label -> label
+              | None -> Option.value (title_of slug) ~default:slug
+            in
+            Some (Embed_link { label; uri = wiki_embed_uri slug })
+        | Wire_knowledge.Embed_wiki { slug; _ } ->
+            Some
+              (Embed_note
+                 (named ~ko:"없는 쪽" ~en:"Missing page" (Option.value embed.label ~default:slug)))
+        | Wire_knowledge.Embed_artifact { id; exists } ->
+            let name = Option.value embed.label ~default:id in
+            Some
+              (Embed_note
+                 (match exists with
+                 | Some true -> named ~ko:"아티팩트" ~en:"Artifact" name
+                 | Some false -> named ~ko:"없는 아티팩트" ~en:"Missing artifact" name
+                 | None -> named ~ko:"확인하지 못한 아티팩트" ~en:"Unchecked artifact" name))
+        | Wire_knowledge.Embed_media { sha256; exists = Some true } ->
+            Some
+              (Embed_image
+                 {
+                   label =
+                     named ~ko:"그림" ~en:"Image"
+                       (Option.value embed.label ~default:(String.sub sha256 0 (Int.min 12 (String.length sha256))));
+                   path = Wire_attachment.media_path_prefix ^ sha256;
+                   rows = (if graphics then wiki_image_rows else 0);
+                   fallback =
+                     say ~ko:"그림을 불러오는 중이에요."
+                       ~en:"Loading the image.";
+                 })
+        | Wire_knowledge.Embed_media { sha256; exists = Some false } ->
+            Some
+              (Embed_note
+                 (named ~ko:"없는 그림" ~en:"Missing image" (Option.value embed.label ~default:sha256)))
+        | Wire_knowledge.Embed_media { sha256; exists = None } ->
+            Some
+              (Embed_note
+                 (named ~ko:"확인하지 못한 그림" ~en:"Unchecked image"
+                    (Option.value embed.label ~default:sha256)))
+        | Wire_knowledge.Embed_invalid | Wire_knowledge.Embed_unsupported -> None
+      in
+      Option.map (fun shown -> { Masc_tui_ui.Markdown.raw = embed.raw; shown }) shown)
+    detail.embeds
 
 let wiki_reading_for ~slug t =
   match t.wiki_reading with

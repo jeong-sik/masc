@@ -451,20 +451,9 @@ let with_wiki_lock ~tool_name ~start_time ctx f : Tool_result.result =
    is already on disk when the other two are written, so a failure there is
    reported as one: the caller learns that the page changed and which file did
    not follow. *)
-let media_exists_in ~base_path sha256 =
-  let store = Attachment_store.create ~base_path in
-  match Attachment_store.get_meta_by_sha256 store ~sha256 with
-  | Ok (Some _) -> true
-  | Ok None | Error _ ->
-    Option.is_some
-      (Keeper_chat_media_store.file_path_of_token ~base_dir:base_path ~token:sha256)
-
 let media_refs_of_body ~base_path body =
   let media_refs = extract_wiki_media_refs body in
-  let missing_media_refs =
-    List.filter (fun sha256 -> not (media_exists_in ~base_path sha256)) media_refs
-  in
-  media_refs, missing_media_refs
+  media_refs, Workspace_media.known_missing ~base_path media_refs
 
 let write_page ~tool_name ~start_time ctx ~path ~content ~body ~action ~revision ~page
     ~(author : Line.t) ~(note : Line.t) ~written
@@ -979,7 +968,7 @@ let handle_lint ~tool_name ~start_time ctx args : Tool_result.result =
                 | Wiki_graph.Readable _ -> false)
               nodes)
        in
-       let media_exists = media_exists_in ~base_path:ctx.base_path in
+       let media_exists = Workspace_media.exists ~base_path:ctx.base_path in
        let artifact_exists id =
          Published_artifact_store.exists ~base_path:ctx.base_path ~id
          |> Result.map_error Published_artifact_store.error_message

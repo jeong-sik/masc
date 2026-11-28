@@ -905,6 +905,19 @@ let test_exists_and_http_projection () = with_base (fun base_path ->
   check_json "keeper receipt warns on missing_media_refs"
     (`List [ `String missing_token ])
     (json_member "missing_media_refs" pub_data);
+  (* The HTTP route answers from the same lookup as the keeper tool: the live
+     image sits in the attachment store, so only the unknown digest is missing. *)
+  let http_publication =
+    Routes.publish ~config:(Masc.Workspace.default_config base_path) ~actor:"operator"
+      ~body:(Yojson.Safe.to_string (request_json md)) in
+  Alcotest.(check int) "HTTP publish creates the artifact" 201
+    (Httpun.Status.to_code http_publication.Routes.status);
+  check_json "HTTP publish exposes media_refs"
+    (`List (List.map (fun s -> `String s) expected_refs))
+    (json_member "media_refs" http_publication.Routes.json);
+  check_json "HTTP publish warns only on the digest no store holds"
+    (`List [ `String missing_token ])
+    (json_member "missing_media_refs" http_publication.Routes.json);
   let id = pub_data |> json_member "artifact" |> json_member "id" |> json_string in
   Alcotest.(check bool) "exists Ok true for published artifact" true
     (S.exists ~base_path ~id |> store_ok);

@@ -181,12 +181,7 @@ let publish ~config ~actor ~body =
               publication.Published_artifact.content
           in
           let missing_media_refs =
-            List.filter
-              (fun token ->
-                 Option.is_none
-                   (Keeper_chat_media_store.file_path_of_token
-                      ~base_dir:config.base_path ~token))
-              media_refs
+            Workspace_media.known_missing ~base_path:config.base_path media_refs
           in
           Ok (artifact, revision, media_refs, missing_media_refs))
     with

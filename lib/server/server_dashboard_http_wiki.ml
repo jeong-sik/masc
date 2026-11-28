@@ -231,14 +231,6 @@ let graph_of_loaded pages =
   |> Wiki_graph.of_nodes
 ;;
 
-let media_exists_in ~base_path sha256 =
-  let store = Attachment_store.create ~base_path in
-  match Attachment_store.get_meta_by_sha256 store ~sha256 with
-  | Ok (Some _) -> true
-  | Ok None | Error _ ->
-    Option.is_some (Keeper_chat_media_store.file_path_of_token ~base_dir:base_path ~token:sha256)
-;;
-
 let artifact_exists_in ~base_path id =
   Published_artifact_store.exists ~base_path ~id
   |> Result.map_error Published_artifact_store.error_message
@@ -333,7 +325,13 @@ let link_to_json ~graph (link : Wiki_link.link) =
 let embed_to_json ~graph ~media_exists ~artifact_exists (embed : Wiki_link.embed) =
   let target_kind, target_name, exists, extra =
     match embed.target with
-    | Wiki_link.Media_embed sha256 -> "media", sha256, Some (media_exists sha256), []
+    | Wiki_link.Media_embed sha256 ->
+      let exists_opt =
+        match media_exists sha256 with
+        | Ok present -> Some present
+        | Error _ -> None
+      in
+      "media", sha256, exists_opt, []
     | Wiki_link.Wiki_embed slug -> "wiki", slug, Some (Wiki_graph.file_exists graph slug), []
     | Wiki_link.Artifact_embed id ->
       let exists_opt =
@@ -415,7 +413,7 @@ let list_json ?now ?tag ?source ?(sort = Sort_title) ~base_path () =
        let graph = graph_of_loaded pages in
        let findings =
          Wiki_lint.run
-           ~media_exists:(media_exists_in ~base_path)
+           ~media_exists:(Workspace_media.exists ~base_path)
            ~artifact_exists:(artifact_exists_in ~base_path)
            graph
            ~log
@@ -824,7 +822,7 @@ let lint_json ?now ?page ~base_path () =
           let graph = graph_of_loaded pages in
           let all_findings =
             Wiki_lint.run
-              ~media_exists:(media_exists_in ~base_path)
+              ~media_exists:(Workspace_media.exists ~base_path)
               ~artifact_exists:(artifact_exists_in ~base_path)
               graph
               ~log
@@ -908,7 +906,7 @@ let get_page_json ?now ~base_path ~slug () =
                (Printf.sprintf "wiki page %s is unreadable: %s" u.file u.reason)
            | Some (Loaded_readable p) ->
              let graph = graph_of_loaded pages in
-             let media_exists = media_exists_in ~base_path in
+             let media_exists = Workspace_media.exists ~base_path in
              let artifact_exists = artifact_exists_in ~base_path in
              let findings =
                Wiki_lint.run ~media_exists ~artifact_exists graph ~log
@@ -1229,9 +1227,7 @@ let put_page_json ?(now = Time_compat.now ()) ~config ~actor ~slug ~body_str () 
                                     body
                                 in
                                 let missing_media_refs =
-                                  List.filter
-                                    (fun token -> not (media_exists_in ~base_path token))
-                                    media_refs
+                                  Workspace_media.known_missing ~base_path media_refs
                                 in
                                 let media_warning =
                                   match missing_media_refs with
@@ -1362,9 +1358,7 @@ let put_page_json ?(now = Time_compat.now ()) ~config ~actor ~slug ~body_str () 
                                 body
                             in
                             let missing_media_refs =
-                              List.filter
-                                (fun token -> not (media_exists_in ~base_path token))
-                                media_refs
+                              Workspace_media.known_missing ~base_path media_refs
                             in
                             let media_warning =
                               match missing_media_refs with

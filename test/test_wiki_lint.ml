@@ -613,15 +613,15 @@ let test_embed_lint_findings_and_report_fields () =
   let graph = G.of_nodes nodes in
   let findings =
     Lint.run
-      ~media_exists:(String.equal live_sha)
+      ~media_exists:(fun sha256 -> Ok (String.equal live_sha sha256))
       ~artifact_exists:(fun id -> Ok (String.equal live_art id))
       graph
       ~log:no_log
   in
-  (* Store read error for artifact_exists must not be misreported as broken_artifact_embed. *)
+  (* A store read error must not be misreported as a broken embed. *)
   let findings_on_store_err =
     Lint.run
-      ~media_exists:(String.equal live_sha)
+      ~media_exists:(fun _ -> Error "attachment metadata unreadable")
       ~artifact_exists:(fun _ -> Error "disk read failed")
       graph
       ~log:no_log
@@ -629,6 +629,10 @@ let test_embed_lint_findings_and_report_fields () =
   check bool "artifact store read error does not emit broken_artifact_embed" false
     (List.exists
        (function Lint.Broken_artifact_embed _ -> true | _ -> false)
+       findings_on_store_err);
+  check bool "media store read error does not emit broken_media_embed" false
+    (List.exists
+       (function Lint.Broken_media_embed _ -> true | _ -> false)
        findings_on_store_err);
   check (list string) "embed findings"
     [ Printf.sprintf "broken_media_embed alpha:2 /api/v1/media/%s" dead_sha

@@ -212,9 +212,10 @@ let embed_findings ~media_exists ~artifact_exists graph page =
          (match media_exists with
           | None -> None
           | Some check ->
-            if check sha256
-            then None
-            else Some (Broken_media_embed { page; line = embed.line; target = embed.raw }))
+            (match check sha256 with
+             | Ok true | Error _ -> None
+             | Ok false ->
+               Some (Broken_media_embed { page; line = embed.line; target = embed.raw })))
        | Wiki_link.Artifact_embed id ->
          (match artifact_exists with
           | None -> None

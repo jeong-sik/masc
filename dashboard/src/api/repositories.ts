@@ -1,6 +1,6 @@
 import { del, get, post, type GetOptions } from './core'
 
-export type RepoStatus = 'active' | 'paused' | 'error' | 'unknown'
+export type RepoStatus = 'active' | 'paused' | 'cloning' | 'error' | 'unknown'
 
 export type RepositoryAdvanceOutcome =
   | { state: 'advanced'; behind: number }
@@ -93,7 +93,7 @@ export function normalizeRepoStatus(raw: string | undefined): RepoStatus {
   switch (raw?.toLowerCase()) {
     case 'active': return 'active'
     case 'paused': return 'paused'
-    case 'cloning': return 'active' // intermediate state, treated as active
+    case 'cloning': return 'cloning'
     case 'error': return 'error'
     default: return 'unknown'
   }

@@ -9,8 +9,8 @@ describe("normalizeRepoStatus", () => {
   it("maps paused", () => {
     expect(normalizeRepoStatus("paused")).toBe("paused")
   })
-  it("maps cloning to active", () => {
-    expect(normalizeRepoStatus("cloning")).toBe("active")
+  it("keeps cloning as its own status", () => {
+    expect(normalizeRepoStatus("cloning")).toBe("cloning")
   })
   it("maps error", () => {
     expect(normalizeRepoStatus("error")).toBe("error")

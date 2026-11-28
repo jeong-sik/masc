@@ -15,7 +15,7 @@ import {
 import { createAsyncResource } from '../lib/async-state'
 import { LoadingState, ErrorState } from './common/feedback-state'
 import { showToast } from './common/toast'
-import { Plus, GitBranch, AlertCircle, PauseCircle, CheckCircle2, HelpCircle, Search } from 'lucide-preact'
+import { Plus, GitBranch, AlertCircle, PauseCircle, CheckCircle2, HelpCircle, RefreshCw, Search } from 'lucide-preact'
 
 export type { Repository, RepoStatus } from '../api/repositories'
 export {
@@ -127,6 +127,8 @@ function StatusIcon({ status }: { status: RepoStatus }) {
       return html`<${CheckCircle2} size=${14} class="text-[var(--color-status-ok)]" aria-hidden="true" />`
     case 'paused':
       return html`<${PauseCircle} size=${14} class="text-[var(--color-status-warn)]" aria-hidden="true" />`
+    case 'cloning':
+      return html`<${RefreshCw} size=${14} class="text-[var(--color-status-warn)]" aria-hidden="true" />`
     case 'error':
       return html`<${AlertCircle} size=${14} class="text-[var(--color-status-err)]" aria-hidden="true" />`
     case 'unknown':
@@ -142,6 +144,8 @@ function StatusLabel({ status }: { status: RepoStatus }) {
       return html`<span class="text-xs font-bold text-[var(--color-status-ok)]">활성</span>`
     case 'paused':
       return html`<span class="text-xs font-bold text-[var(--color-status-warn)]">일시정지</span>`
+    case 'cloning':
+      return html`<span class="text-xs font-bold text-[var(--color-status-warn)]">가져오는 중</span>`
     case 'error':
       return html`<span class="text-xs font-bold text-[var(--color-status-err)]">오류</span>`
     case 'unknown':

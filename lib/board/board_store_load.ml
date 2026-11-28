@@ -210,9 +210,10 @@ let unknown_posts_write ~path =
    with counts re-derived as at startup, and publish it as the new observation.
 
    Persistence is taken only for a read. A store with nothing due, an unknown
-   earlier write and a pending deletion are answered from the store's fields:
-   every Board operation asks, and one that only reads must not queue behind
-   a write's file I/O to be told what a field already says. *)
+   earlier write and a pending deletion are answered without it: every Board
+   operation asks, and one that only reads must not queue behind a write's
+   file I/O to be told what a field already says. A refused source asks one
+   more thing, also without a lock: whether its file has changed (#55465). *)
 let reobserve_posts store =
   match store.posts_source with
   | Posts_unobserved | Posts_readable _ -> Ok ()
@@ -253,8 +254,8 @@ let reobserve_posts store =
 (* #55449: the other four sources refuse on a stale observation as posts did
    and were read again only at startup. On 2026-11-24 every comment write was
    refused for 123 minutes, until the restart. Each is read again by the
-   function that loads it at startup, and only for a refusal one more read
-   can end. *)
+   function that loads it at startup, and only when it is due: for a refusal
+   one more read can end, or once its file has changed (#55465). *)
 let reloaded result =
   result
   |> Result.map (fun (_ : int) -> ())

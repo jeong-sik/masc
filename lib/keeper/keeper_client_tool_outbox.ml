@@ -243,14 +243,6 @@ let host_result_text_bytes ~content = function
          | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _ | ToolReference _ | ToolResult _
          | Image _ | Document _ | Audio _ -> sum) 0 blocks)
 
-(* The marker of a receipt's text body carries the preview a demoted result's
-   does: the receipt is a result of an ended vendor turn. The store's own
-   preview of up to 4 KiB made the marker no shorter than a body under about
-   that size, so those bodies stayed whole above the floor (#55296). *)
-let host_text_marker reference text =
-  host_marker
-    (Tool_output.with_preview reference (Keeper_model_input_demotion.result_marker_preview text))
-
 (* Whether [text] goes as its marker: the marker's serialized length against the
    body's raw length, with the marker planned without hashing. JSON escaping only
    lengthens the body, so a replaced body never made the receipt longer. A body
@@ -258,9 +250,9 @@ let host_text_marker reference text =
    escaping is not counted; before escaping it is no longer than one marker. *)
 let host_marker_is_shorter text =
   match Tool_output.make_artifact_ref ~sha256:planned_sha256 ~bytes:(String.length text)
-          ~preview:"" ~mime:host_text_mime with
+          ~preview:(Tool_blob_store.make_preview text) ~mime:host_text_mime with
   | Ok planned ->
-    Ok (String.length (Yojson.Safe.to_string (`String (host_text_marker planned text)))
+    Ok (String.length (Yojson.Safe.to_string (`String (host_marker planned)))
         < String.length text)
   | Error error -> Error (Tool_output.make_error_to_string error)
 
@@ -281,7 +273,7 @@ let host_text_body store ~stored text =
       if not shorter then Ok text
       else
         let* reference = host_put store ~bytes:text ~mime:host_text_mime in
-        let marker = host_text_marker reference text in
+        let marker = host_marker reference in
         stored := (text, marker) :: !stored;
         Ok marker
 

@@ -498,13 +498,17 @@ let result_marker_preview bytes =
 ;;
 
 (* Call arguments keep the blob store's preview, as they have since #54361.
-   With it an argument is replaced only when it is larger than about 4 KiB,
-   and a request holds few [_blob] inputs. A short preview replaces arguments
-   from a few hundred bytes. While requests held 19 to 108 [_blob] inputs
-   each (2026-11-17..21), models sent the reference as the input of new
-   calls, 32 to about 1,400 refused calls a day; with under one per request
-   there have been none (#55372, which decides whether arguments are
-   replaced at all). *)
+   [plan] replaces the bound arguments of a message together, when the
+   message is shorter with the references than without. A message of one
+   call therefore keeps an argument the preview holds whole; a message of
+   several calls replaces a small argument beside a large one. A short
+   preview makes the references win for arguments of a few hundred bytes, so
+   a request holds many more [_blob] inputs. While requests held 19 to 108
+   of them each (2026-11-17..21), models sent the reference as the input of
+   a new call 32 to 1,433 times a day; at 0.6 and 0.9 per request it was 9
+   and 13 calls a day (2026-11-23, 24), and at 0.1 to 0.2 none
+   (2026-11-25..27). #55372 decides whether arguments are replaced at
+   all. *)
 let demoted_preview kind bytes =
   match kind with
   | Result_body | Result_text_block _ -> result_marker_preview bytes

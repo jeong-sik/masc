@@ -118,12 +118,10 @@ val preview_fallback_closed_tool_bodies :
 
 val result_marker_preview : string -> string
 (** The preview a result's marker carries: the body's sanitized first 200
-    bytes. {!plan} measures a result's marker with it, {!materialize} writes
-    it, and a retained official-client receipt, which is a result of an ended
-    vendor turn, uses it for the same rule
-    ([Keeper_client_tool_outbox.host_response]). A marker carrying the blob
-    store's preview of up to 4 KiB is no smaller than a result under that
-    bound, so such a result never left the request (#55296). *)
+    bytes. {!plan} measures a result's marker with it and {!materialize}
+    writes it. A marker carrying the blob store's preview of up to 4 KiB is
+    no smaller than a result under that bound, so such a result never left
+    the request (#55296). *)
 
 type plan_result =
   { messages : Agent_core.Types.message list
@@ -191,8 +189,11 @@ val plan
       [%S] before any JSON encoder escapes it again; a fixed floor cannot
       stand in for either. [min_result_bytes] is a floor on what the caller
       wants to trade for a marker, checked in addition to these rules. An
-      argument's reference keeps the blob store's preview of up to 4 KiB, so
-      this rule keeps an argument under about that size as it is.
+      argument's reference keeps the blob store's preview of up to 4 KiB, and
+      the bound arguments of one message are replaced together or not at
+      all: a message of one call keeps an argument that preview holds whole,
+      and a message of several calls replaces a small argument beside a
+      large one.
 
     [measure_message_bytes] must be the encoder the window will use. The bound
     is obtained by measuring a real placeholder message through it rather than

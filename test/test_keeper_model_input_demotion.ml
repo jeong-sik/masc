@@ -930,6 +930,10 @@ let completed_arguments_restore_through_reader () =
           pages page.next_offset chunks (count + 1)) in
     let bytes, count = pages 0 [] 0 in
     Alcotest.(check bool) "large argument uses actual reader paging" true (count > 1);
+    (* A result's marker previews 200 bytes; an argument's recorded reference
+       keeps the store's own preview. *)
+    Alcotest.(check string) "the recorded reference carries the store's preview"
+      (Tool_blob_store.make_preview bytes) reference.preview;
     Yojson.Safe.from_string bytes in
   let restored = List.map read (argument_inputs outcome.messages) in
   Alcotest.(check bool) "each repeated ID restores its exact argument JSON" true (restored = inputs);

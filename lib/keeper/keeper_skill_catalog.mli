@@ -8,9 +8,7 @@ type surface =
   | Instruction
 
 type provenance = private
-  { identity : Skill_catalog_snapshot.identity
-  ; source : Skill_source_config.source
-  ; source_root : string option
+  { source_root : string option
   ; resource_read_max_bytes : Skill_source_config.resource_read_max_bytes option
   ; directory : string
   }

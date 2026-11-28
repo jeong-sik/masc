@@ -2,9 +2,7 @@ type surface =
   | Instruction
 
 type provenance =
-  { identity : Skill_catalog_snapshot.identity
-  ; source : Skill_source_config.source
-  ; source_root : string option
+  { source_root : string option
   ; resource_read_max_bytes : Skill_source_config.resource_read_max_bytes option
   ; directory : string
   }
@@ -143,9 +141,7 @@ let provenance_of_entry snapshot (entry : Skill_catalog_snapshot.entry) =
          | Source_unresolved _ ->
            None
        in
-       { identity = entry.identity
-       ; source = scan.Skill_catalog_snapshot.source.source
-       ; source_root
+       { source_root
        ; resource_read_max_bytes
        ; directory = entry.directory
        })

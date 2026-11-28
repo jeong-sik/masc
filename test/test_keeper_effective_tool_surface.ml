@@ -372,7 +372,7 @@ let test_projection_names_equal_turn_surface_authority () =
 
 (* Verify that the surface's JSON serialization writes the expected origin kind
    for every projected tool. *)
-let test_the_tui_reads_the_origin_of_every_tool_this_surface_writes () =
+let test_every_tool_row_writes_its_origin_kind () =
   ignore (Masc_test_deps.init_unified_tool_registry ());
   let surface =
     match
@@ -1112,8 +1112,8 @@ let () =
             test_skill_name_selection_is_structured_and_filters_task
         ; test_case "unprojectable Task Skill is a typed row" `Quick
             test_unprojectable_task_skill_is_a_typed_row
-        ; test_case "the TUI reads the origin of every tool this surface writes" `Quick
-            test_the_tui_reads_the_origin_of_every_tool_this_surface_writes
+        ; test_case "every tool row writes its origin kind" `Quick
+            test_every_tool_row_writes_its_origin_kind
         ; test_case "instruction skill does not require Read" `Quick
             test_instruction_skill_without_read_is_admitted
         ; test_case "left out skills reach the surface" `Quick

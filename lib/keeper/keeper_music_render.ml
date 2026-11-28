@@ -215,7 +215,8 @@ let within_store_limits sized =
     Error
       (Too_large
          (Printf.sprintf
-            "the %s file is %d bytes and one attachment holds at most %d; nothing              was stored. Shorten the score or leave %s out"
+            "the %s file is %d bytes and one attachment holds at most %d; nothing \
+             was stored. Shorten the score or leave %s out"
             (output_name output) bytes one_max (output_name output)))
   | None ->
     let total = List.fold_left (fun sum (_, bytes) -> sum + bytes) 0 sized in
@@ -223,7 +224,8 @@ let within_store_limits sized =
       Error
         (Too_large
            (Printf.sprintf
-              "the files total %d bytes and a Keeper's ephemeral attachments hold at                most %d; nothing was stored. Ask for fewer outputs or shorten the score"
+              "the files total %d bytes and a Keeper's ephemeral attachments hold at \
+               most %d; nothing was stored. Ask for fewer outputs or shorten the score"
               total total_max))
     else Ok ()
 

@@ -8,8 +8,7 @@ let sub_board_to_yojson = Board_sub_board_json.sub_board_to_yojson
 let parse_sub_board_members = Board_sub_board_json.parse_sub_board_members
 let sub_board_of_yojson = Board_sub_board_json.sub_board_of_yojson
 
-let reload_sub_boards store =
-  with_persist_lock store (fun () ->
+let reload_sub_boards_under_persistence store =
     let* () = require_model_reload_allowed store ~path:(Board_paths.sub_boards_path store) in
     let outcome = Board_sub_boards_source.read store in
     let outcome = try
@@ -30,7 +29,10 @@ let reload_sub_boards store =
       Board_sub_boards_source.fail_read store outcome exception_ (Printexc.get_raw_backtrace ()) in
     match Board_sub_boards_source.finish_read outcome with
     | Ok count -> Ok count
-    | Error error -> Error (Board_paths.sub_boards_path store, Failure (show_board_error error)))
+    | Error error -> Error (Board_paths.sub_boards_path store, Failure (show_board_error error))
+
+let reload_sub_boards store =
+  with_persist_lock store (fun () -> reload_sub_boards_under_persistence store)
 
 let changed_sub_boards_jsonl_unlocked store (updated : sub_board) =
   let buf = Buffer.create 1024 in

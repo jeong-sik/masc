@@ -11,6 +11,9 @@ open Board_types
 val sub_board_to_yojson : sub_board -> Yojson.Safe.t
 val sub_board_of_yojson : Yojson.Safe.t -> sub_board option
 
+val reload_sub_boards_under_persistence : store -> (int, string * exn) result
+(** {!reload_sub_boards} for a caller that holds persistence. *)
+
 val reload_sub_boards : store -> (int, string * exn) result
 (** Explicit source load/reload. Replace both indexes on complete reads;
     partial rows grant no query or mutation authority. Unknown writes and

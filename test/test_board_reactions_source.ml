@@ -92,6 +92,111 @@ let test_stale_toggle_preserves_accepted_reaction base_path =
     Alcotest.(check bool) "accepted reactor remains selected" true summary.reacted
   | _ -> Alcotest.fail "a stale toggle lost or replayed a reaction"
 
+let emoji_counts store parent user =
+  summaries store parent user
+  |> List.map (fun (summary : Board.reaction_summary) -> summary.emoji, summary.count)
+  |> List.sort (fun (left, _) (right, _) -> String.compare left right)
+
+(* #55449: the refusal above lasted until a restart, for reads as well.
+   [Board.reobserve] reads the table again only for a refusal one more read
+   can end. *)
+let test_stale_toggle_is_reobserved base_path =
+  let stale = fresh_store base_path in
+  let parent = post stale "a stale reaction source is read again before the next operation" in
+  ignore (require (toggle stale parent "first-reactor" "👍"));
+  let other = fresh_store base_path in
+  ignore (require (toggle other parent "foreign-reactor" "🔥"));
+  require_io_error (toggle stale parent "stale-reactor" "👍");
+  require_io_error (Board.list_reactions stale ~target_type:Board.Reaction_post
+    ~target_id:(Board.Post_id.to_string parent.id) ());
+  (match Board.reobserve stale with
+   | [] -> ()
+   | (_, error) :: _ -> Alcotest.fail (Board.show_board_error error));
+  Alcotest.(check (list (pair string int))) "the fresh read installs both writers' reactions"
+    ["👍", 1; "🔥", 1] (emoji_counts stale parent "stale-reactor");
+  ignore (require (toggle stale parent "stale-reactor" "👍"));
+  let restarted = fresh_store base_path in
+  Alcotest.(check (list (pair string int))) "a fresh load holds every writer's reaction once"
+    ["👍", 2; "🔥", 1] (emoji_counts restarted parent "stale-reactor")
+
+(* The Board operations reach [Board.reobserve] at entry: after the refusal a
+   read and a write through Dispatch both answer without a restart. *)
+let test_dispatch_entries_reobserve base_path =
+  let store = fresh_store base_path in
+  let parent = post store "Dispatch reads a stale reaction source again at entry" in
+  let target_id = Board.Post_id.to_string parent.id in
+  let reader = Masc_board_handlers.Board_access.Operator in
+  ignore (require (toggle store parent "first-reactor" "👍"));
+  let another_writer_toggles user =
+    let other = Board.create_store ~base_path () in
+    require (Board.initialize_store other);
+    ignore (require (toggle other parent user "🔥")) in
+  another_writer_toggles "foreign-one";
+  require_io_error (toggle store parent "stale-reactor" "👍");
+  Alcotest.(check int) "a read through Dispatch answers with both emoji" 2
+    (List.length (require (Board_dispatch.list_reactions ~reader
+       ~target_type:Board.Reaction_post ~target_id ())));
+  another_writer_toggles "foreign-two";
+  require_io_error (toggle store parent "stale-reactor" "👍");
+  ignore (require (Board_dispatch.toggle_reaction ~reader ~target_type:Board.Reaction_post
+    ~target_id ~user_id:"stale-reactor" ~emoji:"👍"));
+  let restarted = fresh_store base_path in
+  Alcotest.(check (list (pair string int))) "a fresh load holds every writer's reaction once"
+    ["👍", 2; "🔥", 2] (emoji_counts restarted parent "stale-reactor")
+
+(* Every Dispatch operation takes the store through [Board_dispatch.backend].
+   The first call after the refusal is the check a comment vote and a comment
+   reaction make before their handler runs: it took the store without reading
+   again while operations were listed one by one, so those two tools stayed
+   refused whatever they retried. The comment read the Keeper's world
+   observation makes then answers with both writers' comments. *)
+let test_dispatch_comment_read_reobserves base_path =
+  let store = fresh_store base_path in
+  let parent = post store "Dispatch reads a stale comments source again" in
+  let post_id = Board.Post_id.to_string parent.id in
+  let comment store content =
+    Board.add_comment ~reader:Masc_board_handlers.Board_access.Operator store
+      ~lookup:Recipient_lookup.none_declared ~post_id ~author:"comment-writer"
+      ~content ~ttl_hours:0 () in
+  let own : Board.comment = require (comment store "this store's comment") in
+  let other = Board.create_store ~base_path () in
+  require (Board.initialize_store other);
+  ignore (require (comment other "another writer's comment"));
+  require_io_error (comment store "refused against the stale cursor");
+  (match Board_dispatch.require_readable_target
+           ~reader:Masc_board_handlers.Board_access.Operator
+           ~target_type:Board.Reaction_comment
+           ~target_id:(Board.Comment_id.to_string own.id) with
+   | Ok _ -> ()
+   | Error error -> Alcotest.fail (Board.show_board_error error));
+  match Board_dispatch.read_comments_unchecked ~post_id with
+  | Ok comments ->
+    Alcotest.(check int) "the read answers with both writers' comments" 2 (List.length comments)
+  | Error error -> Alcotest.fail (Board.show_board_read_error error)
+
+(* A read again that met the other writer's lock leaves that cause in place of
+   the stale one, and the table is still read again. One process cannot
+   contend with its own lock, so the test writes the state that read leaves. *)
+let test_contended_read_is_tried_again base_path =
+  let stale = fresh_store base_path in
+  let parent = post stale "a reaction source whose read again met a lock" in
+  ignore (require (toggle stale parent "first-reactor" "👍"));
+  let other = fresh_store base_path in
+  ignore (require (toggle other parent "foreign-reactor" "🔥"));
+  require_io_error (toggle stale parent "stale-reactor" "👍");
+  (match stale.Board.reactions_source with
+   | Board.Reactions_refused refused ->
+     stale.Board.reactions_source <- Board.Reactions_refused { refused with
+       reaction_failure = Board.Reactions_transaction_failed
+           (Fs_compat.Stable_lock_contended { lock_path = "reactions.lock" }) }
+   | Board.Reactions_unobserved | Board.Reactions_readable _ | Board.Reactions_publishing _
+   | Board.Reactions_unsettled _ ->
+     Alcotest.fail "the stale toggle did not refuse the reaction source");
+  (match Board.reobserve stale with
+   | [] -> ()
+   | (_, error) :: _ -> Alcotest.fail (Board.show_board_error error));
+  ignore (require (toggle stale parent "stale-reactor" "👍"))
+
 let test_stale_flush_preserves_accepted_reaction base_path =
   let stale = fresh_store base_path in
   let parent = post stale "a stale ordinary flush cannot compact away another reaction" in
@@ -307,6 +412,14 @@ let () =
     ["actual writers and fresh loads",
       [Alcotest.test_case "stale toggle retains another writer's reaction" `Quick
          (with_fixture test_stale_toggle_preserves_accepted_reaction);
+       Alcotest.test_case "stale toggle is read again once" `Quick
+         (with_fixture test_stale_toggle_is_reobserved);
+       Alcotest.test_case "Dispatch reads and writes read a stale source again" `Quick
+         (with_fixture test_dispatch_entries_reobserve);
+       Alcotest.test_case "Dispatch comment read reads a stale source again" `Quick
+         (with_fixture test_dispatch_comment_read_reobserves);
+       Alcotest.test_case "a read that met a lock is tried again" `Quick
+         (with_fixture test_contended_read_is_tried_again);
        Alcotest.test_case "stale compaction retains another writer's reaction" `Quick
          (with_fixture test_stale_flush_preserves_accepted_reaction);
        Alcotest.test_case "valid orphan survives compaction and restart" `Quick

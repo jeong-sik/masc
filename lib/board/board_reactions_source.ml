@@ -193,6 +193,18 @@ let rec contradicts_observation = function
   | Transaction_settlement_failed { primary = Transaction_succeeded _; _ }
   | Transaction_append_failed _ -> false
 
+(* #55449: a refusal that one more read of the same file can end is read
+   again before the next operation, as the posts source is (task-4036). A
+   refusal for any other reason is not: the file would refuse again. *)
+let stale_observation = function
+  | Reactions_transaction_failed error -> Board_posts_source.fresh_read_can_clear error
+  | Reactions_not_observed | Reactions_rows_rejected _ | Reactions_missing | Reactions_binding_mismatch
+  | Reactions_publication_pending | Reactions_workspace_refused _ | Reactions_raised _ -> false
+
+let reobservation_due store = match store.reactions_source with
+  | Reactions_refused { reaction_failure; _ } -> stale_observation reaction_failure
+  | Reactions_unobserved | Reactions_readable _ | Reactions_publishing _ | Reactions_unsettled _ -> false
+
 let not_written failure diagnostics = Not_written { failure; diagnostics }
 
 type file_result = (Fs_compat.Private_jsonl_cursor.t, Fs_compat.private_jsonl_transaction_error) result

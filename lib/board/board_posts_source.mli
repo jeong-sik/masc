@@ -42,21 +42,24 @@ val require_readable : store -> (unit, board_error) result
     source reads and writes. A fresh store loads the actual source instead. *)
 type reobservation =
   | Reobservation_not_due
-      (** Readable, never observed, or refused for a reason a fresh read of
-          the same file cannot change. No IO was performed. *)
+      (** Readable, never observed, or refused for a cause
+          {!fresh_read_can_clear} does not accept. No IO was performed. *)
   | Reobserved of posts_source_read
-      (** The store was refused because the file moved away from its stale
-          observation. The caller installs the read into the model and
-          {!publish_read}s it. *)
+      (** The store was refused for a cause {!fresh_read_can_clear} accepts.
+          The caller installs the read into the model and {!publish_read}s
+          it. *)
   | Unsettled_write_pending
       (** An earlier write's outcome is unknown. No IO is performed: a read
           cannot prove a durability-unknown publication durable, so only a
           fresh store (server restart) settles it. *)
 
 val reobserve : store -> reobservation
-(** Caller holds persistence. Re-reads the posts file only when a refusal
-    proves the store's observation stale, so a write refused because another
-    writer appended does not refuse every later write. *)
+(** Caller holds persistence. Re-reads the posts file only when the store is
+    refused for a cause {!fresh_read_can_clear} accepts, so a write refused
+    because another writer appended does not refuse every later write. *)
+
+val reobservation_due : store -> bool
+(** Pure. Whether {!reobserve} would read the file. *)
 
 val failure_to_board_error : posts_source_failure -> board_error
 val finish_write : posts_write_outcome -> (unit, board_error) result
@@ -78,6 +81,15 @@ val reserved_transaction :
   Fs_compat.private_jsonl_transaction_error ->
   (exn * Printexc.raw_backtrace) option
 val definitely_not_written : Fs_compat.private_jsonl_transaction_error -> bool
+
+val fresh_read_can_clear : Fs_compat.private_jsonl_transaction_error -> bool
+(** Whether a refusal with this cause is read again before the next
+    operation: a cursor or content mismatch, a path that changed during the
+    operation, or a contended lock. A torn tail, a second hard link, a file
+    that is not regular and a failed operation are not: a refusal for one
+    lasts until a restart, also after the file was repaired or the failure
+    passed (#55465). Every Board source asks this before it reads
+    again (#55449). *)
 val propagate_reserved : exn -> Printexc.raw_backtrace -> unit
 val defer_reserved :
   result:(unit, board_error) result -> exn -> Printexc.raw_backtrace -> unit

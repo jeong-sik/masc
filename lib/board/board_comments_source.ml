@@ -530,6 +530,20 @@ let rec contradicts_observation = function
   | Transaction_settlement_failed { primary = Transaction_succeeded _; _ }
   | Transaction_append_failed _ -> false
 
+(* #55449: a refusal that one more read of the same file can end is read
+   again before the next operation, as the posts source is (task-4036). A
+   refusal for any other reason is not: the file would refuse again. *)
+let stale_observation = function
+  | Comments_transaction_failed error -> Board_posts_source.fresh_read_can_clear error
+  | Comments_not_observed | Comments_rows_rejected _ | Comments_missing
+  | Comments_source_binding_mismatch | Comments_snapshot_stale | Comments_publication_pending
+  | Comments_reload_required | Comments_workspace_refused _ | Comments_raised _ -> false
+
+let reobservation_due store = match store.comments_source with
+  | Comments_refused { failure; _ } -> stale_observation failure
+  | Comments_unobserved | Comments_readable _ | Comments_publishing _ | Comments_recovered _
+  | Comments_unsettled _ -> false
+
 let observe_guard_refusal store observation failure =
   match store.comments_source with
   | Comments_readable current when current.observation == observation

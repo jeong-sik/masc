@@ -1242,6 +1242,78 @@ let test_dispatch_vote_reaction_thread_reobserve base_path _workspace =
         (current store first).thread_id;
       ignore (require_post (create store "a post after every entry point recovered")))
 
+(* #55449: posts ask the predicate every source asks, so a read again that met
+   another writer's lock is tried again. One process cannot contend with its
+   own lock; the test writes the state that read leaves.
+
+   A deletion that is pending forbids replacing the model. That is answered
+   from the store's fields, without persistence, and asked again once
+   persistence is held, so a deletion that began while the call waited is
+   seen before the file is read. *)
+let test_contended_posts_read_waits_for_no_deletion base_path _workspace =
+  present_empty_posts base_path;
+  let store = make_store base_path in
+  load_posts store 0;
+  load_comments store 0;
+  ignore (require_post (create store "first from this store"));
+  let other = reloaded base_path 1 in
+  let external_ = require_post (create other "appended by another writer") in
+  require_pre_effect (create store "refused against the stale cursor");
+  (match store.Board.posts_source with
+   | Board.Posts_refused refused ->
+     store.Board.posts_source <- Board.Posts_refused { refused with
+       failure = Board.Posts_transaction_failed
+           (Fs_compat.Stable_lock_contended { lock_path = "posts.lock" }) }
+   | Board.Posts_unobserved | Board.Posts_readable _ | Board.Posts_unsettled _ ->
+     Alcotest.fail "the stale write did not refuse the posts source");
+  let refused = store.Board.posts_source in
+  let settled = store.Board.deletion_state in
+  let pending =
+    Board.Deletion_refused
+      { last_observed = None; failure = Board.Deletion_marker_missing; diagnostics = [] }
+  in
+  let require_reported name = function
+    | [ Paths.Posts, Board.Io_error _ ] -> ()
+    | [] -> Alcotest.fail name
+    | (_, error) :: _ -> Alcotest.fail (Board.show_board_error error)
+  in
+  (* Pending before the call: answered while this fiber holds persistence. *)
+  store.Board.deletion_state <- pending;
+  let answered_while_held, reported =
+    Eio.Switch.run (fun sw ->
+      let reported, resolve = Eio.Promise.create () in
+      let answered =
+        Board.with_persist_lock store (fun () ->
+          Eio.Fiber.fork ~sw (fun () -> Eio.Promise.resolve resolve (Board.reobserve store));
+          Eio.Promise.is_resolved reported)
+      in
+      answered, Eio.Promise.await reported)
+  in
+  Alcotest.(check bool) "a pending deletion is answered without persistence" true
+    answered_while_held;
+  require_reported "a due source behind a pending deletion was not reported" reported;
+  (* Pending only once the call waits for persistence: seen under it. *)
+  store.Board.deletion_state <- settled;
+  let after_waiting =
+    Eio.Switch.run (fun sw ->
+      let reported, resolve = Eio.Promise.create () in
+      Board.with_persist_lock store (fun () ->
+        Eio.Fiber.fork ~sw (fun () -> Eio.Promise.resolve resolve (Board.reobserve store));
+        store.Board.deletion_state <- pending);
+      Eio.Promise.await reported)
+  in
+  require_reported "the read replaced the model while a deletion was pending" after_waiting;
+  Alcotest.(check bool) "neither call read the posts again" true
+    (store.Board.posts_source == refused);
+  (* Nothing in the way: the contended refusal is read again. *)
+  store.Board.deletion_state <- settled;
+  (match Board.reobserve store with
+   | [] -> ()
+   | (_, error) :: _ -> Alcotest.fail (Board.show_board_error error));
+  Alcotest.(check string) "the read adopts the other writer's row"
+    external_.body (current store external_).body;
+  ignore (require_post (create store "accepted after the contended read was tried again"))
+
 (* An unknown earlier write is not read clear: reobservation performs no read,
    keeps the evidence and names the cause and the needed restart. *)
 let test_unsettled_reobservation_names_restart base_path _workspace =
@@ -1265,6 +1337,25 @@ let test_unsettled_reobservation_names_restart base_path _workspace =
      Alcotest.(check bool) "the refusal names the needed restart" true
        (mentions "Restart the server")
    | Error error -> Alcotest.fail (Board.show_board_error error));
+  (* #55449: the read every Board operation starts from reports it too, from
+     the store's fields: an operation that only reads does not queue behind a
+     write's file I/O to be told. The report is asked here while this fiber
+     holds persistence, and it has answered before persistence is released. *)
+  let answered_while_held, reported =
+    Eio.Switch.run (fun sw ->
+      let reported, resolve = Eio.Promise.create () in
+      let answered =
+        Board.with_persist_lock store (fun () ->
+          Eio.Fiber.fork ~sw (fun () -> Eio.Promise.resolve resolve (Board.reobserve store));
+          Eio.Promise.is_resolved reported)
+      in
+      answered, Eio.Promise.await reported)
+  in
+  Alcotest.(check bool) "the report does not wait for persistence" true answered_while_held;
+  (match reported with
+   | [ Paths.Posts, Board.Io_error _ ] -> ()
+   | [] -> Alcotest.fail "the needed restart is no longer reported at each operation"
+   | (_, error) :: _ -> Alcotest.fail (Board.show_board_error error));
   Alcotest.(check bool) "unsettled evidence is retained unchanged" true
     (store.Board.posts_source == retained);
   require_pre_effect (create store "still refused while unsettled")
@@ -1321,7 +1412,9 @@ let () =
         ; case "Dispatch votes, reactions and thread links reobserve"
             test_dispatch_vote_reaction_thread_reobserve
         ; case "unsettled reobservation names the restart"
-            test_unsettled_reobservation_names_restart ]
+            test_unsettled_reobservation_names_restart
+        ; case "a contended posts read is tried again once no deletion is pending"
+            test_contended_posts_read_waits_for_no_deletion ]
     ; "unknown writes",
         [ case "reserved unknown keeps the persistence mutex usable"
             test_unknown_reserved_keeps_mutex_usable

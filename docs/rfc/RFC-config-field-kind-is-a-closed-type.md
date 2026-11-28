@@ -10,7 +10,7 @@ related: []
 
 # RFC config-field-kind-is-a-closed-type: 설정 필드의 종류를 닫힌 타입 하나로 정하고 여러 줄 글을 그 종류로 둔다
 
-- 상태: **초안.** 운영자가 「C 는 RFC부터」를 골랐다(2026-11-28). 이 RFC 가 승인되기 전에는 구현하지 않는다.
+- 상태: **초안.** 운영자가 「C 는 RFC부터」를 골랐다(2026-11-28). §6 의 두 선택은 운영자가 추천안으로 정했다(2026-11-28, 「휴리스틱 워크어라운드가 아니고 괴랄한 제약이 아니면 된다」). 이 RFC 가 승인되기 전에는 구현하지 않는다.
 - 계기: 운영자가 「Keeper Prompt 편집이 불편하다」고 했다. 대시보드와 TUI 의 Keeper 설정 화면에서 `keeper.instructions` 를 한 줄 입력으로 고친다.
 - 코드 좌표는 `origin/main` `99eea6d98bdc9` 에서 읽었다.
 
@@ -35,12 +35,13 @@ related: []
 |---|---|---|
 | `lib/server/server_dashboard_http_candle_config.ml:1607`·`:1630`·`:1655` | `runtime.default` 같은 라우팅 필드 | 문자 그대로 `"string"` |
 | 같은 파일 `:1725`→`:1754` | 환경 변수 registry 행 | `Registry.value_kind_label`(`lib/config/keeper_runtime_setting_registry.ml:1013`) 또는 `"secret"` |
-| 같은 파일 `:1814`→`:1849` | `runtime.toml` 의 나머지 값 | TOML 값의 모양을 보고 고른 문자열. `cache-retention` 키 이름만 따로 `"enum"` |
+| 같은 파일 `:1814`→`:1849` | `runtime.toml` 의 나머지 값 | 저장된 TOML 값의 타입으로 고른 문자열. `cache-retention` 은 키 이름 문자열 비교(`:1811`)로 `"enum"` 을 고르고, 값 목록을 따로 적는다(`:1775`) |
 | 같은 파일 `:1932` | Provider 설명 필드 | 호출자가 넘긴 `~type_str` |
 | 같은 파일 `:2101`→`:2121` | Keeper 필드 | `field ~type_str` 인자. `instructions` 는 `:2204` 에서 `"string"` |
 | 같은 파일 `:2139`→`:2154` | Keeper runtime 배정 | 직접 고른 문자열 |
 
 - `enum_values` 는 종류와 따로 실린다. `"enum"` 인데 값 목록이 없는 필드도 서버 타입으로는 만들 수 있다.
+- `cache-retention` 의 값은 이미 닫힌 타입 `Runtime_schema.cache_retention`(`lib/runtime/runtime_schema.ml:468`)이다. 스키마는 그 타입을 쓰지 않고 같은 네 값을 문자열 목록으로 다시 적는다.
 - 종류 이름은 `"boolean"`·`"integer"`·`"float"`·`"string"`·`"enum"`·`"string_list"`·`"structured"`·`"secret"` 여덟 개다.
 
 ### 1.2 클라이언트가 종류를 읽는 곳
@@ -75,6 +76,7 @@ related: []
 - 여러 줄 글이 종류로 없으니 클라이언트는 그 값을 한 줄 입력으로 연다. 대시보드는 저장할 때 값을 바꾸고, TUI 는 줄바꿈을 넣을 수 없다.
 - 종류가 문자열이라 서버 여덟 곳과 클라이언트 네 곳이 서로를 모른다. 새 종류를 더하면 이 열두 곳을 손으로 맞춰야 하고, 컴파일러는 빠진 곳을 알려 주지 않는다.
 - 서버가 보내지 않는 별칭 여덟 개(TUI 넷, 대시보드 넷)가 남아 있다. 읽는 사람은 그 이름을 보내는 곳이 있다고 믿게 된다.
+- `cache-retention` 은 닫힌 타입이 있는데도 키 이름 문자열로 종류를 고르고 값을 다시 적는다. 값이 하나 늘면 스키마만 옛 목록을 보낸다.
 
 ## 3. 결정
 
@@ -105,11 +107,15 @@ val wire_members : t -> (string * Yojson.Safe.t) list
 
 - 여덟 생산자는 모두 `t` 를 만든다. `field ~type_str ?enum_values` 는 `field ~kind` 가 된다.
 - 값 목록 없는 `Enum` 은 만들 수 없다. 범위는 숫자 종류에만 붙는다.
-- `keeper.instructions` 는 `Text` 다. `fusion.presets.*.{panel,judge}_system_prompt` 처럼 프롬프트를 담는 runtime 키도 `Text` 로 둘지는 §6 에서 운영자가 정한다.
+- 종류는 그 키를 가진 모듈이 선언한다.
+  - Keeper 필드: `field ~kind`. `keeper.instructions` 는 `Text` 다.
+  - 환경 변수 registry 행: `Registry.value_kind` 에서 바꾼다.
+  - runtime binding 키: binding 을 읽는 모듈이 선언한다. `cache-retention` 은 `Runtime_schema.cache_retention` 의 모든 값으로 만든 `Enum` 이다. 키 이름 비교(`:1811`)와 따로 적은 값 목록(`:1775`)은 지운다.
+- 어느 모듈도 선언하지 않은 키는 저장된 TOML 값의 타입으로만 정한다. 문자열이면 `Line` 이다. 키 이름이나 글 내용(줄바꿈이 있는지)으로 종류를 고르지 않는다.
+- Fusion preset 의 프롬프트 키(`fusion.presets.*.panel_system_prompt` 등)는 `Fusion_config` 가 타입으로 읽고, Runtime → Prompts 의 Presets 화면(#55434)이 편집한다. 범용 스키마에서는 선언되지 않은 키라 `Line` 으로 남는다. 키 이름 패턴으로 `Text` 를 붙이면 문자열 분류기가 되므로 하지 않는다.
 - 전선 이름은 지금 이름을 그대로 쓰고 `"text"` 하나를 더한다. `Line` 의 전선 이름은 `"string"` 이다.
   - 장점: 바뀌는 이름이 없어 diff 가 작다.
   - 단점: 코드 이름(`Line`)과 전선 이름(`"string"`)이 다르다. 변환은 `wire_members` 한 곳에만 있다.
-- `runtime.toml` 의 나머지 값(§1.1 셋째 행)은 지금처럼 TOML 값 모양으로 종류를 고른다. 다만 결과가 문자열이 아니라 `t` 다. 문자열 값에 줄바꿈이 있다고 `Text` 로 바꾸지 않는다. 종류는 키가 정하고 값이 정하지 않는다.
 
 ### D2. TUI: 서버가 쓰는 이름만 받고 `Text` 는 여러 줄로 연다
 
@@ -135,24 +141,25 @@ val wire_members : t -> (string * Yojson.Safe.t) list
 
 | 방법 | 장점 | 단점 | 판단 |
 |---|---|---|---|
-| A. 값에 줄바꿈이 있으면 클라이언트가 `<textarea>` 를 연다 | 서버를 안 고친다 | 비어 있거나 한 줄인 지시문에는 줄바꿈을 넣을 수 없다. 데이터를 보고 종류를 짐작한다 | 고르지 않음 |
+| A. 값에 줄바꿈이 있으면 클라이언트가 `<textarea>` 를 연다 | 서버를 안 고친다 | 비어 있거나 한 줄인 지시문에는 줄바꿈을 넣을 수 없다. 데이터를 보고 종류를 짐작한다 | 고르지 않음(휴리스틱) |
+| A2. 키 이름에 `instructions`·`prompt` 가 들어가면 `Text` 로 본다 | 한 곳만 고친다 | 이름이 바뀌거나 새 키가 생기면 말없이 틀린다 | 고르지 않음(문자열 분류기) |
 | B. `"text"` 문자열 하나만 더하고 기존 비교 네 곳에 갈래를 더한다 | diff 가 가장 작다 | 문자열 비교 열두 곳이 그대로 남는다. 다음 종류도 같은 손질을 반복한다 | 고르지 않음(워크어라운드 기준의 「문자열 분류기 보강」) |
 | C. `"string"` 옆에 `multiline: bool` 을 더한다 | 기존 이름을 안 건드린다 | `boolean` 필드에 `multiline: true` 같은 틀린 조합을 만들 수 있다 | 고르지 않음 |
 | D. 닫힌 합타입(이 RFC) | 새 종류를 더하면 서버와 TUI 컴파일러, 대시보드 `assertNever` 가 빠진 곳을 알린다 | 여덟 생산자와 네 소비자를 한 번에 고친다 | 고름 |
 
 ## 5. 단계와 확인 방법
 
-1. 서버 `Config_field_kind` 와 여덟 생산자 → 확인: 시험이 Keeper 대상 응답에서 `keeper.instructions` 의 `type` 이 `"text"` 임을 본다. 종류마다 `wire_members` 의 모양을 골든으로 고정한다. 값 목록 없는 enum 은 타입으로 막혀 시험이 필요 없다.
+1. 서버 `Config_field_kind` 와 여덟 생산자 → 확인: 시험이 Keeper 대상 응답에서 `keeper.instructions` 의 `type` 이 `"text"` 임을 본다. 종류마다 `wire_members` 의 모양을 골든으로 고정한다. 값 목록 없는 enum 은 타입으로 막혀 시험이 필요 없다. `cache-retention` 의 `enum_values` 가 `Runtime_schema.cache_retention` 의 모든 값과 같음을 본다. 모든 값 목록은 `[@@deriving enumerate]` 로 만들어, 값이 늘면 목록도 따라 는다.
 2. TUI 디코더와 폼 → 확인: `"bool"` 같은 옛 별칭과 모르는 이름을 거절한다. `"text"` 필드의 폼이 `Multiline_val` 이다. 줄바꿈이 든 값이 `Set_scalar` 로 줄바꿈 그대로 나간다.
 3. 대시보드 디코더와 세 화면 → 확인: 모르는 종류를 받으면 응답이 에러다. Keeper 설정 탭이 `text` 필드를 `<textarea>` 로 그리고, 줄바꿈이 든 값을 고친 초안에 줄바꿈이 남는다. §1.4 의 jsdom 관찰을 회귀 시험으로 둔다.
 4. 끝에서 끝 → 확인: 줄바꿈이 든 값을 설정 PATCH 로 dry-run 해서 diff 에 `\n` 이스케이프가 나오고, 다시 읽은 값이 보낸 값과 같다.
 
 세 층은 같은 stack 의 PR 셋이다. 맨 위 PR 의 호스트 Test 가 세 묶음(서버 설정 시험, TUI `test_protocol_net`·`test_store`, 대시보드 vitest)을 모두 통과해야 Ready 로 올린다.
 
-## 6. 운영자가 정할 것
+## 6. 운영자 결정 (2026-11-28)
 
-1. `Text` 로 둘 키: `keeper.instructions` 만인가, `fusion.presets.*` 의 프롬프트 키도인가. 추천은 둘 다다. 두 키 모두 실제 값이 여러 줄이다(§1.3).
-2. 전선 이름: `Line` 을 지금처럼 `"string"` 으로 보낼지, `"line"` 으로 바꿀지. 추천은 `"string"` 유지다. 바꾸면 클라이언트 이름도 같이 바뀌지만 얻는 동작이 없다.
+1. `Text` 로 두는 키는 이 RFC 에서 `keeper.instructions` 하나다. Fusion preset 프롬프트는 타입으로 읽는 전용 화면이 맡는다(D1). 처음 추천은 Fusion preset 키도 넣는 것이었다. 범용 스키마에서 그 키에 `Text` 를 붙이려면 키 이름 패턴을 비교해야 해서 거뒀다.
+2. `Line` 의 전선 이름은 `"string"` 그대로다. 바꿔도 얻는 동작이 없다.
 
 ## 7. 범위 밖
 

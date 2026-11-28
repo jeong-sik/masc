@@ -5298,6 +5298,7 @@ let test_nav_fix4_knowledge_board_chains_and_wiki_clusters () =
       chain_depth = None;
       is_signal = true;
       pinned = false;
+      typed_media = [];
       attachments = [];
     }
   in
@@ -5969,6 +5970,7 @@ let test_nav_fix7_symmetric_viewport_scrolling_all_stores () =
       chain_depth = None;
       is_signal = true;
       pinned = false;
+      typed_media = [];
       attachments = [];
     }
   in
@@ -7044,6 +7046,7 @@ let test_p2_grouped_top_header_row0_restoration () =
       chain_depth = depth;
       is_signal = true;
       pinned = false;
+      typed_media = [];
       attachments = [];
     }
   in
@@ -14649,6 +14652,7 @@ let test_ux_batch4_knowledge_runtime_infra () =
       chain_depth = Some 1;
       is_signal = true;
       pinned = false;
+      typed_media = [];
       attachments = [];
     }
   in
@@ -16433,6 +16437,7 @@ let test_ux_sweep_12_fixes () =
       updated_at_unix = None;
       is_signal = true;
       pinned = false;
+      typed_media = [];
       attachments = [];
       succession_chain_root_id = None;
       chain_depth = None;
@@ -19552,6 +19557,7 @@ let test_work_and_board_crud_requests_and_guards () =
       chain_depth = None;
       is_signal = true;
       pinned = false;
+      typed_media = [];
       attachments = [];
     }
   in
@@ -24308,6 +24314,7 @@ let test_uncached_knowledge_jumps () =
       chain_depth = None;
       is_signal = true;
       pinned = false;
+      typed_media = [];
       attachments = [];
     }
   in
@@ -30030,6 +30037,7 @@ let () =
                   created_at_unix = 1_795_254_000.0;
                   updated_at_unix = None;
                   pinned = false;
+                  typed_media = [];
       attachments = [];
                   author_karma = Observed.absent;
                   is_signal = true;

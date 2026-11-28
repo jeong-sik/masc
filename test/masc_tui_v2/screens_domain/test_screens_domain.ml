@@ -245,6 +245,7 @@ let make_rich_model ~lang ~cols ~rows =
       chain_depth = Some 22;
       is_signal = true;
       pinned = false;
+      typed_media = [];
       attachments = [];
     }
   in
@@ -276,6 +277,7 @@ let make_rich_model ~lang ~cols ~rows =
       chain_depth = None;
       is_signal = true;
       pinned = false;
+      typed_media = [];
       attachments = [];
     }
   in
@@ -297,6 +299,7 @@ let make_rich_model ~lang ~cols ~rows =
       chain_depth = None;
       is_signal = false;
       pinned = false;
+      typed_media = [];
       attachments = [];
     }
   in
@@ -4956,6 +4959,58 @@ let test_board_audio_attachment_says_not_playable () =
   Alcotest.(check string) "pdf keeps the plain chip" "[pdf: a.pdf]"
     (chip ~lang:Say.Lang_ko "application/pdf" "a.pdf")
 
+let test_board_typed_media_from_post_meta () =
+  let json =
+    Yojson.Safe.from_string
+      {|{"id":"p-1","title":"t","body":"b","author":"a","created_at":1.0,
+         "meta":{"attachments":[
+           {"kind":"audio","url":"https://example.com/a.wav"},
+           {"kind":"midi","name":"a.mid","artifact":{"_blob":
+             {"sha256":"0123456789abcdef","bytes":2048,
+              "mime":"application/octet-stream","preview":""}}},
+           {"kind":"file","url":"https://example.com/a.pdf"}]}}|}
+  in
+  match
+    Wire_knowledge.decode_board_feed ~observed_at:now_mono
+      (`Assoc [ ("posts", `List [ json ]) ])
+  with
+  | Error detail -> Alcotest.fail detail
+  | Ok { posts = [ post ]; _ } ->
+      Alcotest.(check (list string)) "audio and midi only"
+        [ "[audio] No playback on Board · https://example.com/a.wav";
+          "[midi] No playback on Board · a.mid 2KB" ]
+        (List.map
+           (Screen_knowledge.board_typed_media_chip ~lang:Say.Lang_en)
+           post.typed_media)
+  | Ok _ -> Alcotest.fail "expected one post"
+
+let test_board_typed_media_note_survives_a_long_label () =
+  let model = make_rich_model ~lang:Say.Lang_en ~cols:140 ~rows:40 in
+  let listed =
+    Option.get (Knowledge_store.selected_post model.knowledge)
+  in
+  let url = "https://example.com/" ^ String.make 200 'a' ^ ".wav" in
+  (* A thread target the list does not carry is what the preview shows. *)
+  let post : Wire_knowledge.board_post =
+    { listed with
+      id = "p-typed-media";
+      body = "b";
+      attachments = [];
+      typed_media =
+        [ { media_kind = Wire_knowledge.Media_audio; label = url; bytes = None } ];
+    }
+  in
+  let knowledge =
+    Knowledge_store.apply_thread ~observed_at:now_mono (post, []) model.knowledge
+  in
+  let grid =
+    render_into ~cols:140 ~rows:40 (fun ~cache ~rect gr ->
+        Screen_knowledge.render ~model:{ model with knowledge } ~cache ~rect gr)
+  in
+  Alcotest.(check bool) "note drawn before the clipped label" true
+    (contains_sub ~needle:"[audio] No playback on Board"
+       ~haystack:(grid_all_text grid))
+
 let () =
   Alcotest.run "masc_tui_screens_domain"
     [
@@ -5042,5 +5097,9 @@ let () =
           Alcotest.test_case
             "Board audio attachment line says it cannot be played" `Quick
             test_board_audio_attachment_says_not_playable;
+          Alcotest.test_case "Board typed audio and MIDI get a line" `Quick
+            test_board_typed_media_from_post_meta;
+          Alcotest.test_case "Board typed media note survives a long URL" `Quick
+            test_board_typed_media_note_survives_a_long_label;
         ] );
     ]

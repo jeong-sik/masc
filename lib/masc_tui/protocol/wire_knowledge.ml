@@ -147,6 +147,16 @@ type post_visibility =
   | Vis_internal
   | Vis_direct
 
+type board_media_kind =
+  | Media_audio
+  | Media_midi
+
+type board_typed_media = {
+  media_kind : board_media_kind;
+  label : string;
+  bytes : int option;
+}
+
 type board_post = {
   id : string;
   title : string;
@@ -165,6 +175,7 @@ type board_post = {
   is_signal : bool;
   pinned : bool;
   attachments : Wire_attachment.t list;
+  typed_media : board_typed_media list;
 }
 
 type board_comment = {
@@ -358,6 +369,52 @@ let decode_attachments_list = function
 let decode_optional_attachments json =
   decode_attachments_list (member "attachments" json)
 
+(* [masc_board_post]'s typed [attachments] argument is stored under
+   [meta.attachments] as [{kind, url | artifact, name?}], not as an
+   [AttachmentRef], so it has its own record. *)
+let decode_typed_media_entry = function
+  | `Assoc fields ->
+      let text key =
+        match List.assoc_opt key fields with
+        | Some (`String s) when not (String.equal (String.trim s) "") -> Some s
+        | _ -> None
+      in
+      let media_kind =
+        match text "kind" with
+        | Some "audio" -> Some Media_audio
+        | Some "midi" -> Some Media_midi
+        | _ -> None
+      in
+      let stored =
+        match List.assoc_opt "artifact" fields with
+        | Some (`Assoc [ ("_blob", (`Assoc _ as blob)) ]) -> (
+            match member "sha256" blob, member "bytes" blob with
+            | `String sha256, `Int bytes -> Some (sha256, bytes)
+            | _ -> None)
+        | _ -> None
+      in
+      let source =
+        match text "url", stored with
+        | Some url, None -> Some (url, None)
+        | None, Some (sha256, bytes) ->
+            let short = String.sub sha256 0 (Int.min 12 (String.length sha256)) in
+            Some ("sha256:" ^ short, Some bytes)
+        | Some _, Some _ | None, None -> None
+      in
+      (match media_kind, source with
+       | Some media_kind, Some (fallback, bytes) ->
+           let label = Option.value (text "name") ~default:fallback in
+           Some { media_kind; label; bytes }
+       | _ -> None)
+  | _ -> None
+
+let decode_typed_media = function
+  | Some (`Assoc meta) -> (
+      match List.assoc_opt "attachments" meta with
+      | Some (`List entries) -> List.filter_map decode_typed_media_entry entries
+      | _ -> [])
+  | _ -> []
+
 let decode_board_post ~observed_at json =
   match json with
   | `Assoc fields -> (
@@ -381,6 +438,7 @@ let decode_board_post ~observed_at json =
       let f_is_signal = ref None in
       let f_pinned = ref None in
       let f_attachments = ref None in
+      let f_meta = ref None in
       let[@inline] set_once r v =
         if Option.is_none !r then r := Some v
       in
@@ -407,6 +465,7 @@ let decode_board_post ~observed_at json =
           | "is_signal" -> set_once f_is_signal v
           | "pinned" -> set_once f_pinned v
           | "attachments" -> set_once f_attachments v
+          | "meta" -> set_once f_meta v
           | _ -> ())
         fields;
       try
@@ -503,6 +562,7 @@ let decode_board_post ~observed_at json =
             is_signal;
             pinned;
             attachments;
+            typed_media = decode_typed_media !f_meta;
           }
       with Board_decode_err msg -> Error msg)
   | _ ->
@@ -561,6 +621,7 @@ let decode_board_post ~observed_at json =
           is_signal;
           pinned;
           attachments;
+          typed_media = decode_typed_media (Some (member "meta" json));
         }
 
 let decode_board_comment json =

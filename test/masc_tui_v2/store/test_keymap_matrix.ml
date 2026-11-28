@@ -206,6 +206,7 @@ let mk_post ~id ~title ~author ~signal : Wire_knowledge.board_post =
     chain_depth = None;
     is_signal = signal;
     pinned = false;
+    typed_media = [];
     attachments = [];
   }
 

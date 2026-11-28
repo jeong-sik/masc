@@ -1065,6 +1065,7 @@ let test_ui_capability_badges_and_board_attachments () =
       chain_depth = None;
       is_signal = true;
       pinned = false;
+      typed_media = [];
       attachments = [ sample_attachment ];
     }
   in

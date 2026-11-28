@@ -33,6 +33,28 @@ let board_attachment_chip ~lang (a : Wire_attachment.t) =
   | Wire_attachment.Kind_document ->
       chip
 
+let board_typed_media_chip ~lang (m : Wire_knowledge.board_typed_media) =
+  let prefix =
+    match m.media_kind with
+    | Wire_knowledge.Media_audio -> "audio"
+    | Wire_knowledge.Media_midi -> "midi"
+  in
+  let size =
+    match m.bytes with
+    | None -> ""
+    | Some n -> (
+        match Wire_attachment.format_bytes_short n with
+        | "" -> ""
+        | text -> " " ^ text)
+  in
+  (* The note comes before the label: a narrow pane clips the tail, and a
+     label without a [name] is a whole URL. *)
+  Printf.sprintf "[%s] %s · %s%s" prefix
+    (Say.resolve lang
+       (Say.make ~ko:"Board에서 재생 불가" ~en:"No playback on Board"))
+    (H.sanitize_single_line m.label)
+    size
+
 let post_visibility_label ~lang = function
   | None -> ""
   | Some Wire_knowledge.Vis_public ->
@@ -506,7 +528,7 @@ let draw_board_preview ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~bp
                             `Hdr (hdr, c_age) :: (body_rows @ att_rows))
                           threaded)
           in
-          let post_attachment_rows =
+          let ref_attachment_rows =
             if p.attachments = [] then []
             else
               let img_h = if content.w >= 16 then 6 else 0 in
@@ -532,6 +554,10 @@ let draw_board_preview ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~bp
                        slots @ [ `Img_caption att ]
                      else [ `Att_chip att ])
                    p.attachments)
+          in
+          let post_attachment_rows =
+            ref_attachment_rows
+            @ List.map (fun media -> `Typed_media media) p.typed_media
           in
           let combined_rows = post_attachment_rows @ comment_rows_list in
           let extra_count = List.length combined_rows in
@@ -623,6 +649,14 @@ let draw_board_preview ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~bp
                           (H.put_clipped ~grid ~clip:content ~x:content.x ~y:!y
                              ~max_w:content.w ~style:(H.accent_style ~theme ())
                              (board_attachment_chip ~lang att));
+                        incr y
+                      end
+                  | `Typed_media (media : Wire_knowledge.board_typed_media) ->
+                      if !y < bottom then begin
+                        ignore
+                          (H.put_clipped ~grid ~clip:content ~x:content.x ~y:!y
+                             ~max_w:content.w ~style:(H.accent_style ~theme ())
+                             (board_typed_media_chip ~lang media));
                         incr y
                       end
                   | `Divider ->

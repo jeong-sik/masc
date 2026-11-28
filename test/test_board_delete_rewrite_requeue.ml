@@ -316,8 +316,17 @@ let test_delete_refuses_changed_same_cursor_bytes () =
   let module Paths = Masc_board_handlers.Board_paths in
   Alcotest.(check bool) "refused guard writes no marker" false
     (Sys.file_exists (Paths.store_file_path active Paths.Deletion));
+  (* The refused deletion leaves the model as the store had observed it. The
+     table is read directly: a Dispatch read would read the file again first. *)
+  (match Hashtbl.find_opt active.posts post_id with
+   | None -> Alcotest.fail "the refused deletion removed the post from the model"
+   | Some observed ->
+     Alcotest.(check string) "refusal preserves the observed model" doomed.body observed.body);
+  (* #55460: a refusal for changed content is one a fresh read clears, and the
+     next Dispatch call makes that read. The post is still there, and it is the
+     file's row, as a restart would show it. *)
   let kept = require_ok (Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id) in
-  Alcotest.(check string) "refusal preserves the observed model" doomed.body kept.body;
+  Alcotest.(check string) "the read after the refusal shows the file's row" "body-bbbb" kept.body;
   Alcotest.(check bool) "refusal creates no pending snapshot" false active.dirty_posts;
   flush ();
   Alcotest.(check string) "ordinary flush preserves every foreign byte" changed

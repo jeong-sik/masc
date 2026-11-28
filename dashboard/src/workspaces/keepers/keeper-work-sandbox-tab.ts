@@ -17,6 +17,7 @@ import { authSession, currentSessionEpoch, isEpochCurrent, sessionEpoch } from '
 import { isAdminLockedForSession } from '../../routes/router'
 import { pushShellToast } from '../../shell/shell-state'
 import { KeeperReadNotice, useKeeperRead } from './keeper-read'
+import { KeeperSandboxTerminal } from './keeper-sandbox-terminal'
 import { KeeperToolCallInspector } from './keeper-tool-call-inspector'
 import {
   fetchKeeperLinkedTasksApi,
@@ -145,24 +146,32 @@ function KeeperWorkSandboxView(props: KeeperWorkSandboxTabProps) {
                     <span class="kp-kv-v">${sandbox.probe_kind}</span>
                   </div>
                 </div>
-                <div class="kp-pill-row">
-                  <button
-                    type="button"
-                    class="btn-ghost"
-                    onClick=${() => props.onInspect({
-                      title: `Sandbox · ${keeperName}`,
-                      subtitle: sandbox.backend,
-                      kind: 'sandbox',
-                      data: sandbox.summary,
-                    })}
-                  >
-                    샌드박스 원시 상태 보기
-                  </button>
-                  ${sandboxRead.received && html`<button
-                    type="button" class="btn-ghost"
-                    onClick=${() => void sandboxRead.refresh()}
-                  >샌드박스 다시 읽기</button>`}
-                </div>
+                <details class="ap-disclosure kst-sandbox-details" data-testid="keeper-sandbox-details-disclosure">
+                  <summary class="ap-disclosure-trigger">
+                    <span>샌드박스 세부 동작</span>
+                    <span class="mono kst-host-logs-hint">${sandbox.backend} · ${sandbox.probe_kind}</span>
+                  </summary>
+                  <div class="ap-disclosure-body">
+                    <div class="kp-pill-row">
+                      <button
+                        type="button"
+                        class="btn-ghost"
+                        onClick=${() => props.onInspect({
+                          title: `Sandbox · ${keeperName}`,
+                          subtitle: sandbox.backend,
+                          kind: 'sandbox',
+                          data: sandbox.summary,
+                        })}
+                      >
+                        샌드박스 원시 상태 보기
+                      </button>
+                      ${sandboxRead.received && html`<button
+                        type="button" class="btn-ghost"
+                        onClick=${() => void sandboxRead.refresh()}
+                      >샌드박스 다시 읽기</button>`}
+                    </div>
+                  </div>
+                </details>
               `
             : sandboxRead.received && html`<div class="kp-lifecycle-bar">
                 <span>현재 조회에서 샌드박스 텔레메트리 행을 찾지 못했습니다.</span>
@@ -172,14 +181,14 @@ function KeeperWorkSandboxView(props: KeeperWorkSandboxTabProps) {
       </div>
 
       ${authSession.value.kind === 'single_user_local'
-        ? html`<${KeeperLocalWork} keeperName=${keeperName} onInspect=${props.onInspect} />`
+        ? html`<${KeeperLocalWork} keeperName=${keeperName} sandboxBackend=${sandbox?.backend ?? null} onInspect=${props.onInspect} />`
         : html`<p class="kp-card">운영자 노트와 도구 호출 통계·내역은 단일 계정 모드에서 사용할 수 있습니다.</p>`}
     </div>
   `
 }
 
-function KeeperLocalWork(props: Pick<KeeperWorkSandboxTabProps, 'keeperName' | 'onInspect'>) {
-  const { keeperName } = props
+function KeeperLocalWork(props: Pick<KeeperWorkSandboxTabProps, 'keeperName' | 'onInspect'> & { readonly sandboxBackend: string | null }) {
+  const { keeperName, sandboxBackend } = props
   const adminLocked = isAdminLockedForSession('admin', authSession.value)
   const noteRead = useKeeperRead(useCallback(
     (signal: AbortSignal) => fetchKeeperOperatorNoteApi(keeperName, signal), [keeperName],
@@ -225,6 +234,9 @@ function KeeperLocalWork(props: Pick<KeeperWorkSandboxTabProps, 'keeperName' | '
 
   return html`
     <${Fragment}>
+      <!-- Live Sandbox Terminal Output Viewer -->
+      <${KeeperSandboxTerminal} keeperName=${keeperName} sandboxBackend=${sandboxBackend} />
+
       <!-- Operator-Note Editor -->
       <section class="kp-card" aria-label="운영자 노트 편집기">
         <div class="kp-card-head">
@@ -286,7 +298,7 @@ function KeeperLocalWork(props: Pick<KeeperWorkSandboxTabProps, 'keeperName' | '
               <div class="kp-grid-4">
                 ${toolStats.tools.slice(0, 8).map((st) => html`
                   <div key=${st.name} class="kp-kv-box">
-                    <span class="kp-kv-k">${st.name}</span>
+                    <span class="kp-kv-k kst-tool-stat-key" title=${st.name}>${st.name}</span>
                     <span class="kp-kv-v">${st.call_count} calls</span>
                     <span class="kp-roster-sub">
                       ok ${st.success_count} · fail ${st.failure_count} · p95 ${Math.round(st.p95_duration_ms)}ms

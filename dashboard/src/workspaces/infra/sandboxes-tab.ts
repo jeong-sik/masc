@@ -33,6 +33,7 @@ import {
   isJsonRecord,
 } from '../../lib/wire-decode'
 import { pushShellToast } from '../../shell/shell-state'
+import { HostStorageCard } from './host-storage-card'
 import {
   formatUnixTs,
   type InfraDockerKeeper,
@@ -302,7 +303,6 @@ export function SandboxesTab(props: WorkspaceViewProps) {
   const [errorBanner, setErrorBanner] = useState<string | null>(null)
   const [shimParityPref, setShimParityPref] = useState<boolean | null>(null)
   const [volumeGcOpen, setVolumeGcOpen] = useState(false)
-  const [hostStorageOpen, setHostStorageOpen] = useState(false)
   const mountedRef = useRef(true)
   useEffect(() => {
     mountedRef.current = true
@@ -827,8 +827,11 @@ export function SandboxesTab(props: WorkspaceViewProps) {
             />
           </section>
 
-          <!-- Volume GC & Host Storage (default-collapsed JSON with 1-line metric summaries) -->
-          <section style=${{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 'var(--sp-3)', minWidth: 0 }}>
+          <!-- Host Disk Space & .masc Store Telemetry -->
+          <${HostStorageCard} hostStorage=${data.host_storage} onInspect=${props.onInspect} />
+
+          <!-- Volume GC (default-collapsed JSON with 1-line metric summary) -->
+          <section style=${{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 'var(--sp-3)', minWidth: 0 }}>
             <div class="ap-disclosure" data-testid="sandbox-volume-gc">
               <div style=${{ display: 'flex', alignItems: 'center', gap: 'var(--sp-1)', paddingRight: 'var(--sp-2)' }}>
                 <button
@@ -865,47 +868,6 @@ export function SandboxesTab(props: WorkspaceViewProps) {
                 <div class="ap-disclosure-body" data-testid="sandbox-volume-gc-body">
                   <pre class="mono" style=${{ margin: 0, fontSize: 'var(--fs-11)', overflowX: 'auto', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', color: 'var(--fg-2)' }}>
                     ${data.volume_gc_report ? JSON.stringify(data.volume_gc_report, null, 2) : '없음'}
-                  </pre>
-                </div>
-              `}
-            </div>
-
-            <div class="ap-disclosure" data-testid="sandbox-host-storage">
-              <div style=${{ display: 'flex', alignItems: 'center', gap: 'var(--sp-1)', paddingRight: 'var(--sp-2)' }}>
-                <button
-                  type="button"
-                  class="ap-disclosure-trigger"
-                  data-testid="sandbox-host-storage-toggle"
-                  aria-expanded=${hostStorageOpen}
-                  style=${{ flex: '1 1 auto', minWidth: 0 }}
-                  onClick=${() => setHostStorageOpen((v) => !v)}
-                >
-                  <span style=${{ display: 'inline-flex', alignItems: 'center', gap: 'var(--sp-2)', flexWrap: 'wrap', minWidth: 0 }}>
-                    <span>호스트 스토리지</span>
-                    <span class="mono tnum" style=${{ fontSize: 'var(--fs-11)', fontWeight: 400, color: 'var(--fg-3)' }}>
-                      ${summarizeJsonMetrics(data.host_storage)}
-                    </span>
-                  </span>
-                  <span aria-hidden="true">${hostStorageOpen ? '▾' : '▸'}</span>
-                </button>
-                <button
-                  type="button"
-                  class="btn-ghost"
-                  style=${{ padding: 'var(--sp-0) var(--sp-2)', fontSize: 'var(--fs-11)', flexShrink: 0 }}
-                  onClick=${() => props.onInspect({
-                    title: 'Host Storage',
-                    kind: 'host_storage',
-                    data: data.host_storage,
-                    render: () => html`<pre class="mono" style=${{ margin: 0, fontSize: 'var(--fs-11)', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>${JSON.stringify(data.host_storage, null, 2)}</pre>`,
-                  })}
-                >
-                  [⤢] 원본
-                </button>
-              </div>
-              ${hostStorageOpen && html`
-                <div class="ap-disclosure-body" data-testid="sandbox-host-storage-body">
-                  <pre class="mono" style=${{ margin: 0, fontSize: 'var(--fs-11)', overflowX: 'auto', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', color: 'var(--fg-2)' }}>
-                    ${data.host_storage ? JSON.stringify(data.host_storage, null, 2) : '없음'}
                   </pre>
                 </div>
               `}

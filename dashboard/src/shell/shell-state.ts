@@ -259,6 +259,231 @@ export function clearDismissedIncidents(): void {
   incidentsSignal.value = incidentsSignal.peek().filter((i) => !i.dismissed)
 }
 
+// ── Host Disk Observation & Pressure Summary ────────────────────────────
+
+export interface HostDiskFilesystem {
+  readonly path: string | null
+  readonly filesystem: string | null
+  readonly mountedOn: string | null
+  readonly totalBytes: number | null
+  readonly usedBytes: number | null
+  readonly availableBytes: number | null
+  readonly capacityPercent: number | null
+  readonly availablePercent: number | null
+  readonly error: string | null
+}
+
+export interface HostDiskObservation {
+  readonly mascRoot: string | null
+  readonly mode: string | null
+  readonly status: string | null
+  readonly statusReasons: readonly string[]
+  readonly exhaustionTotal: number | null
+  readonly lastExhaustionTs: number | null
+  readonly filesystem: HostDiskFilesystem | null
+}
+
+export type DiskPressureLevel = 'ok' | 'warning' | 'critical' | 'exhausted' | 'unavailable'
+
+export interface DiskPressureSummary {
+  readonly level: DiskPressureLevel
+  readonly label: string
+  readonly detail: string
+}
+
+function asFiniteNumber(v: unknown): number | null {
+  return typeof v === 'number' && Number.isFinite(v) ? v : null
+}
+
+export function decodeDiskObservation(raw: unknown): HostDiskObservation | null {
+  if (!isRecord(raw)) return null
+  const fsRaw = isRecord(raw.filesystem) ? raw.filesystem : null
+  const filesystem: HostDiskFilesystem | null = fsRaw
+    ? {
+        path: asNonEmptyString(fsRaw.path),
+        filesystem: asNonEmptyString(fsRaw.filesystem),
+        mountedOn: asNonEmptyString(fsRaw.mounted_on),
+        totalBytes: asFiniteNumber(fsRaw.total_bytes),
+        usedBytes: asFiniteNumber(fsRaw.used_bytes),
+        availableBytes: asFiniteNumber(fsRaw.available_bytes),
+        capacityPercent: asFiniteNumber(fsRaw.capacity_percent),
+        availablePercent: asFiniteNumber(fsRaw.available_percent),
+        error: asNonEmptyString(fsRaw.error),
+      }
+    : null
+  const statusReasons = Array.isArray(raw.status_reasons)
+    ? raw.status_reasons.filter((r): r is string => typeof r === 'string' && r.trim().length > 0).map((r) => r.trim())
+    : []
+  const mascRoot = asNonEmptyString(raw.masc_root)
+  const mode = asNonEmptyString(raw.mode)
+  const status = asNonEmptyString(raw.status)
+  const exhaustionTotal = asFiniteNumber(raw.storage_space_exhaustion_observations_total)
+  const lastExhaustionTs = asFiniteNumber(raw.last_storage_space_exhaustion_ts)
+  if (
+    mascRoot === null
+    && mode === null
+    && status === null
+    && statusReasons.length === 0
+    && exhaustionTotal === null
+    && lastExhaustionTs === null
+    && filesystem === null
+  ) {
+    return null
+  }
+  return {
+    mascRoot,
+    mode,
+    status,
+    statusReasons,
+    exhaustionTotal,
+    lastExhaustionTs,
+    filesystem,
+  }
+}
+
+export const ENOSPC_RECENT_WINDOW_SEC = 900
+
+export function isRecentEnospcObservation(
+  obs: HostDiskObservation | null,
+  nowSec = Date.now() / 1000,
+): boolean {
+  if (!obs || obs.exhaustionTotal === null || obs.exhaustionTotal <= 0) {
+    return false
+  }
+  if (obs.lastExhaustionTs === null || obs.lastExhaustionTs <= 0) return false
+  return Math.max(0, nowSec - obs.lastExhaustionTs) <= ENOSPC_RECENT_WINDOW_SEC
+}
+
+export function classifyDiskPressure(
+  obs: HostDiskObservation | null,
+  nowSec = Date.now() / 1000,
+): DiskPressureSummary {
+  if (!obs) {
+    return { level: 'ok', label: '', detail: '' }
+  }
+  if (isRecentEnospcObservation(obs, nowSec)) {
+    return {
+      level: 'exhausted',
+      label: `ENOSPC ×${obs.exhaustionTotal}`,
+      detail: `최근 호스트 스토리지 공간 부족(ENOSPC) ${obs.exhaustionTotal}건 관측`,
+    }
+  }
+  if (obs.filesystem?.error) {
+    return {
+      level: 'unavailable',
+      label: '디스크 오류',
+      detail: `호스트 디스크 상태 조회 실패: ${obs.filesystem.error}`,
+    }
+  }
+  const pct = obs.filesystem?.capacityPercent ?? null
+  const pctLabel = pct !== null ? `${Math.round(pct)}%` : null
+  const statusLower = obs.status?.toLowerCase() ?? null
+
+  if (statusLower === 'unavailable') {
+    return { level: 'unavailable', label: '디스크 상태 미확인', detail: '서버가 호스트 디스크 상태를 확인하지 못했습니다.' }
+  }
+
+  if (statusLower === 'critical' || statusLower === 'degraded' || statusLower === 'error' || (pct !== null && pct >= 90)) {
+    return {
+      level: 'critical',
+      label: pctLabel ? `디스크 ${pctLabel}` : '디스크 위험',
+      detail: pctLabel && pct !== null && pct >= 90
+        ? `호스트 디스크 사용률 ${pctLabel} (위험 임계치 90% 이상)`
+        : `호스트 디스크 상태: ${obs.status ?? 'critical'}`,
+    }
+  }
+  if (statusLower === 'warning' || (pct !== null && pct >= 80)) {
+    return {
+      level: 'warning',
+      label: pctLabel ? `디스크 ${pctLabel}` : '디스크 주의',
+      detail: pctLabel
+        ? `호스트 디스크 사용률 ${pctLabel} (주의 임계치 80% 이상)`
+        : '호스트 디스크 경고 상태',
+    }
+  }
+  return {
+    level: 'ok',
+    label: pctLabel ? `디스크 ${pctLabel}` : '',
+    detail: pctLabel ? `호스트 디스크 사용률 ${pctLabel}` : '',
+  }
+}
+
+export const hostDiskObservation = signal<HostDiskObservation | null>(null)
+const diskObservationClock = signal(Date.now() / 1000)
+export const diskPressureSummary = computed<DiskPressureSummary>(() =>
+  classifyDiskPressure(hostDiskObservation.value, diskObservationClock.value),
+)
+
+export function updateHostDiskObservation(raw: unknown): HostDiskObservation | null {
+  const decoded = decodeDiskObservation(raw)
+  batch(() => {
+    diskObservationClock.value = Date.now() / 1000
+    hostDiskObservation.value = decoded
+  })
+  return decoded
+}
+
+const HOST_DISK_REFRESH_MS = 60_000
+
+/** Refresh the top bar's reading while the authenticated shell is visible. */
+export function installHostDiskObservation(fetchImpl?: typeof fetch): () => void {
+  let inflight: AbortController | null = null
+  const retireRead = () => {
+    inflight?.abort()
+    inflight = null
+  }
+  const refresh = async () => {
+    diskObservationClock.value = Date.now() / 1000
+    if (
+      inflight
+      || (typeof document !== 'undefined' && document.visibilityState === 'hidden')
+      || !canAccessMemberWorkspace(authSession.peek())
+    ) return
+
+    const controller = new AbortController()
+    const epoch = currentSessionEpoch()
+    inflight = controller
+    try {
+      const result = await apiGet<unknown>('/api/v1/dashboard/shell?light=true', { signal: controller.signal, fetchImpl })
+      if (controller.signal.aborted || !isEpochCurrent(epoch) || !result.ok || !isRecord(result.value)) return
+      const shell = result.value
+      const runtime = shell.runtime_resolution
+      const disk = isRecord(runtime) && 'disk_observation' in runtime
+        ? runtime.disk_observation
+        : shell.disk_observation
+      updateHostDiskObservation(disk)
+    } finally {
+      if (inflight === controller) inflight = null
+    }
+  }
+
+  const onVisible = () => { void refresh() }
+  const unsubAuth = authSession.subscribe((session) => {
+    if (canAccessMemberWorkspace(session)) void refresh()
+    else {
+      retireRead()
+      updateHostDiskObservation(null)
+    }
+  })
+  let observedEpoch = currentSessionEpoch()
+  const unsubEpoch = sessionEpoch.subscribe((epoch) => {
+    if (epoch === observedEpoch) return
+    observedEpoch = epoch
+    retireRead()
+    updateHostDiskObservation(null)
+    void refresh()
+  })
+  const interval = setInterval(onVisible, HOST_DISK_REFRESH_MS)
+  if (typeof document !== 'undefined') document.addEventListener('visibilitychange', onVisible)
+  return () => {
+    unsubAuth()
+    unsubEpoch()
+    clearInterval(interval)
+    if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', onVisible)
+    retireRead()
+  }
+}
+
 // ── Build-Commit & Connection Diagnostics (Popover Only!) ───────────────
 
 export interface BuildConnectionInfo {
@@ -1052,6 +1277,7 @@ export function dismissShellToast(id: number): void {
 // ── Observer / Epoch Reactive Bridge ────────────────────────────────────
 
 export function installShellObservers(fetchImpl?: typeof fetch): () => void {
+  const stopHostDiskObservation = installHostDiskObservation(fetchImpl)
   const unsubResync = subscribeObserverResync((reason) => {
     recordIncident({
       severity: 'warn',
@@ -1140,6 +1366,7 @@ export function installShellObservers(fetchImpl?: typeof fetch): () => void {
   })
 
   return () => {
+    stopHostDiskObservation()
     unsubResync()
     unsubFrames()
     unsubReconnect()
@@ -1172,6 +1399,7 @@ export function resetShellStateForTests(): void {
     pendingVerifications.value = []
     hitlSourceStatus.value = DEFAULT_HITL_SOURCE_STATUS
     hitlLoading.value = false
+    hostDiskObservation.value = null
     toastsSignal.value = []
     buildConnectionInfo.value = {
       version: null,

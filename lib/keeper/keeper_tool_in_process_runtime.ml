@@ -1638,29 +1638,36 @@ let each_attachment check ids =
   List.fold_left (fun acc id -> Result.bind acc (fun () -> check id)) (Ok ()) ids
 
 (* Before approval: every named attachment must be one this Keeper may read,
-   and a voice message's must be sound MASC can transcode. Files are promoted
-   to durable only once all of them pass, so a post refused here for one file
-   leaves the others as they were. The binding, target and mention checks run
-   after this one, and a post they refuse keeps its files durable. An
-   ephemeral attachment can otherwise be evicted by the Keeper's own later
-   files while the post waits for an operator, and the approved replay would
-   find nothing to send. Durable bytes stay alive while
-   the pending gate record names them; attachment GC reads canonical ids
-   anywhere in that tree. A file post's bytes are read once, after approval. *)
+   and a voice message's must be sound MASC can transcode. Checking changes
+   nothing; [discord_files_promoted] does, once every check of the post has
+   passed. A file post's bytes are read once, after approval. *)
 let discord_files_held ~base_path ~keeper files =
   let store = Attachment_store.create ~base_path in
   let open Result.Syntax in
   match files with
   | Keeper_surface_post.Text_only -> Ok ()
   | Keeper_surface_post.Files (first, rest) ->
-    let ids = first :: rest in
-    let* () = each_attachment (attachment_readable store ~keeper) ids in
-    each_attachment (attachment_promoted store) ids
+    each_attachment (attachment_readable store ~keeper) (first :: rest)
   | Keeper_surface_post.Voice_message id ->
     let* () = attachment_readable store ~keeper id in
     let* bytes = stored_bytes store id in
     let* (_ : Discord_voice_clip.source_format) = voice_source_format id bytes in
-    attachment_promoted store id
+    Ok ()
+
+(* The last step before the post goes to the gate. An ephemeral attachment
+   can be evicted by the Keeper's own later files while the post waits for an
+   operator, and the approved replay would find nothing to send, so the files
+   become durable here. A post refused by any earlier check never gets here
+   and leaves its files as they were. Durable bytes stay alive while the
+   pending gate record names them; attachment GC reads canonical ids anywhere
+   in that tree. *)
+let discord_files_promoted ~base_path files =
+  let store = Attachment_store.create ~base_path in
+  match files with
+  | Keeper_surface_post.Text_only -> Ok ()
+  | Keeper_surface_post.Files (first, rest) ->
+    each_attachment (attachment_promoted store) (first :: rest)
+  | Keeper_surface_post.Voice_message id -> attachment_promoted store id
 
 let replay_connector_post_with_senders
       ~config
@@ -2124,6 +2131,15 @@ let handle_surface_post_with_outcome
              Keeper_surface_post.To_dashboard
              (Keeper_surface_post.ok_json ~surface ()))
          | Keeper_surface_post.To_discord { channel_id } ->
+      (match
+        discord_files_promoted ~base_path:config.Workspace.base_path discord_files
+      with
+      | Error message ->
+        fail
+          ~class_:Tool_result.Policy_rejection
+          ~effect_disposition:Tool_result.Proven_pre_effect
+          (Keeper_surface_post.error_json message)
+      | Ok () ->
       let input =
         connector_post_gate_input
           ~connector:surface
@@ -2147,7 +2163,7 @@ let handle_surface_post_with_outcome
            ; mention_user_ids
            ; files = discord_files
            })
-      |> Keeper_tool_execution.with_surface_post_receipt target
+      |> Keeper_tool_execution.with_surface_post_receipt target)
          | Keeper_surface_post.To_slack { channel_id; thread_ts; blocks } ->
       let slack_blocks =
         match blocks with
@@ -2837,6 +2853,7 @@ let handle_masc_keeper_with_outcome
 
 module For_testing = struct
   let discord_files_held = discord_files_held
+  let discord_files_promoted = discord_files_promoted
 
   let replay_connector_post_with_senders
         ~config

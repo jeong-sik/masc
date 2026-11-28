@@ -442,8 +442,13 @@ module For_testing : sig
     base_path:string -> keeper:string -> Keeper_surface_post.discord_files ->
     (unit, string) result
   (** The check a Discord post's files pass before approval: each id is
-      readable by [keeper] and is promoted to durable, and a voice message's
-      bytes are audio MASC can transcode. *)
+      readable by [keeper], and a voice message's bytes are audio MASC can
+      transcode. It changes no file. *)
+
+  val discord_files_promoted :
+    base_path:string -> Keeper_surface_post.discord_files -> (unit, string) result
+  (** Makes a Discord post's files durable. The post handler calls it last,
+      after the binding, target and mention checks, right before the gate. *)
 
   val replay_connector_post_with_senders :
     config:Workspace.config ->

@@ -57,11 +57,11 @@ Exact records and proofs, domain ledgers, receipts and source queues.
    and start the server. Confirm each attached worker's package revision. A
    retained host terminal can still finish its owner without a worker record;
    undispatched work can be admitted normally. A dispatched open original cannot
-   recover automatically from empty worker state: `Lane_addon_submit_once` keeps
-   it `Missing_after_dispatch`, and the Exact runner only processes worker-listed
-   requests. This is why step 2 must resolve or explicitly set aside those
-   originals before clearing the volume. Check the known IDs against host proofs
-   and owner outcomes, recording delivery and domain commit separately.
+   recover automatically from empty worker state: the Exact runner only
+   processes worker-listed requests. This is why step 2 must resolve or
+   explicitly set aside those originals before clearing the volume. Check the
+   known IDs against host proofs and owner outcomes, recording delivery and
+   domain commit separately.
 
 The host incarnation/cause change has its own Exact/Curator/Librarian hard cut.
 If both changes deploy together, use one stopped-server window and satisfy both

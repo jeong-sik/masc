@@ -49,10 +49,12 @@
 # scripts/install.sh places a release shim. This script only rebuilds a shim
 # from the checkout.
 #
-# The dashboard bundle goes the same way (scripts/lib/install-workspace-dashboard.sh,
-# #49980). A workspace that holds <workspace>/assets/dashboard gets this
-# checkout's assets/dashboard when its .build-stamp is newer, and keeps the old
-# bundle as dashboard-backup-<UTC time>. The checkout's bundle is the one
+# The dashboard bundle goes beside the binaries, in <prefix>/assets/dashboard,
+# as the release install keeps its own beside its binary
+# (scripts/lib/install-dashboard-beside-binary.sh, #49980, #55405). A server
+# reads it before the assets of its base path, so every workspace served from
+# the prefix gets the bundle of this install. An older bundle there is kept as
+# dashboard-backup-<UTC time>. The checkout's bundle is the one
 # build-dashboard-if-needed.sh (make build) last built; this script does not
 # build it.
 #
@@ -706,14 +708,13 @@ else
   echo "install-local-build: no Pele in $prefix; none installed (scripts/install-pele.sh installs it)"
 fi
 
-# The dashboard bundle the workspace serves is not part of the binaries, and
-# the server picks it up on the next request without a restart (#49980). The
-# step never fails the install.
-if [ "$workspace_kind" = directory ]; then
-  # shellcheck source=lib/install-workspace-dashboard.sh
-  . "$repo/scripts/lib/install-workspace-dashboard.sh"
-  install_workspace_dashboard "$repo/assets/dashboard" "$workspace_root"
-fi
+# The dashboard bundle is not part of the binaries, and a running server picks
+# it up on the next request without a restart (#49980). It goes beside the
+# binaries whether or not the workspace exists, since every workspace served
+# from the prefix reads it there (#55405). The step never fails the install.
+# shellcheck source=lib/install-dashboard-beside-binary.sh
+. "$repo/scripts/lib/install-dashboard-beside-binary.sh"
+install_dashboard_beside_binary "$repo/assets/dashboard" "$prefix"
 
 # The masc just installed writes the browser Add-on package it carries into
 # the workspace and declares it when the workspace has none, so the server

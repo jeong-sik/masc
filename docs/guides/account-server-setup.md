@@ -145,10 +145,14 @@ masc start --base-path <base> --port <port>
   `MASC_ASSETS_DIR`, the `assets` directory three levels above the binary's
   directory (a checkout's `_build/default/bin`), `assets` beside the binary,
   and `assets` in the working directory, which is the base path once
-  `masc start` runs. A binary installed in `~/.local/bin` finds none of them
-  for a new base path. Set `MASC_ASSETS_DIR` to an `assets` directory that
-  holds `dashboard/index.html`, such as `assets` of the checkout the binary
-  was built from. Without one, `/dashboard` answers 503.
+  `masc start` runs. Both installs put the bundle beside the binary: the
+  release install (`scripts/install.sh`), and `scripts/install-local-build.sh`
+  after `make build`, which copies it to `<prefix>/assets/dashboard`. So the
+  account server reads the bundle of the same install as every other
+  workspace of that binary, and needs no setting. An install that predates
+  this left the bundle in the base path of one workspace only; install
+  again, or set `MASC_ASSETS_DIR`. With no bundle at all, `/dashboard`
+  answers 503.
 - The server binds the TLS listener of `[transport] https_port` in
   `<base>/.masc/config/runtime.toml` (8938 when the file sets none, `0`
   turns it off). `MASC_HTTPS_PORT` in the environment comes before the file.

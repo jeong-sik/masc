@@ -23,27 +23,23 @@ let select_assets_root
   in
   (* MASC_BASE_PATH is the runtime data root for .masc, not a dashboard asset root. *)
   let candidates =
-    List.filter_map
-      Fun.id
-      [
-        Some inferred_repo_assets;
-        Some (Filename.concat exe_dir "assets");
-        Some (Filename.concat cwd "assets");
-      ]
+    [ inferred_repo_assets
+    ; Filename.concat exe_dir "assets"
+    ; Filename.concat cwd "assets"
+    ]
   in
   match launch_source_root_state with
   | Build_identity.Bound_valid source_root -> Some (Filename.concat source_root "assets")
   | Build_identity.Bound_invalid _ -> None
   | Build_identity.Unbound ->
+    (* No candidate on disk is no asset root. Naming the first candidate
+       anyway made every dashboard request read a directory that is not there
+       (an installed binary in ~/.local/bin started from $HOME read
+       /Users/assets), and the surface reported a read failure where it should
+       report missing assets. *)
     (match configured_assets_dir with
      | Some d when is_dir d -> Some d
-     | _ ->
-      match List.find_opt is_dir candidates with
-      | Some path -> Some path
-      | None ->
-        (match candidates with
-         | path :: _ -> Some path
-         | [] -> Some (Filename.concat cwd "assets")))
+     | Some _ | None -> List.find_opt is_dir candidates)
 ;;
 
 let select_installed_authority ~launch_source_root_state ~installed =

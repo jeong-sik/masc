@@ -297,6 +297,32 @@ let test_invalid_binding_never_falls_back_but_unbound_launch_can () =
     (select (Build_identity.Bound_invalid Build_identity.Source_root_inode_differs))
 ;;
 
+(* An installed binary in ~/.local/bin started from $HOME with no
+   MASC_ASSETS_DIR has no candidate on disk. The selection is no root, not the
+   first candidate: that one (/Users/assets) made every request read a
+   directory that does not exist (#55405). *)
+let test_unbound_launch_with_no_candidate_on_disk_has_no_root () =
+  let selected =
+    Web_dashboard.For_testing.select_assets_root
+      ~launch_source_root_state:Build_identity.Unbound
+      ~configured_assets_dir:None
+      ~exe_dir:"/Users/someone/.local/bin"
+      ~cwd:"/Users/someone"
+      ~is_dir:(fun _ -> false)
+  in
+  check (option string) "no candidate on disk is no root" None selected;
+  let configured_missing =
+    Web_dashboard.For_testing.select_assets_root
+      ~launch_source_root_state:Build_identity.Unbound
+      ~configured_assets_dir:(Some "/configured/missing")
+      ~exe_dir:"/Users/someone/.local/bin"
+      ~cwd:"/Users/someone"
+      ~is_dir:(fun _ -> false)
+  in
+  check (option string) "a configured directory that is not there is no root" None
+    configured_missing
+;;
+
 let test_verified_blob_returns_manifest_bytes_and_rejects_replacement () =
   let snapshot_root = make_temp_dir "verified-blob" |> Unix.realpath in
   Unix.chmod snapshot_root 0o700;
@@ -661,6 +687,8 @@ let () =
         test_bound_worktree_assets_override_valid_common_assets;
       test_case "invalid binding does not fall back" `Quick
         test_invalid_binding_never_falls_back_but_unbound_launch_can;
+      test_case "no candidate on disk is no root" `Quick
+        test_unbound_launch_with_no_candidate_on_disk_has_no_root;
     ];
     "asset_path_safety", [
       test_case "accept normal" `Quick test_safe_asset_relative_path_accepts_normal;

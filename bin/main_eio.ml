@@ -1358,8 +1358,10 @@ let auth_cmd =
            no external store yet. The command takes the workspace lease, so \
            stop the server first."
       ; `P
-          "MASC_HTTP_BASE_URL must be the http(s) address the person opens; \
-           the link is built on it."
+          "The base URL must be the http(s) address the person opens; the link \
+           is built on it. It is MASC_HTTP_BASE_URL when this shell sets it, \
+           else transport.http_base_url of the runtime.toml of the base path, \
+           which the server reads the same way."
       ; `P
           "The link carries the invitation token after #, so a browser keeps \
            it out of the request URL. Only a digest of the token is written. \
@@ -1403,7 +1405,7 @@ let auth_cmd =
            it was lost. This build has no command that revokes an invitation or \
            writes a Member invitation."
       ; `P
-          "MASC_HTTP_BASE_URL must be the http(s) address the person opens, as \
+          "The base URL must be the http(s) address the person opens, read as \
            for masc auth bootstrap. The command takes the workspace lease, so \
            stop the server first."
       ; `P

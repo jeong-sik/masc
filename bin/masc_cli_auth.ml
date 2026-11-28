@@ -31,24 +31,37 @@ let with_lease ~held ~base_path f =
 
 (* The person opens the link from wherever they are, so its base is the public
    address the operator states, as for a Play invite. MASC_HOST and
-   MASC_HTTP_PORT of this shell need not be where the server listens. *)
-let public_base_url () =
-  let key = Env_config_core.http_base_url_env_key in
+   MASC_HTTP_PORT of this shell need not be where the server listens. The
+   address is the one a server started on this base path from this shell
+   reads: MASC_HTTP_BASE_URL, or else transport.http_base_url of the
+   runtime.toml of the base path. The settings are loaded as the server loads
+   them, so settings the server would refuse refuse the link too. *)
+let public_base_url ~base_path =
+  let names = Env_config_core.http_base_url_setting_names in
+  let* (_ : int) =
+    Result.map_error
+      (fun failure ->
+         "the settings a server on this base path reads do not load (its environment \
+          and its runtime.toml), so it would not start either: "
+         ^ Keeper_runtime_config.load_failure_to_string failure)
+      (Keeper_runtime_config.load_and_apply ~base_path)
+  in
   match Env_config_core.masc_http_base_url_opt () with
   | None ->
     Error
-      (key
-       ^ " is not set, so the link has no address; set it to the http(s) address the \
-          person opens")
+      ("no base URL is set ("
+       ^ names
+       ^ "), so the link has no address; set one to the http(s) address the person opens")
   | Some base ->
     if Masc.Play_invite.is_http_public_base_url base
     then Ok base
     else
       (* The value is not echoed: a refused URL can carry a password. *)
       Error
-        (key
-         ^ " is not an http(s) origin with no user, path, query or fragment, so it cannot \
-            carry the link")
+        ("the base URL ("
+         ^ names
+         ^ ") is not an http(s) origin with no user, path, query or fragment, so it \
+            cannot carry the link")
 ;;
 
 (* A running account server issues invitations itself, so the person is sent
@@ -67,7 +80,7 @@ let invite_held ~base_path ~lock_path owner =
   | Ok Authz_boot_mode.Asks_single_user | Error (_ : Authz_boot_mode.refusal) -> shared
   | Ok Authz_boot_mode.Asks_multi_account ->
     let console, address_note =
-      match public_base_url () with
+      match public_base_url ~base_path with
       | Ok base -> base ^ Account_page.console_path, ""
       | Error reason ->
         Account_page.console_path, " It also needs an address for the link: " ^ reason ^ "."
@@ -99,7 +112,7 @@ let anonymous_mutations () =
    printed, or a setting a server would refuse, writes nothing. *)
 let under_lease ~held ~base_path write =
   with_lease ~held ~base_path (fun base_path ->
-    let* base_url = public_base_url () in
+    let* base_url = public_base_url ~base_path in
     let* anonymous_mutations = anonymous_mutations () in
     let* written =
       Eio_main.run (fun _env ->
@@ -152,13 +165,13 @@ let print_link ~command ~base_url ~next invitation =
 let start_step ~base_url ~base_path =
   Printf.sprintf
     "Start the account server where %s reaches it: masc start --base-path %s --port \
-     <port>, with %s and the client secret of each login client of config.json \
-     exported (docs/guides/account-server-setup.md, step 3). A trial on this machine \
-     runs masc auth preview in its place (the same guide, \"Try it on this machine \
-     first\")."
+     <port>, with the client secret of each login client of config.json exported. \
+     The server reads its address as this command did (%s) \
+     (docs/guides/account-server-setup.md, step 3). A trial on this machine runs masc \
+     auth preview in its place (the same guide, \"Try it on this machine first\")."
     base_url
     (Filename.quote base_path)
-    Env_config_core.http_base_url_env_key
+    Env_config_core.http_base_url_setting_names
 ;;
 
 let refused command reason =

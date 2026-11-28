@@ -16,13 +16,15 @@ val load_persisted_reactions : Board_types.store -> (int, string * exn) result
 val recalculate_reply_counts : Board_types.store -> unit
 
 val reobserve_posts : Board_types.store -> (unit, Board_types.board_error) result
-(** Take persistence, then re-read the posts file only when the store was
-    refused because another writer moved the file away from its observation.
-    An unknown earlier write is reported, not read clear. A complete read
-    replaces the posts model, re-derives reply and vote counts and becomes the
-    new write observation. [Ok ()] when no reobservation was due or the source
-    is readable again; [Error] names the cause and the needed action. The
-    caller must not hold persistence. *)
+(** Re-read the posts file when the store is refused for a cause
+    {!Board_posts_source.fresh_read_can_clear} accepts. Persistence is taken
+    only for that read: a store with nothing due answers [Ok ()], and an
+    unknown earlier write or a pending deletion answers [Error] from the
+    store's fields, not read clear. A complete read replaces the posts model,
+    re-derives reply and vote counts and becomes the new write observation.
+    [Ok ()] when no reobservation was due or the source is readable again;
+    [Error] names the cause and the needed action. The caller must not hold
+    persistence. *)
 
 val reobserve :
   Board_types.store -> (Board_paths.persisted_file * Board_types.board_error) list
@@ -31,9 +33,10 @@ val reobserve :
     when it is refused for a cause {!Board_posts_source.fresh_read_can_clear}
     accepts. A complete read replaces that source's model as at startup and
     becomes its new write observation; a comments read that is not complete
-    merges its rows and re-derives no counts. Returns the sources that were
-    due and are still not readable, each with its cause: a read that failed,
-    or a pending deletion, during which no source is read again. Posts are
-    also returned while a write of unknown outcome needs a restart. A source
-    refused for any other cause is not in the list. The caller must hold
-    neither persistence nor the state lock (#55449). *)
+    merges its rows and re-derives no counts. Persistence is taken only for a
+    read, so a store with nothing due costs a look at its fields. Returns the
+    sources that were due and are still not readable, each with its cause: a
+    read that failed, or a pending deletion, during which no source is read
+    again. Posts are also returned while a write of unknown outcome needs a
+    restart. A source refused for any other cause is not in the list. The
+    caller must hold neither persistence nor the state lock (#55449). *)

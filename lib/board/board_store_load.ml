@@ -181,43 +181,64 @@ let load_reactions_under_persistence store =
 let load_persisted_reactions store =
   with_persist_lock store (fun () -> load_reactions_under_persistence store)
 
+(* A pending deletion forbids replacing a model; only a fresh store may. Read
+   from the store's fields, so an operation learns it without waiting for
+   persistence. *)
+let model_reload_allowed store ~path =
+  Board_core_persist.require_model_reload_allowed store ~path
+  |> Result.map_error (fun ((_ : string), exn) -> Io_error (Printexc.to_string exn))
+
+let unknown_posts_write ~path =
+  Io_error (Printf.sprintf
+    "posts source %s has an earlier write whose outcome is unknown, so Board \
+     writes stay refused while listing keeps the loaded posts. Restart the \
+     server to reload the Board from the file." path)
+
 (* task-4036: a posts write refused by a stale observation (another writer
    moved the file) must not refuse every later write. Re-read
    the file once under persistence, install a complete read as the posts model
-   with counts re-derived as at startup, and publish it as the new observation. *)
+   with counts re-derived as at startup, and publish it as the new observation.
+
+   Persistence is taken only for a read. A store with nothing due, an unknown
+   earlier write and a pending deletion are answered from the store's fields:
+   every Board operation asks, and one that only reads must not queue behind
+   a write's file I/O to be told what a field already says. *)
 let reobserve_posts store =
+  let path = Board_paths.persist_path store in
   match store.posts_source with
   | Posts_unobserved | Posts_readable _ -> Ok ()
-  | Posts_refused _ | Posts_unsettled _ ->
-    with_persist_lock store (fun () ->
-      let path = Board_paths.persist_path store in
-      match Board_core_persist.require_model_reload_allowed store ~path with
-      | Error (_, exn) -> Error (Io_error (Printexc.to_string exn))
+  | Posts_unsettled _ -> Error (unknown_posts_write ~path)
+  | Posts_refused _ ->
+    if not (Board_posts_source.reobservation_due store)
+    then Ok ()
+    else
+      match model_reload_allowed store ~path with
+      | Error _ as refused -> refused
       | Ok () ->
-        match Board_posts_source.reobserve store with
-        | Board_posts_source.Reobservation_not_due -> Ok ()
-        | Board_posts_source.Unsettled_write_pending ->
-          Error (Io_error (Printf.sprintf
-            "posts source %s has an earlier write whose outcome is unknown, so Board \
-             writes stay refused while listing keeps the loaded posts. Restart the \
-             server to reload the Board from the file." path))
-        | Board_posts_source.Reobserved outcome ->
-          let outcome =
-            try
-              with_lock store (fun () ->
-                (match outcome with
-                 | Posts_complete { posts; _ } ->
-                   Board_votes_json.replace_loaded_posts store posts;
-                   recalculate_reply_counts store;
-                   recalculate_vote_counts store
-                 | Posts_partial _ | Posts_unavailable _ -> ());
-                publish_posts_read store outcome);
-              outcome
-            with exception_ ->
-              fst (Board_posts_source.fail_read store outcome ~stage:Project_posts
-                exception_ (Printexc.get_raw_backtrace ())) in
-          finish_posts_read outcome;
-          require_posts_source_readable store)
+        with_persist_lock store (fun () ->
+          match model_reload_allowed store ~path with
+          | Error _ as refused -> refused
+          | Ok () ->
+            match Board_posts_source.reobserve store with
+            | Board_posts_source.Reobservation_not_due -> Ok ()
+            | Board_posts_source.Unsettled_write_pending -> Error (unknown_posts_write ~path)
+            | Board_posts_source.Reobserved outcome ->
+              let outcome =
+                try
+                  with_lock store (fun () ->
+                    (match outcome with
+                     | Posts_complete { posts; _ } ->
+                       Board_votes_json.replace_loaded_posts store posts;
+                       recalculate_reply_counts store;
+                       recalculate_vote_counts store
+                     | Posts_partial _ | Posts_unavailable _ -> ());
+                    publish_posts_read store outcome);
+                  outcome
+                with exception_ ->
+                  fst (Board_posts_source.fail_read store outcome ~stage:Project_posts
+                    exception_ (Printexc.get_raw_backtrace ())) in
+              finish_posts_read outcome;
+              require_posts_source_readable store)
 
 (* #55449: the other four sources refuse on a stale observation as posts did
    and were read again only at startup. On 2026-11-24 every comment write was
@@ -232,25 +253,20 @@ let reloaded result =
 (* Startup order: comments re-derive counts held on posts, votes re-derive
    counts held on posts and comments.
 
-   A source is asked before persistence is taken and again once it is held, so
-   a call that waited behind another call's read finds the source readable and
-   reads nothing. A loader refuses before it reads while a deletion is
-   pending; that refusal is returned like a read that failed. *)
+   As for posts, persistence is taken only for a read. A source is asked again
+   once persistence is held: a call that waited behind a read that cleared the
+   source reads nothing. Behind a read that met another writer's lock the
+   source is still due, and each waiting call tries once. *)
 let reobserve store =
-  let read_again ~due ~load () =
+  let read_again file ~due ~load () =
     if not (due store)
     then Ok ()
-    else with_persist_lock store (fun () -> if due store then reloaded (load store) else Ok ())
-  in
-  (* [reobserve_posts] asks again under persistence. It also answers for a
-     write whose outcome is unknown: the restart that needs is reported at
-     each operation, as it was before this function. *)
-  let posts () =
-    match store.posts_source with
-    | Posts_unobserved | Posts_readable _ -> Ok ()
-    | Posts_unsettled _ -> reobserve_posts store
-    | Posts_refused _ ->
-      if Board_posts_source.reobservation_due store then reobserve_posts store else Ok ()
+    else
+      match model_reload_allowed store ~path:(Board_paths.store_file_path store file) with
+      | Error _ as refused -> refused
+      | Ok () ->
+        with_persist_lock store (fun () ->
+          if due store then reloaded (load store) else Ok ())
   in
   (* As at startup, and in the interval that replaces the comments: reply
      counts are held on posts, and the vote counts of the comments just loaded
@@ -265,17 +281,17 @@ let reobserve store =
        match attempt () with
        | Ok () -> None
        | Error error -> Some (file, error))
-    [ Board_paths.Posts, posts
+    [ Board_paths.Posts, (fun () -> reobserve_posts store)
     ; ( Board_paths.Comments
-      , read_again ~due:Board_comments_source.reobservation_due
+      , read_again Board_paths.Comments ~due:Board_comments_source.reobservation_due
           ~load:load_comments )
     ; ( Board_paths.Votes
-      , read_again ~due:Board_votes_source.reobservation_due
+      , read_again Board_paths.Votes ~due:Board_votes_source.reobservation_due
           ~load:load_votes_under_persistence )
     ; ( Board_paths.Reactions
-      , read_again ~due:Board_reactions_source.reobservation_due
+      , read_again Board_paths.Reactions ~due:Board_reactions_source.reobservation_due
           ~load:load_reactions_under_persistence )
     ; ( Board_paths.Sub_boards
-      , read_again ~due:Board_sub_boards_source.reobservation_due
+      , read_again Board_paths.Sub_boards ~due:Board_sub_boards_source.reobservation_due
           ~load:Board_sub_boards.reload_sub_boards_under_persistence )
     ]

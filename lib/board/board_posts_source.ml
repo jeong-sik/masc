@@ -361,13 +361,16 @@ let write store ~pre_write ~kind ~workspace_observation ~bytes ~diagnostics perf
     write_raised store ~pre_write ~kind ~bytes ~diagnostics
       exception_ (Printexc.get_raw_backtrace ())
 
-(* #55449: whether one more read of the same file can end a refusal. A cursor
+(* #55449: whether a refusal is read again before the next operation. A cursor
    or content mismatch is raised by a write alone and says the file is no
    longer the one observed. A path that changed during the operation and a
    contended lock end when the other writer does. The rest describe the file
    as it is (a torn tail, a second hard link, not a regular file) or an
-   operation that failed: reading again meets the same thing, and a source
-   that kept asking would read the whole file at every operation. *)
+   operation that failed. While such a cause lasts a read meets it again, and
+   nothing here tells when it has gone, so a source that kept asking would
+   take persistence at every operation. Such a refusal is not read again: it
+   lasts until a restart, also after the file was repaired or the failure
+   passed (#55465). *)
 let rec fresh_read_can_clear = function
   | Fs_compat.Cursor_mismatch _ | Transaction_content_changed _
   | Transaction_path_binding_changed _ | Stable_lock_contended _ -> true
@@ -379,10 +382,11 @@ let rec fresh_read_can_clear = function
   | Transaction_settlement_failed { primary = Transaction_succeeded _; _ }
   | Transaction_append_failed _ -> false
 
-(* A refusal caused by the file moving away from this store's observation
-   (another writer appended, replaced or rewrote it) proves only that the old
-   observation is stale. Every later write reuses that stale expectation, so
-   without a fresh read the store refuses forever (task-4036). *)
+(* A refusal one more read can end. The case this was written for (task-4036):
+   the file moved away from this store's observation (another writer appended,
+   replaced or rewrote it), which proves only that the old observation is
+   stale. Every later write reuses that stale expectation, so without a fresh
+   read the store refuses forever. *)
 let stale_observation = function
   | Posts_transaction_failed error -> fresh_read_can_clear error
   | Posts_not_observed | Posts_rows_rejected _ | Posts_missing

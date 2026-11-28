@@ -409,16 +409,18 @@ let started_backend () =
           store
 
 (* task-4036, #55449: a Board source refused because another writer moved its
-   file, or because a read met that writer's lock, is read again here, once,
-   before the caller's operation. Every caller reaches the store through this
-   function, so no operation has to be listed as one that reads again. It is
-   called outside every Board lock: nothing outside [lib/board] holds one, and
-   no callback run under one calls back into Dispatch. *)
+   file, or because a read met that writer's lock, is read again here before
+   the caller's operation. Every Dispatch operation takes the store here, some
+   more than once, so no operation has to be listed as one that reads again; a
+   call that finds nothing due looks at the store's fields and returns. The
+   flusher takes the store without it. It is called outside every Board lock:
+   nothing outside [lib/board] holds one, and no callback run under one calls
+   back into Dispatch. *)
 let backend () =
   let store = started_backend () in
   List.iter
     (fun (file, error) ->
-       Log.BoardLog.warn "board source %s stays unavailable after reobservation: %s"
+       Log.BoardLog.warn "board source %s stays unavailable: %s"
          (Board_paths.store_file_path store file) (Board_types.show_board_error error))
     (Board.reobserve store);
   store

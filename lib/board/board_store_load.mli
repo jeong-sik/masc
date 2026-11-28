@@ -26,11 +26,12 @@ val reobserve_posts : Board_types.store -> (unit, Board_types.board_error) resul
 
 val reobserve :
   Board_types.store -> (Board_paths.persisted_file * Board_types.board_error) list
-(** {!reobserve_posts}, then the same fresh read for the comments, votes,
-    reactions and sub-board policy sources, in the order startup loads them.
-    A source is read again only when its refusal proves its observation stale.
-    A complete read replaces that source's model as at startup and becomes its
-    new write observation. Returns the sources still unavailable afterwards,
-    each with its cause; empty when every source that was due is readable
-    again. The caller must hold neither persistence nor the state
-    lock (#55449). *)
+(** One fresh read for each source that is due, in the order startup loads
+    them: posts, comments, votes, reactions, sub-board policy. A source is due
+    when it is refused for a cause {!Board_posts_source.fresh_read_can_clear}
+    accepts and no deletion is pending. A complete read replaces that source's
+    model as at startup and becomes its new write observation; a comments read
+    that is not complete merges its rows and re-derives no counts. Returns the
+    reads that were attempted and failed, each with its cause; a source that
+    was not due is not in the list, whatever its state. The caller must hold
+    neither persistence nor the state lock (#55449). *)

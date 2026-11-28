@@ -288,8 +288,9 @@ let add_comment_with_audience
            | Error _ as error ->
              (* Retain the same persistence interval and exact append receipt.
                 A foreign append makes cleanup CAS fail instead of deleting
-                its rows. Dirty retry is volatile; restart before cleanup can
-                still reload this rejected row (#26378). *)
+                its rows. Dirty retry is volatile; a restart or a
+                reobservation before cleanup can still reload this rejected
+                row (#26378, #55449). *)
              rewrite_comments_under_persistence store;
              error)))
 ;;

@@ -94,9 +94,8 @@ let recalculate_vote_counts store =
   invalidate_comment_caches store
 ;;
 
-let load_persisted_votes store =
+let load_votes_under_persistence store =
   let module Source = Board_votes_source in
-  with_persist_lock store (fun () ->
     let path = Board_paths.store_file_path store Board_paths.Votes in
     let open Result.Syntax in
     let* () = Board_core_persist.require_model_reload_allowed store ~path in
@@ -137,12 +136,14 @@ let load_persisted_votes store =
     | Board_posts_source.Reserved_settlement _ as carrier -> raise carrier
     | exception_ ->
       let outcome = Source.fail_read store outcome exception_ (Printexc.get_raw_backtrace ()) in
-      finish outcome)
+      finish outcome
 
-let load_persisted_reactions store =
+let load_persisted_votes store =
+  with_persist_lock store (fun () -> load_votes_under_persistence store)
+
+let load_reactions_under_persistence store =
   let module Source = Board_reactions_source in
   let path = Board_paths.store_file_path store Board_paths.Reactions in
-  Board_core_persist.with_persist_lock store (fun () ->
     let open Result.Syntax in
     let* () = Board_core_persist.require_model_reload_allowed store ~path in
     let t0 = Time_compat.now () in
@@ -175,7 +176,10 @@ let load_persisted_reactions store =
     | Board_posts_source.Reserved_settlement _ as carrier -> raise carrier
     | exception_ ->
       let outcome = Source.fail_read store outcome exception_ (Printexc.get_raw_backtrace ()) in
-      finish outcome)
+      finish outcome
+
+let load_persisted_reactions store =
+  with_persist_lock store (fun () -> load_reactions_under_persistence store)
 
 (* task-4036: a posts write refused by a stale observation (another writer
    moved the file) must not refuse every later write. Re-read
@@ -218,52 +222,63 @@ let reobserve_posts store =
 (* #55449: the other four sources refuse on a stale observation as posts did
    and were read again only at startup. On 2026-11-24 every comment write was
    refused for 123 minutes, until the restart. Each is read again by the
-   function that loads it at startup, and only when its refusal is one a fresh
-   read can clear. The check runs before persistence is taken, so two calls
-   that arrive together may each read once; either read is complete. *)
+   function that loads it at startup, and only for a refusal one more read
+   can end. *)
 let reloaded result =
   result
   |> Result.map (fun (_ : int) -> ())
   |> Result.map_error (fun ((_ : string), exn) -> Io_error (Printexc.to_string exn))
 
-let reobserve_comments store =
-  if Board_comments_source.reobservation_due store
-  then
-    (* As at startup, and in the interval that replaces the comments: reply
-       counts are held on posts, and the vote counts of the comments just
-       loaded come from the vote ledger. *)
-    reloaded
-      (Board_votes_json.load_comments_deriving store ~derive:(fun () ->
-         recalculate_reply_counts store;
-         recalculate_vote_counts store))
-  else Ok ()
-
-let reobserve_votes store =
-  if Board_votes_source.reobservation_due store
-  then reloaded (load_persisted_votes store)
-  else Ok ()
-
-let reobserve_reactions store =
-  if Board_reactions_source.reobservation_due store
-  then reloaded (load_persisted_reactions store)
-  else Ok ()
-
-let reobserve_sub_boards store =
-  if Board_sub_boards_source.reobservation_due store
-  then reloaded (Board_core.reload_sub_boards store)
-  else Ok ()
-
 (* Startup order: comments re-derive counts held on posts, votes re-derive
-   counts held on posts and comments. *)
+   counts held on posts and comments.
+
+   A source is asked before persistence is taken and again once it is held, so
+   a call that waited behind another call's read finds the source readable and
+   reads nothing. A store with a deletion pending may not replace its model;
+   nothing is attempted for it and the operation's own refusal stands. *)
 let reobserve store =
+  let may_read file ~due =
+    due store
+    && Result.is_ok
+         (Board_core_persist.require_model_reload_allowed store
+            ~path:(Board_paths.store_file_path store file))
+  in
+  let read_again file ~due ~load () =
+    if not (may_read file ~due)
+    then Ok ()
+    else
+      with_persist_lock store (fun () ->
+        if may_read file ~due then reloaded (load store) else Ok ())
+  in
+  let posts () =
+    if may_read Board_paths.Posts ~due:Board_posts_source.reobservation_due
+    then reobserve_posts store
+    else Ok ()
+  in
+  (* As at startup, and in the interval that replaces the comments: reply
+     counts are held on posts, and the vote counts of the comments just loaded
+     come from the vote ledger. *)
+  let load_comments store =
+    Board_votes_json.load_comments_under_persistence store ~derive:(fun () ->
+      recalculate_reply_counts store;
+      recalculate_vote_counts store)
+  in
   List.filter_map
-    (fun (source, reobserve_source) ->
-       match reobserve_source store with
+    (fun (file, attempt) ->
+       match attempt () with
        | Ok () -> None
-       | Error error -> Some (source, error))
-    [ Board_paths.Posts, reobserve_posts
-    ; Board_paths.Comments, reobserve_comments
-    ; Board_paths.Votes, reobserve_votes
-    ; Board_paths.Reactions, reobserve_reactions
-    ; Board_paths.Sub_boards, reobserve_sub_boards
+       | Error error -> Some (file, error))
+    [ Board_paths.Posts, posts
+    ; ( Board_paths.Comments
+      , read_again Board_paths.Comments ~due:Board_comments_source.reobservation_due
+          ~load:load_comments )
+    ; ( Board_paths.Votes
+      , read_again Board_paths.Votes ~due:Board_votes_source.reobservation_due
+          ~load:load_votes_under_persistence )
+    ; ( Board_paths.Reactions
+      , read_again Board_paths.Reactions ~due:Board_reactions_source.reobservation_due
+          ~load:load_reactions_under_persistence )
+    ; ( Board_paths.Sub_boards
+      , read_again Board_paths.Sub_boards ~due:Board_sub_boards_source.reobservation_due
+          ~load:Board_sub_boards.reload_sub_boards_under_persistence )
     ]

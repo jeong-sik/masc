@@ -440,39 +440,6 @@ export interface KeeperToolStatsData extends KeeperToolSource {
   }[]
 }
 
-export interface KeeperLastPromptData {
-  readonly keeper: string
-  readonly captured_at: number
-  readonly trace_id: string
-  readonly absolute_turn: number
-  readonly assembled: string | null
-  readonly assembled_bytes: number
-  readonly system_prompt: string | null
-  readonly blocks: readonly { readonly id: string; readonly bytes: number; readonly text: string }[]
-}
-
-export interface ProviderInputPartSummary {
-  readonly index: number
-  readonly kind: 'system_prompt' | 'message' | 'tool_schema'
-  readonly role?: string
-  readonly name?: string
-  readonly bytes: number
-  readonly sha256: string
-}
-
-export interface ProviderInputData {
-  readonly keeper: string
-  readonly turn_ref: string
-  readonly runtime_profile: string
-  readonly wire: {
-    readonly provider: string
-    readonly model: string
-    readonly http_codec: string
-    readonly body_bytes: number
-  }
-  readonly parts: readonly ProviderInputPartSummary[]
-}
-
 export interface RawTraceTurnItem {
   readonly file: string
   readonly trace_id: string | null

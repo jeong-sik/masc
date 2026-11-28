@@ -55,13 +55,13 @@ import {
 import type {
   CheckpointInventoryData,
   DebugCompanionTab,
-  KeeperLastPromptData,
   KeeperMemoryFactsData,
   KeeperMemoryJournalData,
   KeeperToolCallsData,
-  ProviderInputData,
   RawTraceTurnItem,
 } from './types'
+import type { PromptCapture } from './prompt-capture-wire'
+import type { ProviderInputSnapshot } from '../../api/dashboard-provider-input'
 
 export interface PromptCacheSegments {
   readonly cacheRead: number | null
@@ -162,8 +162,8 @@ export function KeeperDebugCompanion(props: KeeperDebugCompanionProps) {
   const [traceError, setTraceError] = useState<string | null>(null)
 
   // Context state
-  const [lastPrompt, setLastPrompt] = useState<KeeperLastPromptData | null>(null)
-  const [providerInput, setProviderInput] = useState<ProviderInputData | null>(null)
+  const [lastPrompt, setLastPrompt] = useState<PromptCapture | null>(null)
+  const [providerInput, setProviderInput] = useState<ProviderInputSnapshot | null>(null)
   const [checkpoints, setCheckpoints] = useState<CheckpointInventoryData | null>(null)
   const [compactionEpochs, setCompactionEpochs] = useState<number | null>(null)
   const [contextStatus, setContextStatus] = useState<string | null>(null)
@@ -773,7 +773,7 @@ export function KeeperDebugCompanion(props: KeeperDebugCompanionProps) {
                     : html`<div class="kp-empty">캡처된 프롬프트 없음</div>`}
                   ${providerInput && html`
                     <div class="kp-roster-sub">
-                      Provider Input: ${providerInput.wire.provider}/${providerInput.wire.model} (${providerInput.parts.length} parts · ${providerInput.wire.body_bytes.toLocaleString('en-US')} B)
+                      Provider Input: ${providerInput.wire.provider}/${providerInput.wire.model} (${providerInput.parts.length} parts · ${providerInput.wire.bodyBytes.toLocaleString('en-US')} B)
                     </div>
                   `}
                 `}

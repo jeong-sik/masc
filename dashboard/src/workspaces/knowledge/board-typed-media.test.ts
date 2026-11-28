@@ -4,6 +4,7 @@ import { cleanup, fireEvent, render, waitFor } from '@testing-library/preact'
 import { html } from 'htm/preact'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { BoardTypedMediaList } from '../../components/attachments/board-typed-media'
+import { authSession } from '../../core/auth'
 import { decodeBoardPost } from './types'
 
 const SHA = 'c'.repeat(64)
@@ -73,6 +74,36 @@ describe('Board typed audio and MIDI attachments', () => {
       expect(view.container.querySelector('audio')?.getAttribute('src')).toBe('blob:stored-audio')
     })
     expect(String(fetchSpy.mock.calls[0]?.[0])).toContain(`/api/v1/artifact-bytes/${SHA}`)
+  })
+
+  it('offers no player on a multi-account installation and keeps the source link', () => {
+    const before = authSession.value
+    authSession.value = { ...before, kind: 'multi_account_signed_in' } as typeof authSession.value
+    try {
+      const post = decodeBoardPost(rawPost([STORED_WAV, { kind: 'audio', url: 'https://example.com/a.mp3' }]))
+      const view = render(html`<${BoardTypedMediaList} media=${post!.typedMedia} />`)
+
+      expect(view.container.querySelector('audio')).toBeNull()
+      expect(view.queryByText('불러오기')).toBeNull()
+      expect(view.getAllByText('다중 계정 설치에서는 여기서 재생할 수 없습니다.')).toHaveLength(2)
+      expect(view.getByText('원본 열기').getAttribute('href')).toBe('https://example.com/a.mp3')
+    } finally {
+      cleanup()
+      authSession.value = before
+    }
+  })
+
+  it('does not blame admin login for an external server refusing a MIDI URL', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('', { status: 403 })))
+    const post = decodeBoardPost(rawPost([{ kind: 'midi', url: 'https://example.com/theme.mid' }]))
+
+    const view = render(html`<${BoardTypedMediaList} media=${post!.typedMedia} />`)
+    fireEvent.click(view.getByText('불러오기'))
+
+    await waitFor(() => {
+      expect(view.getByRole('alert').textContent).toContain('HTTP 403')
+    })
+    expect(view.getByRole('alert').textContent).not.toContain('관리자')
   })
 
   it('says so when the stored file needs admin', async () => {

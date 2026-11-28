@@ -404,7 +404,6 @@ export function PersonalKeepersWorkspace(props: PersonalKeepersWorkspaceProps) {
               <span class="kp-roster-title-text" title=${`Personal Keepers (${keepers.length})`}>
                 Personal (<span class="tnum">${keepers.length}</span>)
               </span>
-              <span class="kp-pill" data-tone="info">${session.role}</span>
             </h2>
             <button
               type="button"
@@ -414,6 +413,10 @@ export function PersonalKeepersWorkspace(props: PersonalKeepersWorkspaceProps) {
             >
               + Create Keeper
             </button>
+          </div>
+
+          <div class="kp-roster-note" data-testid="ma-roster-role">
+            <span class="kp-pill" data-tone="info">${session.role}</span>
           </div>
 
           <input

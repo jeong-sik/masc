@@ -460,6 +460,12 @@ describe('Multi-Account Personal Keepers UI flows (Worker & Admin)', () => {
       expect(view.getByTestId('ma-turn-failed')).toBeTruthy()
       expect(view.container.textContent).toContain('모델이 이 메시지를 읽었을 수 있습니다')
     })
+    // The title line holds the title and its count alone; the role sits on the line under it.
+    const rosterTitle = view.container.querySelector('.kp-roster-title')
+    expect(rosterTitle?.textContent?.replace(/\s+/g, ' ').trim()).toBe('Personal (1)')
+    expect(rosterTitle?.querySelector('.kp-pill')).toBeNull()
+    expect(view.getByTestId('ma-roster-role').textContent?.trim()).toBe('worker')
+    expect(view.getByTestId('ma-roster-role').previousElementSibling?.classList.contains('kp-roster-top')).toBe(true)
 
     // 2. Switch to historical conversation -> read-only banner + earlier turn shown
     fireEvent.click(view.container.querySelector('[data-conversation-id="conv-old-1"] .kp-ma-conv-select')!)

@@ -8,7 +8,10 @@ import { isWaitingUnavailable } from './turn-context'
 import { KeeperTurnElapsed } from './turn-elapsed'
 import { useCallback, useEffect, useMemo, useState } from 'preact/hooks'
 import { authSession } from '../../core/auth'
+import { useLateRead } from '../../core/late-read'
 import { formatObserved, type Observed } from '../../core/resource-cache'
+import { formatTimeHmMs } from '../../lib/format-time'
+import { InlineSpinner } from '../../components/common/inline-spinner'
 import { KeeperBadge } from '../../components/keeper-badge'
 import { VirtualList } from '../../components/primitives/virtual-list'
 import { isAdminLockedForSession } from '../../routes/router'
@@ -103,6 +106,11 @@ export function KeeperRoster(props: KeeperRosterProps) {
   )
   const getRosterKey = useCallback((k: KeeperRosterItem) => k.name, [])
 
+  const late = useLateRead(props.roster)
+  const lateHint = late && props.roster.kind === 'value'
+    ? `목록을 다시 읽는 중입니다 · ${formatTimeHmMs(props.roster.updatedAt)} 조회 결과`
+    : null
+
   return html`
     <aside class="kp-roster" aria-label="Keeper 로스터">
       <div class="kp-roster-head">
@@ -111,8 +119,10 @@ export function KeeperRoster(props: KeeperRosterProps) {
             <span class="kp-roster-title-text" title=${`Keepers (${items.length})`}>
               Keepers (<span class="tnum">${items.length}</span>)
             </span>
-            ${props.roster.kind === 'value' && props.roster.stale && html`
-              <span class="kp-pill" data-tone="warn">지연됨</span>
+            ${lateHint !== null && html`
+              <span class="kp-roster-late" title=${lateHint}>
+                <${InlineSpinner} size="sm" tone="muted" ariaLabel=${lateHint} testId="keeper-roster-late" />
+              </span>
             `}
           </h2>
           ${!adminLocked && html`

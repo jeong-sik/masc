@@ -77,8 +77,17 @@
   white-space: nowrap;
 }
 
-.kp-roster-title .kp-pill {
+.kp-roster-late {
   flex: none;
+  display: inline-flex;
+  align-items: center;
+}
+
+.kp-roster-note {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
 }
 
 .kp-roster-top .btn-primary {

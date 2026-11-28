@@ -3243,6 +3243,125 @@ let test_retract_records_a_retraction () =
     "and the earlier retraction stays in the commit log" recorded (retractions ())
 ;;
 
+(* task-1644: one turn wrote and retracted the same claim ten times each, and
+   every write receipt said "inserted" as if for the first time. Each receipt
+   now carries what the commit log says that id has been through, counting
+   the commit it reports, while the answer the repeat guard reads stays the
+   same so the loop still looks like a loop. *)
+let test_alternating_write_and_retract_receipts_carry_the_id_history () =
+  with_temp_dir
+  @@ fun base_path ->
+  let config = Masc.Workspace.default_config base_path in
+  let meta = make_meta "alternating-write-retract" in
+  let args = make_args ~title:"" ~content:"the build cache lives on volume b" in
+  let write () =
+    (write_tool ~config ~meta ~args).Masc.Keeper_tool_execution.raw_output
+  in
+  let retract id =
+    (retract_tool
+       ~config
+       ~meta
+       ~args:(make_retract_args ~memory_id:id ~reason:"rechecking the volume"))
+      .Masc.Keeper_tool_execution.raw_output
+    |> Yojson.Safe.from_string
+  in
+  let history json = json_field "memory_id_history" json in
+  let count key json =
+    match json_field key (history json) with
+    | `Int n -> n
+    | _ -> Alcotest.failf "expected int history field: %s" key
+  in
+  let check_counts label ~inserted ~retracted json =
+    Alcotest.(check (pair int int))
+      label
+      (inserted, retracted)
+      (count "inserted" json, count "retracted" json)
+  in
+  let fingerprint receipt =
+    match
+      Masc.Keeper_tool_progress_identity.digest_tool_io
+        ~tool_name:"keeper_memory_write" ~input:args ~output_text:receipt ()
+    with
+    | Some io -> io.Masc.Keeper_tool_progress_identity.output_fingerprint
+    | None -> Alcotest.fail "no fingerprint for a memory write receipt"
+  in
+  let first_raw = write () in
+  let first = Yojson.Safe.from_string first_raw in
+  let id = string_field "memory_id" first in
+  check_counts "a first insert has no past" ~inserted:1 ~retracted:0 first;
+  Alcotest.(check bool) "nothing was retracted yet" true
+    (json_field "last_retracted_at" (history first) = `Null);
+  check_counts "the retraction is counted with it" ~inserted:1 ~retracted:1 (retract id);
+  let second_raw = write () in
+  let second = Yojson.Safe.from_string second_raw in
+  Alcotest.(check string) "the re-insert is still an insert" "inserted"
+    (string_field "identity_disposition" second);
+  check_counts "but it says the id was inserted and retracted before"
+    ~inserted:2 ~retracted:1 second;
+  (match json_field "last_retracted_at" (history second) with
+   | `String _ -> ()
+   | _ -> Alcotest.fail "the re-insert names when the id was last retracted");
+  check_counts "the second retraction" ~inserted:2 ~retracted:2 (retract id);
+  let third_raw = write () in
+  check_counts "the third insert" ~inserted:3 ~retracted:2
+    (Yojson.Safe.from_string third_raw);
+  Alcotest.(check string) "the history stays out of the answer the repeat guard reads"
+    (fingerprint first_raw) (fingerprint third_raw);
+  ignore (fingerprint second_raw)
+;;
+
+(* A folded log keeps only the last removal per id, so retractions can vanish
+   with the folded detail rows; the receipt must then say every count is a
+   lower bound, not only inserts (reviews on #55484). *)
+let test_of_history_marks_folded_history_as_lower_bounds () =
+  with_temp_dir
+  @@ fun base_path ->
+  let log_path = Filename.concat base_path "keeper-log.jsonl" in
+  let base = Result.get_ok (Masc.Librarian_archive.history log_path) in
+  let folded_fact = fact "folded away" in
+  let id = Masc.Keeper_memory_os_types.memory_id folded_fact in
+  let left : Masc.Librarian_archive.left =
+    { fact = folded_fact
+    ; removal =
+        Masc.Librarian_effects.Retracted
+          { by = Masc.Librarian_effects.Keeper; reason = "folded away" }
+    ; at = 5.
+    ; line_at = 0
+    }
+  in
+  let folded_marker : Masc.Librarian_archive.folded =
+    { through_seq = 10; min_revision = 1; max_revision = 10; min_at = 1.; max_at = 10. }
+  in
+  let check_folded label ~retracted history =
+    let t = Masc.Keeper_memory_id_history.of_history ~memory_id:id history in
+    Alcotest.(check bool) (label ^ ": folded flag set") true t.folded;
+    Alcotest.(check int) (label ^ ": retracted count") retracted t.retracted;
+    let key, json = Masc.Keeper_memory_id_history.receipt_field (Ok t) in
+    Alcotest.(check string) (label ^ ": receipt key") "memory_id_history" key;
+    (match json with
+     | `Assoc fields ->
+       Alcotest.(check bool)
+         (label ^ ": every count is marked a lower bound")
+         true
+         (List.assoc "older_history_folded" fields = `Bool true)
+     | _ -> Alcotest.fail (label ^ ": receipt is not an object"))
+  in
+  check_folded "compaction fold + sidecar" ~retracted:1
+    { base with folded = Some folded_marker; unsequenced = [left] };
+  check_folded "sidecar left row only" ~retracted:1 { base with unsequenced = [left] };
+  check_folded "compaction marker alone" ~retracted:0
+    { base with folded = Some folded_marker };
+  let plain = Masc.Keeper_memory_id_history.of_history ~memory_id:id base in
+  Alcotest.(check bool) "unfolded log: folded flag clear" false plain.folded;
+  (match Masc.Keeper_memory_id_history.receipt_field (Ok plain) with
+   | key, `Assoc fields ->
+     Alcotest.(check string) "unfolded log: receipt key" "memory_id_history" key;
+     Alcotest.(check bool) "unfolded log: no folded marker"
+       false (List.mem_assoc "older_history_folded" fields)
+   | _ -> Alcotest.fail "unfolded log: receipt is not an object");
+  ()
+;;
+
 let test_source_snapshot_commit_notifications () =
   let module Source = Masc.Keeper_memory_source_current in
   let module Notifications = Masc.Keeper_memory_commit_notifications in
@@ -3866,6 +3985,14 @@ let () =
             "retract records removal and survives re-adding the claim"
             `Quick
             test_retract_records_a_retraction
+        ; tool_case
+            "alternating write and retract receipts carry the id history"
+            `Quick
+            test_alternating_write_and_retract_receipts_carry_the_id_history
+        ; tool_case
+            "folded history marks every count as a lower bound"
+            `Quick
+            test_of_history_marks_folded_history_as_lower_bounds
         ; tool_case
             "source parser accepts every supported value"
             `Quick

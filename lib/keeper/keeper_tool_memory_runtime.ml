@@ -1457,6 +1457,13 @@ let keeper_memory_write_with_outcome
                   ; Write_receipt_key.outcome, `String "persisted_current_snapshot"
                   ; Write_receipt_key.store, `String "current_memory_snapshot"
                   ; Write_receipt_key.memory_id, `String memory_id
+                    (* Re-inserting a claim retracted a minute ago reads like
+                       a first insert; the id's past says it is not (task-1644). *)
+                  ; Keeper_memory_id_history.receipt_field
+                      (Keeper_memory_id_history.read
+                         ~keepers_dir
+                         ~keeper_id:meta.Keeper_meta_contract.name
+                         ~memory_id)
                   ]
                 @
                 match supersedes with
@@ -1592,6 +1599,13 @@ let keeper_memory_retract_with_outcome
           ; "store", `String "current_memory_snapshot"
           ; "memory_id", `String memory_id
           ; "reason", `String reason
+          ; Keeper_memory_id_history.receipt_field
+              (Keeper_memory_id_history.read
+                 ~keepers_dir:
+                   (Config_dir_resolver.keepers_dir_for_base_path
+                      ~base_path:config.Workspace.base_path)
+                 ~keeper_id:meta.Keeper_meta_contract.name
+                 ~memory_id)
           ]
           @ removal_receipt commit.effects)
      | Some Already_absent ->

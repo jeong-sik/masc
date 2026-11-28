@@ -59,7 +59,7 @@ related: ["remote-keeper-workspace-entries-are-swept-on-their-endpoint", "idle-k
 
 - 돌려주지 않은 블록: 게스트에서 파일을 지워도 볼륨 이미지가 호스트에서 차지한 자리가 줄지 않는다.
   - 2026-09-27 부터 서버는 게스트를 띄우기 전에 helper 컨테이너로 ext4 discard 기본값을 켰다(#39283). 켜진 볼륨은 지운 자리가 바로 돌아온다(이슈 #44655 의 10-21 측정).
-  - 10-29 에 #46713 이 helper 실행을 멈췄다. helper 컨테이너 이름에 workspace 가 없어서, 같은 이름의 남의 helper 를 지울 수 있었기 때문이다. 그 뒤 helper 함수(`reclaim_apple_work_volume`, `lib/keeper/keeper_sandbox_microvm_work_volume.ml:273`)는 시험만 부른다. 제품 코드에 `fstrim` 은 없다.
+  - 10-29 에 #46713 이 helper 실행을 멈췄다. helper 컨테이너 이름에 workspace 가 없어서, 같은 이름의 남의 helper 를 지울 수 있었기 때문이다. 그 뒤 helper 함수 `reclaim_apple_work_volume` 은 시험만 불렀고, 11-28 에 지웠다(#55535). 제품 코드에 `fstrim` 은 없다.
   - 11-11 16시에 작업 볼륨 이미지 20개의 superblock 을 읽었다. discard 기본값이 있는 것은 4개고, 모두 10-29 11:58 까지 만든 볼륨이다. 없는 16개는 모두 10-29 12:00 뒤에 만들었다. 호스트에서 차지한 자리는 있는 쪽이 61 GiB, 없는 쪽이 95 GiB 다.
   - 같은 날 게스트 셋을 손으로 trim 해서 38 GiB 를 돌려받았다(you-never-change 54→26, github-pr-checker 16→8.1, sangsu 31→28 GiB). 셋 다 discard 기본값이 없는 볼륨이다.
 - 게스트 작업 볼륨 안의 남은 worktree 와 사본: e-masc-the-leader 45 GiB, sangsu 28 GiB, you-never-change 26 GiB(11-11). 치우는 단계가 없다. `RFC-idle-keeper-worktrees-are-swept-where-they-live` 는 Draft 이고 구현되지 않았다.

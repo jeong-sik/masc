@@ -3647,8 +3647,8 @@ let test_volume_repair_argv_grants_only_sys_admin () =
     (adjacent ~flag:"--name" ~value:"masc-keeper-work-x-repair" argv);
   Alcotest.(check bool) "runs as root" true (adjacent ~flag:"--user" ~value:"0" argv);
   Alcotest.(check bool) "drops every capability first" true (contains_run drop_all argv);
-  (* SYS_ADMIN to unmount. e2fsck writes the block device, not files, so the
-     trim helper's DAC_OVERRIDE is not needed. *)
+  (* SYS_ADMIN to unmount. e2fsck writes the block device, not files, so
+     DAC_OVERRIDE is not needed. *)
   Alcotest.(check bool) "only CAP_SYS_ADMIN is added" true
     (adjacent ~flag:"--cap-add" ~value:"CAP_SYS_ADMIN" argv
      && List.length (List.filter (String.equal "--cap-add") argv) = 1);

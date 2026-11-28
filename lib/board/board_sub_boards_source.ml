@@ -187,6 +187,19 @@ let rec contradicts_observation = function
   | Transaction_settlement_failed { primary = Transaction_succeeded _; _ }
   | Transaction_append_failed _ -> false
 
+(* #55449: a refusal that only proves this store's observation stale (another
+   writer moved the file) is cleared by one fresh read, as the posts source
+   is (task-4036). A refusal for any other reason is not: the same file would
+   refuse again. *)
+let stale_observation = function
+  | Policy_transaction_failed error -> contradicts_observation error
+  | Policy_not_observed | Policy_rows_rejected _ | Policy_missing | Policy_binding_mismatch
+  | Policy_publication_pending | Policy_workspace_refused _ | Policy_raised _ -> false
+
+let reobservation_due store = match store.sub_boards_source with
+  | Policy_refused { policy_failure; _ } -> stale_observation policy_failure
+  | Policy_unobserved | Policy_readable _ | Policy_publishing _ | Policy_unsettled _ -> false
+
 let not_written failure diagnostics = Not_written { failure; diagnostics }
 
 let observe_guard_refusal store observation failure =

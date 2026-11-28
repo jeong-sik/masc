@@ -232,6 +232,10 @@ class CheckoutGuestShim(unittest.TestCase):
             self.assertIn(f"so no shim was built for {shim}", result.stderr)
             self.assertIn(f"{BY_HAND} arm64 && install -m 755 dist/remote-ssh/masc-exec-shim-linux-arm64",
                           result.stderr)
+            # Docker is what a host without microVM Keepers is least likely to
+            # have, so the refusal says the shim can go instead.
+            self.assertIn(f"A workspace that runs no microVM Keeper needs no shim: remove {shim} and install again.",
+                          result.stderr)
             # printf %q escapes the space in the fixture's workspace path.
             quoted = str(shim).replace(" ", "\\ ")
             self.assertIn(f"&& mv {quoted}.partial {quoted}", result.stderr)
@@ -281,23 +285,53 @@ class CheckoutGuestShim(unittest.TestCase):
                 self.assertTrue((root / "prefix/masc").is_file())
 
     # The sidecar still describes these bytes, so it stays with them.
+    # The server trims the sidecar and reads what precedes the first space, so
+    # a digest alone, or one after a blank line, verifies the shim as well.
     def test_a_release_shim_of_this_build_keeps_its_sidecar_and_nothing_is_built(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary).resolve()
-            repo = checkout(root)
-            current = elf(EM_AARCH64, BUILD_SOURCE)
-            recorded = guest_shim.sidecar_line(current)
-            base, shim, sidecar = guest_shim.workspace_with_shim(root, content=current, sidecar=recorded)
-            inode = shim.stat().st_ino
-            result = install(root, repo, guest_shim.build_naming(root), base)
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(build_calls(repo), [])
-            self.assertEqual(shim.stat().st_ino, inode, "a current shim was replaced")
-            self.assertEqual(sidecar.read_text(), recorded)
-            self.assertEqual(guest_shim.shim_directory(shim), guest_shim.PAIR)
-            self.assertFalse((root / "release-requested").exists(),
-                             "a default install requested a release")
-            self.assertTrue((root / "prefix/masc").is_file())
+        current = elf(EM_AARCH64, BUILD_SOURCE)
+        digest = guest_shim.sha256(current)
+        for label, recorded in (
+                ("the release line", guest_shim.sidecar_line(current)),
+                ("the digest alone", digest),
+                ("after a blank line", f"\n\t{digest} \n")):
+            with self.subTest(label), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary).resolve()
+                repo = checkout(root)
+                base, shim, sidecar = guest_shim.workspace_with_shim(root, content=current, sidecar=recorded)
+                inode = shim.stat().st_ino
+                result = install(root, repo, guest_shim.build_naming(root), base)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(build_calls(repo), [])
+                self.assertEqual(shim.stat().st_ino, inode, "a current shim was replaced")
+                self.assertEqual(sidecar.read_text(), recorded)
+                self.assertEqual(guest_shim.shim_directory(shim), guest_shim.PAIR)
+                self.assertFalse((root / "release-requested").exists(),
+                                 "a default install requested a release")
+                self.assertTrue((root / "prefix/masc").is_file())
+
+    # A shim built from this checkout was put over a release shim by hand and
+    # the sidecar stayed. The identity is this build's, and the server still
+    # refuses the pair (microvm_shim_hash_mismatch) because the sidecar names
+    # the release bytes that are gone.
+    def test_a_shim_of_this_build_loses_a_sidecar_that_names_other_bytes(self):
+        for label, written in (
+                ("the sha256 of other bytes", guest_shim.sidecar_line(elf(EM_AARCH64, OTHER_SOURCE))),
+                ("no sha256", "not a checksum line\n"),
+                ("empty", "")):
+            with self.subTest(label), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary).resolve()
+                repo = checkout(root)
+                current = elf(EM_AARCH64, BUILD_SOURCE)
+                base, shim, sidecar = guest_shim.workspace_with_shim(root, content=current, sidecar=written)
+                inode = shim.stat().st_ino
+                result = install(root, repo, guest_shim.build_naming(root), base)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(build_calls(repo), [])
+                self.assertEqual(shim.stat().st_ino, inode, "a current shim was replaced")
+                self.assertFalse(sidecar.exists(), "a sidecar the server refuses the shim for stayed")
+                self.assertEqual(guest_shim.shim_directory(shim), ["masc-exec-shim"])
+                self.assertIn(f"removed {sidecar}", result.stdout)
+                self.assertTrue((root / "prefix/masc").is_file())
 
     # A refused rebuild leaves the pair as it was: the server in place still
     # runs that shim, and no new server is put beside it.

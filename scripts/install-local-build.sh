@@ -34,8 +34,9 @@
 # error gives the command that builds the shim by hand; only a rename that
 # fails after masc-exec-shim.previous was written leaves that file holding a
 # copy of the shim still in place. A shim that already declares this build's
-# identity is kept, with its sidecar when it has one. A workspace with no
-# shim is given none.
+# identity is kept, with its sidecar when that names the shim's sha256; a
+# sidecar that names other bytes is removed, because the server refuses the
+# pair. A workspace with no shim is given none.
 #
 # The server still running refuses the new shim from this install until
 # masc restart, as the restarted server refused the old one before (#53164):
@@ -389,6 +390,15 @@ sha256_of() {
   python3 -c 'import hashlib, sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$1"
 }
 
+# The digest a sidecar names, read the way the server reads it
+# (Keeper_sandbox_microvm_shim.sidecar_provenance): the file is trimmed, and
+# what precedes the first space is trimmed again.
+sidecar_digest_of() {
+  python3 -c 'import sys
+blank = b" \x0c\n\r\t"
+print(open(sys.argv[1], "rb").read().strip(blank).split(b" ")[0].strip(blank).decode("ascii", "replace"))' "$1"
+}
+
 # The assets a release ships for the guest shim (scripts/install.sh,
 # guest_shim_asset).
 guest_shim_assets="masc-exec-shim-linux-arm64 masc-exec-shim-linux-amd64"
@@ -589,6 +599,25 @@ checkout_guest_shim() (
     exit 1
   fi
   if installed_source=$(source_identity_of "$shim") && [ "$installed_source" = "$required_source" ]; then
+    # The server also refuses a shim whose sidecar does not begin with the
+    # sha256 of its bytes (microvm_shim_hash_mismatch, _sidecar_invalid). A
+    # shim of this build beside such a sidecar was put over a release shim by
+    # hand, and the sidecar describes the release bytes that are gone.
+    if [ -f "$sidecar" ]; then
+      if ! shim_sha256=$(sha256_of "$shim"); then
+        echo "install-local-build: the sha256 of $shim could not be computed; nothing installed" >&2
+        exit 1
+      fi
+      recorded=$(sidecar_digest_of "$sidecar" 2>/dev/null) || recorded=""
+      if [ "$recorded" != "$shim_sha256" ]; then
+        if ! rm -f "$sidecar"; then
+          echo "install-local-build: guest exec shim $shim is $shim_sha256 and $sidecar names '$recorded', so this build's server refuses the pair, and the sidecar could not be removed; nothing installed" >&2
+          exit 1
+        fi
+        echo "guest exec shim in $shim_dir already declares this build's source identity $required_source; removed $sidecar, which named '$recorded' while the shim is $shim_sha256 (the server refuses that pair)"
+        exit 0
+      fi
+    fi
     echo "guest exec shim in $shim_dir already declares this build's source identity $required_source"
     exit 0
   fi
@@ -610,7 +639,7 @@ checkout_guest_shim() (
   fi
   by_hand+=$(printf ' && mv %q %q' "$shim.partial" "$shim")
   refuse() {
-    echo "install-local-build: guest exec shim $shim declares source identity $installed_source, but this build is $required_source and its server refuses that shim. $1; nothing installed. Build the shim by hand, then install again: $by_hand" >&2
+    echo "install-local-build: guest exec shim $shim declares source identity $installed_source, but this build is $required_source and its server refuses that shim. $1; nothing installed. Build the shim by hand, then install again: $by_hand. A workspace that runs no microVM Keeper needs no shim: remove $shim and install again." >&2
     exit 1
   }
   [ "$guest_arch_status" -eq 0 ] ||

@@ -1,0 +1,23 @@
+(include_subdirs no)
+
+; The Keeper chat wire native clients read: atd-generated types and JSON
+; readers and writers (RFC-native-keeper-chat-clients).
+
+(library
+ (name keeper_chat_wire)
+ (public_name masc.keeper_chat_wire)
+ (flags
+  (:standard -w +4 -w +33))
+ (libraries yojson atdgen-runtime))
+
+(rule
+ (targets keeper_chat_wire_t.ml keeper_chat_wire_t.mli)
+ (deps keeper_chat_wire.atd)
+ (action
+  (run atdgen -t %{deps})))
+
+(rule
+ (targets keeper_chat_wire_j.ml keeper_chat_wire_j.mli)
+ (deps keeper_chat_wire.atd)
+ (action
+  (run atdgen -j %{deps})))

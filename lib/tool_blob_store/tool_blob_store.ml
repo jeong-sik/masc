@@ -213,8 +213,8 @@ let fetch_error_to_string = function
    [make_preview], so the estimate uses the exact sanitized head+tail bytes.
    The size spares a reader that has never seen the body a multi-turn
    artifact-read loop for typical command/build outputs, keeping both the
-   beginning and the trailing errors/summaries. A marker that stands where
-   its reader already received the body takes [make_head_preview]. *)
+   beginning and the trailing errors/summaries. A marker with a shorter
+   preview takes [make_head_preview]. *)
 let preview_max = 4096
 
 let sanitize_utf8_slice slice =
@@ -279,7 +279,7 @@ let make_preview bytes =
 
 (* The first [max_bytes] bytes of a body, sanitized as [make_preview] does. A
    sequence the cut splits becomes one ASCII byte, so the result is never
-   longer than the cut. *)
+   longer than the cut. A bound of zero or less gives the empty string. *)
 let make_head_preview ~max_bytes bytes =
   let length = min (String.length bytes) (max 0 max_bytes) in
   sanitize_utf8_slice (String.sub bytes 0 length)

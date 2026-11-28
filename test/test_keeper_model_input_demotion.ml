@@ -738,6 +738,43 @@ let structured_bodies_are_stored_and_replayed () = with_demotion_store @@ fun st
      = outcome.Demotion.messages)
 ;;
 
+(* A result's marker previews the body's first 200 bytes: what the plan
+   measured and what [materialize] wrote. The blob store's own preview would
+   be the body's head and tail, up to 4 KiB. *)
+let a_result_marker_previews_its_first_200_bytes () = with_demotion_store @@ fun store ->
+  let body = String.make 150 'h' ^ String.make 3_000 'm' ^ String.make 150 't' in
+  let messages = closed_cycle ~id:"previewed" body in
+  let planned = Demotion.plan ~measure_wire_bytes:stored_wire_bytes ~measure_message_bytes ~demote_before:1 messages in
+  let outcome = Demotion.materialize ~store ~addresses:(Demotion.create_address_memo ())
+      ~pending:planned.pending planned.messages in
+  let preview_of text =
+    match Tool_output.decode_from_agent_core text with
+    | Tool_output.Decoded reference -> reference.Tool_output.preview
+    | Tool_output.Not_marker | Tool_output.Invalid_marker _ -> Alcotest.fail "a marker is expected" in
+  let expected = String.sub body 0 200 in
+  Alcotest.(check string) "the preview is the first 200 bytes" expected (Demotion.result_marker_preview body);
+  Alcotest.(check (list string)) "the planned marker carries it" [expected]
+    (List.map preview_of (markers planned.messages));
+  Alcotest.(check (list string)) "the written marker carries it" [expected]
+    (List.map preview_of (markers outcome.messages));
+  Alcotest.(check (list string)) "the marker opens the whole body" [body]
+    (List.map (fetch_body store) (markers outcome.messages))
+;;
+
+(* Call arguments keep the blob store's preview. An argument that preview
+   holds whole is no smaller as a reference, so it stays as the model wrote
+   it; with a 200-byte preview it would leave as a [_blob] input, the shape
+   models then sent as the input of new calls (#55372). *)
+let an_argument_the_store_preview_holds_stays_as_written () =
+  let input = `Assoc ["command", `String (String.make 3_000 'c')] in
+  let seed = argument_cycle ~id:"written" input in
+  let completed_arguments = bind_arguments ~completed_before:1 ~seed seed in
+  let planned = Demotion.plan ~measure_wire_bytes:stored_wire_bytes ~completed_arguments
+      ~measure_message_bytes ~demote_before:0 seed in
+  Alcotest.(check int) "nothing is planned" 0 (List.length planned.pending);
+  Alcotest.(check bool) "the argument is sent as written" true (argument_inputs planned.messages = [input])
+;;
+
 let repeated_id_bodies () =
   let prefix = String.make Tool_blob_store.preview_max 'p' in
   [prefix ^ String.make 4000 'a'; prefix ^ String.make 4000 'b']
@@ -3290,7 +3327,11 @@ let () =
             signed_prefix_replays_the_first_mixed_storage_outcome
         ] )
     ; ( "materialize"
-      , [ Alcotest.test_case "reused IDs retain distinct exact payloads" `Quick
+      , [ Alcotest.test_case "a result marker previews its first 200 bytes" `Quick
+            a_result_marker_previews_its_first_200_bytes
+        ; Alcotest.test_case "an argument the store preview holds stays as written" `Quick
+            an_argument_the_store_preview_holds_stays_as_written
+        ; Alcotest.test_case "reused IDs retain distinct exact payloads" `Quick
             repeated_ids_keep_distinct_payloads
         ; Alcotest.test_case "cut stores only the retained repeated-ID payload" `Quick
             cut_repeated_id_stores_only_retained_payload

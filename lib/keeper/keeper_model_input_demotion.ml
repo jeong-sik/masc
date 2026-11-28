@@ -473,22 +473,42 @@ let with_reference kind (block : Agent_core.Types.content_block) reference =
      | Agent_core.Types.Document _ | Agent_core.Types.Audio _ -> None)
 ;;
 
-(* The marker of a demoted body stands where the model already received that
-   body whole, in the turn that produced it. Its preview says which result
-   this was; the address is what reads it again. The blob store's own
-   preview is for a body its reader has never seen: it holds up to 4 KiB of
-   head and tail, so a marker carrying it is no smaller than a body under
-   that bound and nothing of that size would be demoted (#55296).
+(* A result's marker carries a short preview, its first 200 B. The blob
+   store's own preview holds up to 4 KiB of head and tail, so a marker
+   carrying it is no smaller than a result under that bound, and no result
+   of that size left the request (#55296).
 
-   200 B is the preview this marker had until #54361. The age-out RFC's
-   re-read rate (1.32% of aged markers, 2026-11-08..10) was measured with
-   it, and with it the marker is at most about 1,530 B on a lane that escapes
-   it twice, below the 2,048 B the request assembly demotes from. Results and
-   call arguments share it. *)
-let demoted_preview_max_bytes = 200
+   A result of an ended turn is one the model received whole in the turn
+   that produced it: the preview says which result it was and the address
+   reads it again. The age-out RFC measured how often it is read again with
+   this preview (1.32% of aged markers, 2026-11-08..10). The one resend that
+   answers a size refusal also sends as markers the results of the refused
+   request, which the model has not read; it does so for the request to fit,
+   and their first 200 B is what the model has of them until it reads the
+   address.
 
-let demoted_preview bytes =
-  Tool_blob_store.make_head_preview ~max_bytes:demoted_preview_max_bytes bytes
+   200 B is the preview these markers had until #54361. With it a marker is
+   at most about 1,730 B on a lane that escapes it twice (a preview of quote
+   characters: [%S] doubles each byte and each JSON encoder doubles it
+   again), below the 2,048 B the request assembly demotes from. *)
+let result_marker_preview_max_bytes = 200
+
+let result_marker_preview bytes =
+  Tool_blob_store.make_head_preview ~max_bytes:result_marker_preview_max_bytes bytes
+;;
+
+(* Call arguments keep the blob store's preview, as they have since #54361.
+   With it an argument is replaced only when it is larger than about 4 KiB,
+   and a request holds few [_blob] inputs. A short preview replaces arguments
+   from a few hundred bytes. While requests held 19 to 108 [_blob] inputs
+   each (2026-11-17..21), models sent the reference as the input of new
+   calls, 32 to about 1,400 refused calls a day; with under one per request
+   there have been none (#55372, which decides whether arguments are
+   replaced at all). *)
+let demoted_preview kind bytes =
+  match kind with
+  | Result_body | Result_text_block _ -> result_marker_preview bytes
+  | Call_arguments -> Tool_blob_store.make_preview bytes
 ;;
 
 (* The plan measures this reference and [materialize] writes the stored one
@@ -497,7 +517,7 @@ let demoted_preview bytes =
    size. *)
 let planned_reference ~kind ~sha256 ~bytes =
   Tool_output.make_artifact_ref ~sha256 ~bytes:(String.length bytes)
-    ~preview:(demoted_preview bytes)
+    ~preview:(demoted_preview kind bytes)
     ~mime:(payload_mime kind)
   |> Result.to_option
 ;;
@@ -828,7 +848,7 @@ let materialize ~store ~addresses ~pending messages =
                                 current
                                 (Tool_output.with_preview
                                    stored
-                                   (demoted_preview entry.bytes))
+                                   (demoted_preview entry.kind entry.bytes))
                             | exception Sys_error _ ->
                               incr reverted;
                               current))

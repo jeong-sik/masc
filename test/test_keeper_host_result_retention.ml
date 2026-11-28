@@ -135,6 +135,8 @@ let test_host_response_names_each_payload () = with_workspace (fun base_path ->
   let content = member "content" shared |> to_string in
   check (option string) "the marker names the exact body" (Some long)
     (held store (marker content).Tool_output.sha256);
+  check string "the marker previews the body's first 200 bytes" (String.make 200 'x')
+    (marker content).Tool_output.preview;
   (match member "content_blocks" shared |> to_list with
    | [block] -> check string "a body content and a block share is one marker" content
        (member "text" block |> to_string)

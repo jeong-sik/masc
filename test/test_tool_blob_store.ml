@@ -275,7 +275,9 @@ let test_head_preview_is_cut_at_its_bound_and_sanitized () =
   Alcotest.(check string) "a line break becomes a space" "a b"
     (B.make_head_preview ~max_bytes:3 "a\nb");
   Alcotest.(check string) "a bound of zero leaves nothing" ""
-    (B.make_head_preview ~max_bytes:0 "abc")
+    (B.make_head_preview ~max_bytes:0 "abc");
+  Alcotest.(check string) "and so does a negative bound" ""
+    (B.make_head_preview ~max_bytes:(-1) "abc")
 
 let test_binary_previews_are_utf8_without_changing_stored_bytes () =
   with_temp_dir (fun dir ->

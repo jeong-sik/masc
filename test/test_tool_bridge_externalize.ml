@@ -872,6 +872,44 @@ let test_blob_store_failure_is_typed () =
    agent_core discards [_meta] where a tool result becomes conversation and
    the advice never reached the caller it was written for. The join is still
    worth pinning for whatever attaches next. *)
+(* #55433: a producer asks [fits_inline] before it builds its result, and the
+   projection decides when the result is sent. One comparison answers both, so
+   at the ceiling and one byte under it the two agree, for a completed result
+   and for a failed one. *)
+let test_fits_inline_agrees_with_the_projection () =
+  with_temp_base_path (fun base_path ->
+    let sent_whole ~model_projection result =
+      match B.to_agent_core_typed_result ~base_path ~model_projection result with
+      | Ok { content; _ } -> not (O.is_marker content)
+      | Error { message; _ } -> not (O.is_marker message)
+    in
+    let agrees name ~model_projection result expected =
+      Alcotest.(check bool) (name ^ ": the projection sends it whole") expected
+        (sent_whole ~model_projection result);
+      Alcotest.(check bool) (name ^ ": fits_inline") expected
+        (B.fits_inline ~model_projection result)
+    in
+    let bytes = 512 in
+    let completed = tool_ok ~tool_name:"Execute" (String.make bytes 'c') in
+    agrees "completed at the ceiling"
+      ~model_projection:(O.Store_above { threshold_bytes = bytes }) completed true;
+    agrees "completed one byte over"
+      ~model_projection:(O.Store_above { threshold_bytes = bytes - 1 }) completed false;
+    let failed = tool_error ~tool_name:"Execute" (String.make bytes 'e') in
+    let text =
+      match
+        B.to_agent_core_typed_result ~base_path
+          ~model_projection:(O.Store_above { threshold_bytes = max_int }) failed
+      with
+      | Error { message; _ } -> message
+      | Ok _ -> Alcotest.fail "a failed result must remain an error"
+    in
+    let ceiling = String.length text in
+    agrees "failed at the ceiling"
+      ~model_projection:(O.Store_above { threshold_bytes = ceiling }) failed true;
+    agrees "failed one byte over"
+      ~model_projection:(O.Store_above { threshold_bytes = ceiling - 1 }) failed false)
+
 let test_existing_metadata_survives_the_manifest () =
   let answered =
     Tool_result.with_metadata
@@ -958,5 +996,7 @@ let () =
             test_blob_store_failure_is_typed;
           Alcotest.test_case "existing metadata survives the manifest" `Quick
             test_existing_metadata_survives_the_manifest;
+          Alcotest.test_case "fits_inline agrees with the projection at the ceiling" `Quick
+            test_fits_inline_agrees_with_the_projection;
         ] );
     ]

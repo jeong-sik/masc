@@ -63,14 +63,21 @@ import type {
   RawTraceTurnItem,
 } from './types'
 
-export interface PromptCacheSegments {
+export type PromptCacheSegments = {
+  readonly cacheHitPct: number | null
+} & ({
+  readonly total: number
+  readonly cacheRead: number
+  readonly cacheCreate: number
+  readonly uncachedInput: number
+  readonly output: number
+} | {
+  readonly total: null
   readonly cacheRead: number | null
   readonly cacheCreate: number | null
   readonly uncachedInput: number | null
   readonly output: number | null
-  readonly total: number | null
-  readonly cacheHitPct: number | null
-}
+})
 
 export function computePromptCacheSegments(record: TurnRecordEntry | null): PromptCacheSegments {
   if (!record) {
@@ -97,10 +104,11 @@ export function computePromptCacheSegments(record: TurnRecordEntry | null): Prom
     && input >= cacheRead + cacheCreate
     ? Math.round((cacheRead / input) * 100)
     : null
-  const total = cacheRead !== null && cacheCreate !== null && uncachedInput !== null && output !== null
-    ? cacheRead + cacheCreate + uncachedInput + output
-    : null
-  return { cacheRead, cacheCreate, uncachedInput, output, total, cacheHitPct }
+  if (cacheRead !== null && cacheCreate !== null && uncachedInput !== null && output !== null) {
+    const total = cacheRead + cacheCreate + uncachedInput + output
+    return { cacheRead, cacheCreate, uncachedInput, output, total, cacheHitPct }
+  }
+  return { cacheRead, cacheCreate, uncachedInput, output, total: null, cacheHitPct }
 }
 
 /**
@@ -538,11 +546,11 @@ export function KeeperDebugCompanion(props: KeeperDebugCompanionProps) {
   }
 
   const cacheBarKnown = cacheSegs.total !== null
-  const cacheW = cacheBarKnown && cacheSegs.total! > 0 ? cacheSegs.total! : 1
-  const segReadW = cacheBarKnown ? (cacheSegs.cacheRead! / cacheW) * 100 : 0
-  const segCreateW = cacheBarKnown ? (cacheSegs.cacheCreate! / cacheW) * 100 : 0
-  const segUncachedW = cacheBarKnown ? (cacheSegs.uncachedInput! / cacheW) * 100 : 0
-  const segOutputW = cacheBarKnown ? (cacheSegs.output! / cacheW) * 100 : 0
+  const cacheW = cacheBarKnown && cacheSegs.total > 0 ? cacheSegs.total : 1
+  const segReadW = cacheBarKnown ? (cacheSegs.cacheRead / cacheW) * 100 : 0
+  const segCreateW = cacheBarKnown ? (cacheSegs.cacheCreate / cacheW) * 100 : 0
+  const segUncachedW = cacheBarKnown ? (cacheSegs.uncachedInput / cacheW) * 100 : 0
+  const segOutputW = cacheBarKnown ? (cacheSegs.output / cacheW) * 100 : 0
 
   return html`
     <aside class="kp-companion" aria-label="Debug Companion (⌘.)" data-companion-tab=${tab}>

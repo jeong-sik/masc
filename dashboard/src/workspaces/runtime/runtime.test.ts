@@ -21,7 +21,7 @@ import {
 } from '../../core'
 import * as observer from '../../core/observer'
 import { RuntimeWorkspace, type WorkspaceInspectPayload } from './index'
-import { aggregateModelBuckets, cacheBucketCoverageLabel, modelCostCoverage, pairedCacheCoverage } from './efficiency-tab'
+import { aggregateModelBuckets, cacheBucketCoverageLabel, modelCostCoverage, pairedCacheCoverage } from './efficiency-model'
 import {
   formatLocalReleaseTime,
   formatReleaseSummary,

@@ -57,7 +57,9 @@ let text_message_start ?(timestamp = Time_compat.now ()) ~thread_id ?run_id ~mes
   Text_message_start { thread_id; timestamp; run_id; message_id; role }
 
 (* textResponse names the observed provider response; without one the frame
-   carries at most textStreamScope. *)
+   carries at most textStreamScope. The wire names the two numbers
+   content_generation and stream_scope; Ag_ui.response_identity calls them
+   response_generation and response_scope. *)
 let text_message_content ?(timestamp = Time_compat.now ()) ~thread_id ?run_id ?message_id
     ?(text_response = Unobserved_scope None) ~delta () : event =
   let text_stream_scope, response =

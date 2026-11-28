@@ -4977,12 +4977,39 @@ let test_board_typed_media_from_post_meta () =
   | Error detail -> Alcotest.fail detail
   | Ok { posts = [ post ]; _ } ->
       Alcotest.(check (list string)) "audio and midi only"
-        [ "[audio: https://example.com/a.wav] · No playback on Board";
-          "[midi: a.mid 2KB] · No playback on Board" ]
+        [ "[audio] No playback on Board · https://example.com/a.wav";
+          "[midi] No playback on Board · a.mid 2KB" ]
         (List.map
            (Screen_knowledge.board_typed_media_chip ~lang:Say.Lang_en)
            post.typed_media)
   | Ok _ -> Alcotest.fail "expected one post"
+
+let test_board_typed_media_note_survives_a_long_label () =
+  let model = make_rich_model ~lang:Say.Lang_en ~cols:140 ~rows:40 in
+  let listed =
+    Option.get (Knowledge_store.selected_post model.knowledge)
+  in
+  let url = "https://example.com/" ^ String.make 200 'a' ^ ".wav" in
+  (* A thread target the list does not carry is what the preview shows. *)
+  let post : Wire_knowledge.board_post =
+    { listed with
+      id = "p-typed-media";
+      body = "b";
+      attachments = [];
+      typed_media =
+        [ { media_kind = Wire_knowledge.Media_audio; label = url; bytes = None } ];
+    }
+  in
+  let knowledge =
+    Knowledge_store.apply_thread ~observed_at:now_mono (post, []) model.knowledge
+  in
+  let grid =
+    render_into ~cols:140 ~rows:40 (fun ~cache ~rect gr ->
+        Screen_knowledge.render ~model:{ model with knowledge } ~cache ~rect gr)
+  in
+  Alcotest.(check bool) "note drawn before the clipped label" true
+    (contains_sub ~needle:"[audio] No playback on Board"
+       ~haystack:(grid_all_text grid))
 
 let () =
   Alcotest.run "masc_tui_screens_domain"
@@ -5072,5 +5099,7 @@ let () =
             test_board_audio_attachment_says_not_playable;
           Alcotest.test_case "Board typed audio and MIDI get a line" `Quick
             test_board_typed_media_from_post_meta;
+          Alcotest.test_case "Board typed media note survives a long URL" `Quick
+            test_board_typed_media_note_survives_a_long_label;
         ] );
     ]

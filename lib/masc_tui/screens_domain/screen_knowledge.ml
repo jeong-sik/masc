@@ -47,11 +47,13 @@ let board_typed_media_chip ~lang (m : Wire_knowledge.board_typed_media) =
         | "" -> ""
         | text -> " " ^ text)
   in
-  Printf.sprintf "[%s: %s%s] · %s" prefix
-    (H.sanitize_single_line m.label)
-    size
+  (* The note comes before the label: a narrow pane clips the tail, and a
+     label without a [name] is a whole URL. *)
+  Printf.sprintf "[%s] %s · %s%s" prefix
     (Say.resolve lang
        (Say.make ~ko:"Board에서 재생 불가" ~en:"No playback on Board"))
+    (H.sanitize_single_line m.label)
+    size
 
 let post_visibility_label ~lang = function
   | None -> ""

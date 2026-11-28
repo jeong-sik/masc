@@ -43,7 +43,7 @@ name = "kind"
 type = "string"
 required = true
 enum = ["image", "video", "youtube", "external_link", "file", "audio", "score", "midi"]
-description = "How the attachment is shown. file is any file; audio, score (Guitar Pro, MusicXML, alphaTex) and midi say what the file is. The TUI Board lists audio and midi from this argument and says it cannot play them; it does not list file or score. The dashboard Board screen does not read this argument yet."
+description = "How the attachment is shown. file is any file; audio, score (Guitar Pro, MusicXML, alphaTex) and midi say what the file is. The TUI Board lists only the audio and midi entries from this argument and says it cannot play them; it lists no other kind. The dashboard Board screen does not read this argument yet."
 
 [[params.items.params]]
 name = "url"
@@ -211,7 +211,7 @@ name = "kind"
 type = "string"
 required = true
 enum = ["image", "video", "youtube", "external_link", "file", "audio", "score", "midi"]
-description = "How the attachment is shown. file is any file; audio, score (Guitar Pro, MusicXML, alphaTex) and midi say what the file is. The TUI Board lists audio and midi from this argument and says it cannot play them; it does not list file or score. The dashboard Board screen does not read this argument yet."
+description = "How the attachment is shown. file is any file; audio, score (Guitar Pro, MusicXML, alphaTex) and midi say what the file is. The TUI Board lists only the audio and midi entries from this argument and says it cannot play them; it lists no other kind. The dashboard Board screen does not read this argument yet."
 
 [[keeper_projection.params.items.params]]
 name = "url"

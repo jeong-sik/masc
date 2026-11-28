@@ -7,6 +7,7 @@ import {
   legendPointIndex,
   legendText,
   legendValueColumns,
+  legendValueText,
   pointerOnAny,
   reserveLegendValueWidths,
 } from './uplot-legend'
@@ -62,6 +63,16 @@ describe('components/primitives uplot legend', () => {
 
     // Not 57.3, the series' last value: that one is the earlier time's.
     expect([text(0), text(1), text(2)]).toEqual(['t1800003600', LEGEND_NO_VALUE, '4'])
+  })
+
+  it('says a value with thousands grouped, two decimals at most and no closing zero', () => {
+    expect(legendValueText(18.9, '%')).toBe('18.9 %')
+    expect(legendValueText(18.25, '%')).toBe('18.25 %')
+    expect(legendValueText(18, '%')).toBe('18 %')
+    expect(legendValueText(57.304, '%')).toBe('57.3 %')
+    expect(legendValueText(1234567, undefined)).toBe('1,234,567')
+    expect(legendValueText(12345.678, '¢')).toBe('12,345.68 ¢')
+    expect(legendValueText(0, undefined)).toBe('0')
   })
 
   it('counts a character from Hangul up as two columns and the rest as one', () => {

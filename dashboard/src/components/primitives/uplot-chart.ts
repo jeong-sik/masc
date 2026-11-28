@@ -18,6 +18,7 @@ import {
   legendPointIndex,
   legendText,
   legendValueColumns,
+  legendValueText,
   makeLegendTogglesReachable,
   pointerOnAny,
   reflectLegendToggle,
@@ -166,9 +167,7 @@ export function UPlotChart(props: UPlotChartProps) {
         const timeText = (seconds: number): string => stamp(new Date(Math.round(seconds * 1000)))
         const valueText = (specIdx: number, raw: number): string => {
           if (formatterRef.current) return formatterRef.current(specIdx, raw)
-          const formatted = Number.isInteger(raw) ? String(raw) : raw.toFixed(2)
-          const unit = specs[specIdx]?.unit
-          return unit ? `${formatted} ${unit}` : formatted
+          return legendValueText(raw, specs[specIdx]?.unit)
         }
         const textAt = (plot: uPlot, seriesIdx: number, pointIdx: number | null): string =>
           legendText(plot.data, seriesIdx, pointIdx, timeText, valueText)

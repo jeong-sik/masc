@@ -4,32 +4,51 @@
  * Inserts canonical Obsidian-style embed syntax (`![[wiki:<slug>]]` or
  * `![[artifact:<id>]]`) with one click so authors never type raw IDs by hand.
  *
- * - Wiki pages reuse the already-loaded `wikiIndex.pages` prop (zero extra request).
+ * - Wiki pages come from the editor that owns the page list (`wikiPages`). The
+ *   picker asks it to read the list when the wiki tab opens and from the retry
+ *   button, so a failed read is shown and can be read again.
  * - Published artifacts lazily read `GET /api/v1/published-artifacts` via the shared
- *   `kn:artifacts:list` `resourceCache` entry, gated strictly by
- *   `canUseSingleUserTokenAdmin(session)` (zero speculative 401/403 calls).
+ *   `PUBLISHED_ARTIFACTS_LIST_KEY` `resourceCache` entry, gated strictly by
+ *   `canUseSingleUserTokenAdmin(session)` (zero speculative 401/403 calls). The
+ *   list renders from that entry's state, so every outcome of a read is shown.
  */
 
 import { html } from 'htm/preact'
-import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
+import { useEffect, useMemo, useState } from 'preact/hooks'
 import {
   authSession,
   canUseSingleUserTokenAdmin,
-  currentSessionEpoch,
-  isEpochCurrent,
   sessionEpoch,
 } from '../../core/auth'
-import { resourceCache } from '../../core/resource-cache'
+import { resourceCache, type Observed } from '../../core/resource-cache'
 import { PopoverMenu } from '../../components/primitives'
-import { fetchPublishedArtifactsList, type ArtifactListBundle } from './artifacts-tab'
+import {
+  PUBLISHED_ARTIFACTS_LIST_KEY,
+  readPublishedArtifactsList,
+  type ArtifactListBundle,
+} from './artifacts-tab'
 import type { PublishedArtifactItem, WikiPageSummary } from './types'
 
 type EmbedPickerTab = 'wiki' | 'artifact'
 
+/** The wiki page list the picker offers, as its owner last read it. */
+export type WikiEmbedPages =
+  | { readonly kind: 'loading' }
+  | { readonly kind: 'ready'; readonly pages: readonly WikiPageSummary[] }
+  | { readonly kind: 'failed'; readonly message: string }
+
 const MAX_PICKER_RESULTS = 40
 
+const NO_ARTIFACT_LIST_MESSAGE = '발행된 아티팩트 목록을 받지 못했습니다.'
+
+// Shared empty lists keep the memoized filters stable while a list is not ready.
+const NO_PAGES: readonly WikiPageSummary[] = []
+const NO_ARTIFACTS: readonly PublishedArtifactItem[] = []
+
 export interface WikiEmbedPickerProps {
-  readonly wikiPages: readonly WikiPageSummary[]
+  readonly wikiPages: WikiEmbedPages
+  /** Reads the wiki page list: `mount` when the wiki tab opens, `manual` from the retry button. */
+  readonly onLoadWikiPages: (reason: 'mount' | 'manual') => void
   readonly currentSlug?: string | null
   readonly disabled?: boolean
   readonly onInsertEmbed: (markdown: string) => void
@@ -43,8 +62,47 @@ export function formatArtifactEmbed(id: string): string {
   return `![[artifact:${id.trim()}]]`
 }
 
+function artifactsOf(obs: Observed<ArtifactListBundle> | null): readonly PublishedArtifactItem[] {
+  return obs !== null && obs.kind === 'value' ? obs.data.artifacts : NO_ARTIFACTS
+}
+
+/** The message for a read that ended without a list, or null when there is a list or a read is running. */
+function artifactListProblem(obs: Observed<ArtifactListBundle>): string | null {
+  switch (obs.kind) {
+    case 'loading':
+    case 'value':
+      return null
+    case 'failed':
+      return obs.error.message
+    case 'absent':
+    case 'unreported':
+      return obs.reason ?? NO_ARTIFACT_LIST_MESSAGE
+  }
+}
+
+function RetryNotice({ message, testId, onRetry }: {
+  readonly message: string
+  readonly testId: string
+  readonly onRetry: () => void
+}) {
+  return html`
+    <div class="kn-notice kn-notice--err" role="alert" data-testid=${testId}>
+      <span>${message}</span>
+      <button
+        type="button"
+        class="btn-ghost kn-btn-compact"
+        data-testid=${`${testId}-retry`}
+        onClick=${onRetry}
+      >
+        다시 불러오기
+      </button>
+    </div>
+  `
+}
+
 export function WikiEmbedPicker({
   wikiPages,
+  onLoadWikiPages,
   currentSlug,
   disabled = false,
   onInsertEmbed,
@@ -57,60 +115,32 @@ export function WikiEmbedPicker({
   const [open, setOpen] = useState(false)
   const [tab, setTab] = useState<EmbedPickerTab>('wiki')
   const [query, setQuery] = useState('')
-  const [artifacts, setArtifacts] = useState<readonly PublishedArtifactItem[]>([])
-  const [artifactsLoading, setArtifactsLoading] = useState(false)
-  const [artifactsError, setArtifactsError] = useState<string | null>(null)
-  const mountedRef = useRef(true)
 
-  useEffect(() => {
-    mountedRef.current = true
-    return () => {
-      mountedRef.current = false
-    }
-  }, [])
+  // Read only while the picker is open, so a closed picker creates no cache entry.
+  const artifactsObs = open && canListArtifacts
+    ? resourceCache.observe<ArtifactListBundle>(PUBLISHED_ARTIFACTS_LIST_KEY).value
+    : null
+  const artifacts = artifactsOf(artifactsObs)
 
   useEffect(() => {
     if (disabled) setOpen(false)
   }, [disabled])
 
-  // Clear cached artifact selection state whenever workspace/account epoch changes.
   useEffect(() => {
-    setArtifacts([])
-    setArtifactsError(null)
-    setArtifactsLoading(false)
-  }, [epoch])
+    if (!open || tab !== 'wiki') return
+    onLoadWikiPages('mount')
+  }, [open, tab, onLoadWikiPages, epoch])
 
   useEffect(() => {
     if (!open || tab !== 'artifact' || !canListArtifacts) return
-    let cancelled = false
-    const startEpoch = currentSessionEpoch()
-    setArtifactsLoading(true)
-    setArtifactsError(null)
-
-    void resourceCache
-      .fetch<ArtifactListBundle>(
-        'kn:artifacts:list',
-        fetchPublishedArtifactsList,
-        { ttlMs: 15_000, topics: ['artifacts'], reason: 'mount' },
-      )
-      .then((obs) => {
-        if (cancelled || !mountedRef.current || !isEpochCurrent(startEpoch)) return
-        setArtifactsLoading(false)
-        if (obs.kind === 'value') {
-          setArtifacts(obs.data.artifacts)
-        } else if (obs.kind === 'failed') {
-          setArtifactsError(obs.error.message)
-        }
-      })
-
-    return () => {
-      cancelled = true
-    }
+    void readPublishedArtifactsList('mount')
   }, [open, tab, canListArtifacts, epoch])
+
+  const pages = wikiPages.kind === 'ready' ? wikiPages.pages : NO_PAGES
 
   const matchedPages = useMemo(() => {
     const q = query.trim().toLowerCase()
-    return wikiPages.filter((page) => {
+    return pages.filter((page) => {
       if (!q) return true
       return (
         page.title.toLowerCase().includes(q)
@@ -118,7 +148,7 @@ export function WikiEmbedPicker({
         || page.tags.some((t) => t.toLowerCase().includes(q))
       )
     })
-  }, [wikiPages, query])
+  }, [pages, query])
 
   const filteredPages = useMemo(
     () => matchedPages.slice(0, MAX_PICKER_RESULTS),
@@ -163,6 +193,112 @@ export function WikiEmbedPicker({
     `
   }
 
+  const renderWikiPages = () => {
+    switch (wikiPages.kind) {
+      case 'loading':
+        return html`<span class="dtable-absent">위키 목록 불러오는 중…</span>`
+      case 'failed':
+        return html`
+          <${RetryNotice}
+            message=${wikiPages.message}
+            testId="wiki-embed-picker-wiki-error"
+            onRetry=${() => onLoadWikiPages('manual')}
+          />
+        `
+      case 'ready':
+        break
+    }
+    if (filteredPages.length === 0) {
+      return html`<div class="kn-embed-picker-list"><span class="dtable-absent">일치하는 위키 페이지가 없습니다.</span></div>`
+    }
+    return html`
+      <div class="kn-embed-picker-list" role="list" aria-label="삽입할 위키 페이지 목록">
+        ${filteredPages.map((page) => html`
+          <div key=${page.slug} role="listitem">
+            <button
+              type="button"
+              class="kn-embed-picker-item"
+              data-testid=${`wiki-embed-option-wiki-${page.slug}`}
+              onClick=${() => selectEmbed(formatWikiEmbed(page.slug))}
+            >
+              <span class="kn-embed-picker-title">
+                ${page.title}
+                ${currentSlug === page.slug ? ' (현재 페이지)' : ''}
+              </span>
+              <span class="kn-embed-picker-meta">
+                <span class="mono">${page.slug}</span>
+                <span>rev ${page.revision}</span>
+              </span>
+            </button>
+          </div>
+        `)}
+      </div>
+      ${hiddenPagesCount > 0 && html`
+        <div class="kn-embed-picker-overflow" data-testid="wiki-embed-picker-overflow">
+          +${hiddenPagesCount}건 더 있음 — 검색어로 좁혀주세요
+        </div>
+      `}
+    `
+  }
+
+  const renderArtifacts = () => {
+    if (!isSingleUser) {
+      return html`
+        <div class="kn-notice kn-notice--info" role="status">
+          발행된 아티팩트 목록 조회는 싱글유저 로컬 세션에서 지원됩니다.
+        </div>
+      `
+    }
+    if (!canListArtifacts || artifactsObs === null) {
+      return html`
+        <div class="kn-notice kn-notice--info" role="status">
+          아티팩트 목록 조회는 토큰 기반 관리자 권한이 필요합니다.
+        </div>
+      `
+    }
+    const problem = artifactListProblem(artifactsObs)
+    if (problem !== null) {
+      return html`
+        <${RetryNotice}
+          message=${problem}
+          testId="wiki-embed-picker-artifact-error"
+          onRetry=${() => { void readPublishedArtifactsList('manual') }}
+        />
+      `
+    }
+    if (artifactsObs.kind === 'loading') {
+      return html`<span class="dtable-absent">아티팩트 목록 불러오는 중…</span>`
+    }
+    if (filteredArtifacts.length === 0) {
+      return html`<div class="kn-embed-picker-list"><span class="dtable-absent">일치하는 아티팩트가 없습니다.</span></div>`
+    }
+    return html`
+      <div class="kn-embed-picker-list" role="list" aria-label="삽입할 아티팩트 목록">
+        ${filteredArtifacts.map((item) => html`
+          <div key=${item.id} role="listitem">
+            <button
+              type="button"
+              class="kn-embed-picker-item"
+              data-testid=${`wiki-embed-option-artifact-${item.id}`}
+              onClick=${() => selectEmbed(formatArtifactEmbed(item.id))}
+            >
+              <span class="kn-embed-picker-title">${item.title}</span>
+              <span class="kn-embed-picker-meta">
+                <span class="mono">${item.id}</span>
+                <span class="kn-badge">${item.format.toUpperCase()}</span>
+              </span>
+            </button>
+          </div>
+        `)}
+      </div>
+      ${hiddenArtifactsCount > 0 && html`
+        <div class="kn-embed-picker-overflow" data-testid="wiki-embed-picker-overflow">
+          +${hiddenArtifactsCount}건 더 있음 — 검색어로 좁혀주세요
+        </div>
+      `}
+    `
+  }
+
   return html`
     <${PopoverMenu}
       align="right"
@@ -190,7 +326,10 @@ export function WikiEmbedPicker({
             data-testid="wiki-embed-tab-wiki"
             onClick=${() => setTab('wiki')}
           >
-            위키 <span class="kn-chip-count">${wikiPages.length}</span>
+            위키
+            ${wikiPages.kind === 'ready' && html`
+              <span class="kn-chip-count">${wikiPages.pages.length}</span>
+            `}
           </button>
           <button
             type="button"
@@ -201,7 +340,7 @@ export function WikiEmbedPicker({
             onClick=${() => setTab('artifact')}
           >
             아티팩트
-            ${canListArtifacts && artifacts.length > 0 && html`
+            ${artifacts.length > 0 && html`
               <span class="kn-chip-count">${artifacts.length}</span>
             `}
           </button>
@@ -217,80 +356,7 @@ export function WikiEmbedPicker({
           data-testid="wiki-embed-picker-search"
         />
 
-        ${tab === 'wiki'
-          ? filteredPages.length === 0
-            ? html`<div class="kn-embed-picker-list"><span class="dtable-absent">일치하는 위키 페이지가 없습니다.</span></div>`
-            : html`
-                <div class="kn-embed-picker-list" role="list" aria-label="삽입할 위키 페이지 목록">
-                  ${filteredPages.map((page) => html`
-                    <div key=${page.slug} role="listitem">
-                      <button
-                        type="button"
-                        class="kn-embed-picker-item"
-                        data-testid=${`wiki-embed-option-wiki-${page.slug}`}
-                        onClick=${() => selectEmbed(formatWikiEmbed(page.slug))}
-                      >
-                        <span class="kn-embed-picker-title">
-                          ${page.title}
-                          ${currentSlug === page.slug ? ' (현재 페이지)' : ''}
-                        </span>
-                        <span class="kn-embed-picker-meta">
-                          <span class="mono">${page.slug}</span>
-                          <span>rev ${page.revision}</span>
-                        </span>
-                      </button>
-                    </div>
-                  `)}
-                </div>
-                ${hiddenPagesCount > 0 && html`
-                  <div class="kn-embed-picker-overflow" data-testid="wiki-embed-picker-overflow">
-                    +${hiddenPagesCount}건 더 있음 — 검색어로 좁혀주세요
-                  </div>
-                `}
-              `
-          : !isSingleUser
-            ? html`
-                <div class="kn-notice kn-notice--info" role="status">
-                  발행된 아티팩트 목록 조회는 싱글유저 로컬 세션에서 지원됩니다.
-                </div>
-              `
-            : !canListArtifacts
-              ? html`
-                  <div class="kn-notice kn-notice--info" role="status">
-                    아티팩트 목록 조회는 토큰 기반 관리자 권한이 필요합니다.
-                  </div>
-                `
-              : artifactsError
-                ? html`<div class="kn-notice kn-notice--err" role="alert">${artifactsError}</div>`
-                : artifactsLoading && artifacts.length === 0
-                  ? html`<span class="dtable-absent">아티팩트 목록 불러오는 중…</span>`
-                  : filteredArtifacts.length === 0
-                    ? html`<div class="kn-embed-picker-list"><span class="dtable-absent">일치하는 아티팩트가 없습니다.</span></div>`
-                    : html`
-                        <div class="kn-embed-picker-list" role="list" aria-label="삽입할 아티팩트 목록">
-                          ${filteredArtifacts.map((item) => html`
-                            <div key=${item.id} role="listitem">
-                              <button
-                                type="button"
-                                class="kn-embed-picker-item"
-                                data-testid=${`wiki-embed-option-artifact-${item.id}`}
-                                onClick=${() => selectEmbed(formatArtifactEmbed(item.id))}
-                              >
-                                <span class="kn-embed-picker-title">${item.title}</span>
-                                <span class="kn-embed-picker-meta">
-                                  <span class="mono">${item.id}</span>
-                                  <span class="kn-badge">${item.format.toUpperCase()}</span>
-                                </span>
-                              </button>
-                            </div>
-                          `)}
-                        </div>
-                        ${hiddenArtifactsCount > 0 && html`
-                          <div class="kn-embed-picker-overflow" data-testid="wiki-embed-picker-overflow">
-                            +${hiddenArtifactsCount}건 더 있음 — 검색어로 좁혀주세요
-                          </div>
-                        `}
-                      `}
+        ${tab === 'wiki' ? renderWikiPages() : renderArtifacts()}
       `}
     <//>
   `

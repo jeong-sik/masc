@@ -8,6 +8,7 @@ import {
   WikiEmbedPicker,
   formatArtifactEmbed,
   formatWikiEmbed,
+  type WikiEmbedPages,
 } from './wiki-embed-picker'
 import type { WikiPageSummary } from './types'
 
@@ -48,7 +49,19 @@ const SAMPLE_PAGES: readonly WikiPageSummary[] = [
   },
 ]
 
+const READY_PAGES: WikiEmbedPages = { kind: 'ready', pages: SAMPLE_PAGES }
+
 const ARTIFACT_ID = 'artifact-0123456789abcdef0123456789abcdef'
+
+const ARTIFACT_ROW = {
+  id: ARTIFACT_ID,
+  revision: 1,
+  title: 'Latency Benchmark',
+  summary: '',
+  format: 'markdown',
+  author: 'sangsu',
+  created_at: '2026-11-26T00:00:00Z',
+}
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -98,7 +111,8 @@ describe('WikiEmbedPicker', () => {
     const onInsertEmbed = vi.fn()
     render(
       html`<${WikiEmbedPicker}
-        wikiPages=${SAMPLE_PAGES}
+        wikiPages=${READY_PAGES}
+        onLoadWikiPages=${vi.fn()}
         currentSlug="architecture-notes"
         onInsertEmbed=${onInsertEmbed}
       />`,
@@ -149,7 +163,7 @@ describe('WikiEmbedPicker', () => {
 
     const onInsertEmbed = vi.fn()
     render(
-      html`<${WikiEmbedPicker} wikiPages=${SAMPLE_PAGES} onInsertEmbed=${onInsertEmbed} />`,
+      html`<${WikiEmbedPicker} wikiPages=${READY_PAGES} onLoadWikiPages=${vi.fn()} onInsertEmbed=${onInsertEmbed} />`,
       container,
     )
 
@@ -186,7 +200,7 @@ describe('WikiEmbedPicker', () => {
     globalThis.fetch = fetchMock
 
     render(
-      html`<${WikiEmbedPicker} wikiPages=${SAMPLE_PAGES} onInsertEmbed=${vi.fn()} />`,
+      html`<${WikiEmbedPicker} wikiPages=${READY_PAGES} onLoadWikiPages=${vi.fn()} onInsertEmbed=${vi.fn()} />`,
       container,
     )
 
@@ -218,7 +232,7 @@ describe('WikiEmbedPicker', () => {
     )
 
     render(
-      html`<${WikiEmbedPicker} wikiPages=${SAMPLE_PAGES} onInsertEmbed=${vi.fn()} />`,
+      html`<${WikiEmbedPicker} wikiPages=${READY_PAGES} onLoadWikiPages=${vi.fn()} onInsertEmbed=${vi.fn()} />`,
       container,
     )
     container.querySelector<HTMLButtonElement>('[data-testid="wiki-embed-picker-trigger"]')!.click()
@@ -234,10 +248,62 @@ describe('WikiEmbedPicker', () => {
     expect(container.textContent).not.toContain('Old Workspace Artifact')
   })
 
+  it('asks for the wiki page list on open and reads it again from the retry button after a failed read', async () => {
+    const onLoadWikiPages = vi.fn()
+    render(
+      html`<${WikiEmbedPicker}
+        wikiPages=${{ kind: 'failed', message: 'wiki index unavailable' }}
+        onLoadWikiPages=${onLoadWikiPages}
+        onInsertEmbed=${vi.fn()}
+      />`,
+      container,
+    )
+    container.querySelector<HTMLButtonElement>('[data-testid="wiki-embed-picker-trigger"]')!.click()
+    await flushUi()
+
+    expect(onLoadWikiPages).toHaveBeenCalledWith('mount')
+    expect(container.querySelector('[data-testid="wiki-embed-picker-wiki-error"]')).not.toBeNull()
+    expect(container.querySelector('[role="list"]')).toBeNull()
+
+    container.querySelector<HTMLButtonElement>('[data-testid="wiki-embed-picker-wiki-error-retry"]')!.click()
+    expect(onLoadWikiPages).toHaveBeenLastCalledWith('manual')
+  })
+
+  it('shows an artifact list read that ends without a list and reads it again from the retry button', async () => {
+    let calls = 0
+    const fetchMock = vi.fn<typeof fetch>(async () => {
+      calls += 1
+      if (calls === 1) return jsonResponse({ error: 'not_found', message: 'no published artifacts route' }, 404)
+      return jsonResponse({ artifacts: [ARTIFACT_ROW], diagnostics: [] })
+    })
+    globalThis.fetch = fetchMock
+
+    render(
+      html`<${WikiEmbedPicker} wikiPages=${READY_PAGES} onLoadWikiPages=${vi.fn()} onInsertEmbed=${vi.fn()} />`,
+      container,
+    )
+    container.querySelector<HTMLButtonElement>('[data-testid="wiki-embed-picker-trigger"]')!.click()
+    await flushUi()
+    container.querySelector<HTMLButtonElement>('[data-testid="wiki-embed-tab-artifact"]')!.click()
+    await flushUi(6)
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(container.querySelector('[data-testid="wiki-embed-picker-artifact-error"]')).not.toBeNull()
+    expect(container.querySelector(`[data-testid="wiki-embed-option-artifact-${ARTIFACT_ID}"]`)).toBeNull()
+
+    container.querySelector<HTMLButtonElement>('[data-testid="wiki-embed-picker-artifact-error-retry"]')!.click()
+    await flushUi(6)
+
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(container.querySelector('[data-testid="wiki-embed-picker-artifact-error"]')).toBeNull()
+    expect(container.querySelector(`[data-testid="wiki-embed-option-artifact-${ARTIFACT_ID}"]`)).not.toBeNull()
+  })
+
   it('passes axe accessibility checks in open list and empty-search states', async () => {
     render(
       html`<${WikiEmbedPicker}
-        wikiPages=${SAMPLE_PAGES}
+        wikiPages=${READY_PAGES}
+        onLoadWikiPages=${vi.fn()}
         currentSlug="architecture-notes"
         onInsertEmbed=${vi.fn()}
       />`,
@@ -274,7 +340,7 @@ describe('WikiEmbedPicker', () => {
       sha256: 'a'.repeat(64),
     }))
     render(
-      html`<${WikiEmbedPicker} wikiPages=${manyPages} onInsertEmbed=${vi.fn()} />`,
+      html`<${WikiEmbedPicker} wikiPages=${{ kind: 'ready', pages: manyPages }} onLoadWikiPages=${vi.fn()} onInsertEmbed=${vi.fn()} />`,
       container,
     )
     container.querySelector<HTMLButtonElement>('[data-testid="wiki-embed-picker-trigger"]')!.click()

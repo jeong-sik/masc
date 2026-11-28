@@ -17,7 +17,7 @@ import { MarkdownContent, type LinkRewrite } from '../../components/common/markd
 import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { authSession, currentSessionEpoch, isEpochCurrent } from '../../core/auth'
 import { markViewSynced } from '../../core/observer'
-import { resourceCache } from '../../core/resource-cache'
+import { resourceCache, type Observed } from '../../core/resource-cache'
 import { apiGetV2, apiMutateV2 } from '../../core/transport'
 import { KeeperBadge } from '../../components/keeper-badge'
 import { MasterDetail } from '../../components/primitives/master-detail'
@@ -39,7 +39,7 @@ import {
 } from '../../lib/wire-decode'
 import { isAdminLockedForSession, navigate, resolveRoute } from '../../routes/router'
 import { pushShellToast } from '../../shell/shell-state'
-import { WikiEmbedPicker } from './wiki-embed-picker'
+import { WikiEmbedPicker, type WikiEmbedPages } from './wiki-embed-picker'
 import {
   WIKI_LINK_KINDS,
   WIKI_SOURCES,
@@ -193,6 +193,46 @@ type WikiEditorViewMode = 'write' | 'split' | 'preview'
 
 const SPLIT_PREVIEW_DEBOUNCE_MS = 150
 
+/** Index query for every page: the embed picker offers all pages even while a tag or source filter narrows the list. */
+const ALL_PAGES_INDEX_QUERY = 'sort=updated'
+
+const NO_ALL_PAGES_MESSAGE = '전체 위키 목록을 받지 못했습니다.'
+
+function wikiIndexKey(query: string): string {
+  return `kn:wiki:index:${query}`
+}
+
+function readWikiIndex(query: string, reason: 'mount' | 'manual'): Promise<Observed<WikiIndexData>> {
+  return resourceCache.fetch<WikiIndexData>(
+    wikiIndexKey(query),
+    (signal) => apiGetV2<WikiIndexData>(`/api/v1/wiki?${query}`, {
+      signal,
+      decode: decodeWikiIndexData,
+    }),
+    { ttlMs: 12_000, topics: ['wiki', 'wiki_updated'], reason },
+  )
+}
+
+function shownIndexEmbedPages(index: WikiIndexData | null, loadError: string | null): WikiEmbedPages {
+  if (index !== null) return { kind: 'ready', pages: index.pages }
+  if (loadError !== null) return { kind: 'failed', message: loadError }
+  return { kind: 'loading' }
+}
+
+function embedPagesOf(obs: Observed<WikiIndexData>): WikiEmbedPages {
+  switch (obs.kind) {
+    case 'loading':
+      return { kind: 'loading' }
+    case 'value':
+      return { kind: 'ready', pages: obs.data.pages }
+    case 'failed':
+      return { kind: 'failed', message: obs.error.message }
+    case 'absent':
+    case 'unreported':
+      return { kind: 'failed', message: obs.reason ?? NO_ALL_PAGES_MESSAGE }
+  }
+}
+
 interface CasConflictState {
   readonly serverPage: WikiPageData
   readonly localBody: string
@@ -242,16 +282,11 @@ export function WikiTab(props: WorkspaceViewProps) {
   const [casConflict, setCasConflict] = useState<CasConflictState | null>(null)
   const [editorViewMode, setEditorViewMode] = useState<WikiEditorViewMode>('split')
   const [previewBody, setPreviewBody] = useState('')
-  const [allWikiPages, setAllWikiPages] = useState<{
-    readonly epoch: number
-    readonly pages: readonly WikiPageSummary[]
-  } | null>(null)
   const submitSaveRef = useRef<() => Promise<void>>(async () => {})
   const savingRef = useRef(false)
   const saveAbortRef = useRef<AbortController | null>(null)
   const mountedRef = useRef(true)
   const indexSeqRef = useRef(0)
-  const allPagesSeqRef = useRef(0)
   const searchAbortRef = useRef<AbortController | null>(null)
   const preserveFeedbackSlugRef = useRef<string | null>(null)
 
@@ -305,21 +340,11 @@ export function WikiTab(props: WorkspaceViewProps) {
     const params = new URLSearchParams({ sort })
     if (tagFilter) params.set('tag', tagFilter)
     if (sourceFilter) params.set('source', sourceFilter)
-    const obs = await resourceCache.fetch<WikiIndexData>(
-      `kn:wiki:index:${params.toString()}`,
-      (signal) => apiGetV2<WikiIndexData>(`/api/v1/wiki?${params.toString()}`, {
-        signal,
-        decode: decodeWikiIndexData,
-      }),
-      { ttlMs: 12_000, topics: ['wiki', 'wiki_updated'], reason },
-    )
+    const obs = await readWikiIndex(params.toString(), reason)
     if (!mountedRef.current || indexSeqRef.current !== seq || !isEpochCurrent(startEpoch)) return
     setLoading(false)
     if (obs.kind === 'value') {
       setWikiIndex(obs.data)
-      if (!tagFilter && !sourceFilter) {
-        setAllWikiPages({ epoch: startEpoch, pages: obs.data.pages })
-      }
       markViewSynced()
       setSelectedSlug((prev) => {
         const pages = obs.data.pages
@@ -337,25 +362,17 @@ export function WikiTab(props: WorkspaceViewProps) {
     void loadIndex('mount')
   }, [loadIndex])
 
-  useEffect(() => {
-    const epoch = currentSessionEpoch()
-    if (!editing || (!tagFilter && !sourceFilter)) return
-    if (allWikiPages && allWikiPages.epoch === epoch) return
-    const seq = ++allPagesSeqRef.current
-    void resourceCache.fetch<WikiIndexData>(
-      'kn:wiki:index:sort=updated',
-      (signal) => apiGetV2<WikiIndexData>('/api/v1/wiki?sort=updated', {
-        signal,
-        decode: decodeWikiIndexData,
-      }),
-      { ttlMs: 12_000, topics: ['wiki', 'wiki_updated'], reason: 'mount' },
-    ).then((obs) => {
-      if (!mountedRef.current || allPagesSeqRef.current !== seq || !isEpochCurrent(epoch)) return
-      if (obs.kind === 'value') {
-        setAllWikiPages({ epoch, pages: obs.data.pages })
-      }
-    })
-  }, [editing, tagFilter, sourceFilter, allWikiPages])
+  // A filtered index lists only some pages, so the picker reads the index of
+  // every page. Without a filter the index on screen already lists every page.
+  const pickerReadsAllPages = tagFilter !== '' || sourceFilter !== ''
+
+  const loadPickerPages = useCallback((reason: 'mount' | 'manual') => {
+    if (pickerReadsAllPages) {
+      void readWikiIndex(ALL_PAGES_INDEX_QUERY, reason)
+    } else if (reason === 'manual') {
+      void loadIndex('manual')
+    }
+  }, [pickerReadsAllPages, loadIndex])
 
   const loadLint = useCallback((reason: 'mount' | 'manual') => {
     void resourceCache.fetch(
@@ -566,9 +583,6 @@ export function WikiTab(props: WorkspaceViewProps) {
         'success',
       )
       resourceCache.invalidateTopic('wiki')
-      if (tagFilter || sourceFilter) {
-        setAllWikiPages(null)
-      }
       await loadIndex('manual')
       if (!mountedRef.current || !isEpochCurrent(startEpoch) || saveCtrl.signal.aborted) return
       pageAbortRef.current?.abort()
@@ -604,10 +618,14 @@ export function WikiTab(props: WorkspaceViewProps) {
   }, [casConflict])
 
   const displayedPages = wikiIndex ? wikiIndex.pages : []
-  const currentEpoch = currentSessionEpoch()
-  const pickerPages = allWikiPages && allWikiPages.epoch === currentEpoch
-    ? allWikiPages.pages
-    : displayedPages
+  // The picker renders the cache entry, so a read that fails or ends after
+  // another read of the same index still reaches it.
+  const allPagesObs = editing && pickerReadsAllPages
+    ? resourceCache.observe<WikiIndexData>(wikiIndexKey(ALL_PAGES_INDEX_QUERY)).value
+    : null
+  const pickerPages = allPagesObs !== null
+    ? embedPagesOf(allPagesObs)
+    : shownIndexEmbedPages(wikiIndex, loadError)
 
   const masterPane = html`
     <div class="kn-pane-col">
@@ -1117,6 +1135,7 @@ export function WikiTab(props: WorkspaceViewProps) {
               </button>
               <${WikiEmbedPicker}
                 wikiPages=${pickerPages}
+                onLoadWikiPages=${loadPickerPages}
                 currentSlug=${creatingNew ? null : editSlug}
                 disabled=${saving}
                 onInsertEmbed=${mediaComposer.insertSnippet}

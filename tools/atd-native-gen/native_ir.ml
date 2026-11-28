@@ -135,7 +135,7 @@ let rec ty ~json_aliases (expr : A.type_expr) =
 
 let field ~json_aliases (field : A.field) =
   match field with
-  | Inherit (loc, _) -> fail loc "inherit must be expanded when the file is loaded"
+  | Inherit (loc, _) -> fail loc "inherit must be expanded before Native_ir reads a definition"
   | Field (loc, (name, kind, annot), expr) ->
     let* () = check_annot loc ~allowed:[ "json", "name" ] annot in
     let* json_name = json_name loc name annot in
@@ -155,7 +155,7 @@ let field ~json_aliases (field : A.field) =
 
 let variant (variant : A.variant) =
   match variant with
-  | Inherit (loc, _) -> fail loc "inherit must be expanded when the file is loaded"
+  | Inherit (loc, _) -> fail loc "inherit must be expanded before Native_ir reads a definition"
   | Variant (loc, (name, annot), payload) ->
     let* () = check_annot loc ~allowed:[ "json", "name" ] annot in
     let* json = json_name loc name annot in
@@ -228,6 +228,38 @@ let records defs =
       | Enum _ | Tagged _ -> None)
     defs
 
+(* A tagged sum is read from a whole JSON value ("type" first), so the
+   emitters write it as a top-level type only. A field that holds one is
+   refused rather than written as something that does not decode. *)
+let check_fields defs =
+  let tagged =
+    List.filter_map
+      (function
+        | Tagged { name; _ } -> Some name
+        | Record _ | Enum _ -> None)
+      defs
+  in
+  let rec holds = function
+    | Scalar _ -> None
+    | Ref name -> if List.mem name tagged then Some name else None
+    | List item -> holds item
+  in
+  all
+    (List.concat_map
+       (function
+         | Record { name; fields } ->
+           List.map
+             (fun (field : field) ->
+               match holds field.ty with
+               | None -> Ok ()
+               | Some sum ->
+                 Error
+                   (Printf.sprintf "%s.%s holds %s, a tagged sum; only a top-level value is written"
+                      name field.name sum))
+             fields
+         | Enum _ | Tagged _ -> [])
+       defs)
+
 let check_payloads defs =
   let records = records defs in
   all
@@ -258,6 +290,16 @@ let swift_keywords =
   ; "self"; "super"; "throws"; "true"; "try"
   ]
 
+(* Words kotlinc 2.4.21 refuses as a property name (one data class per
+   word, 2026-11-28): the hard keywords. Soft and modifier keywords such as
+   value, data and open compile and are not here. Kotlin case and type
+   names are UpperCamelCase and never meet these words. *)
+let kotlin_keywords =
+  [ "as"; "break"; "class"; "continue"; "do"; "else"; "false"; "for"; "fun"; "if"; "in"
+  ; "interface"; "is"; "null"; "object"; "package"; "return"; "super"; "this"; "throw"; "true"
+  ; "try"; "typealias"; "typeof"; "val"; "var"; "when"; "while"
+  ]
+
 (* Type names the generated Swift already uses, plus Self and Any, which
    swiftc refuses as type names. A definition with one of these names would
    shadow or break the generated code. *)
@@ -266,8 +308,22 @@ let swift_taken_types =
   ; "Decoder"; "CodingKey"; "CodingKeys"; "DecodingError"; "TagKey"; "Self"; "Any"
   ]
 
+(* Type names the generated Kotlin already uses. *)
+let kotlin_taken_types =
+  [ "String"; "Long"; "Double"; "Boolean"; "List"; "Json"; "JsonElement"; "JsonObject"
+  ; "JsonPrimitive"; "JsonDecoder"; "Serializable"; "SerialName"; "KSerializer"
+  ; "DeserializationStrategy"; "SerializationException"; "SerialDescriptor"; "PrimitiveKind"
+  ; "PrimitiveSerialDescriptor"; "Decoder"; "Encoder"; "WireJson"
+  ]
+
 let def_name = function
   | Record { name; _ } | Enum { name; _ } | Tagged { name; _ } -> name
+
+(* Top-level names the Kotlin emitter adds for a definition. *)
+let kotlin_helpers = function
+  | Enum { name; openness = Open; _ } -> [ Naming.upper_camel name ^ "Serializer" ]
+  | Tagged { name; _ } -> [ Naming.upper_camel name ^ "Deserializer" ]
+  | Enum { openness = Closed; _ } | Record _ -> []
 
 (* [atd_names] become [native] names; two ATD names must not become one. *)
 let distinct ~what pairs =
@@ -280,16 +336,37 @@ let distinct ~what pairs =
   in
   go [] pairs
 
-let not_keyword ~what (atd, native) =
-  if List.mem native swift_keywords
-  then Error (Printf.sprintf "%s %s becomes %s, a Swift keyword" what atd native)
-  else Ok ()
+(* Fields are lowerCamelCase in both languages; cases only in Swift. *)
+let not_keyword ~what ~kotlin (atd, native) =
+  let language =
+    if List.mem native swift_keywords
+    then Some "Swift"
+    else if kotlin && List.mem native kotlin_keywords
+    then Some "Kotlin"
+    else None
+  in
+  match language with
+  | Some language -> Error (Printf.sprintf "%s %s becomes %s, a %s keyword" what atd native language)
+  | None -> Ok ()
+
+let not_taken (atd, native) =
+  let language =
+    if List.mem native swift_taken_types
+    then Some "Swift"
+    else if List.mem native kotlin_taken_types
+    then Some "Kotlin"
+    else None
+  in
+  match language with
+  | Some language ->
+    Error (Printf.sprintf "type %s becomes %s, which the generated %s already names" atd native language)
+  | None -> Ok ()
 
 let case_names ~owner ~openness names =
   let what = "case of " ^ owner in
   let pairs = List.map (fun name -> name, Naming.lower_camel name) names in
   let* () = distinct ~what pairs in
-  let* _ = all (List.map (not_keyword ~what) pairs) in
+  let* _ = all (List.map (not_keyword ~what ~kotlin:false) pairs) in
   match openness, List.find_opt (fun (_, native) -> native = "unrecognized") pairs with
   | Open, Some (atd, _) ->
     Error (Printf.sprintf "%s %s becomes unrecognized, the case <native open> adds" what atd)
@@ -297,16 +374,13 @@ let case_names ~owner ~openness names =
 
 let check_names defs =
   let types = List.map (fun def -> def_name def, Naming.upper_camel (def_name def)) defs in
-  let* () = distinct ~what:"type" types in
-  let* _ =
-    all
-      (List.map
-         (fun (atd, native) ->
-           if List.mem native swift_taken_types
-           then Error (Printf.sprintf "type %s becomes %s, which the generated Swift already names" atd native)
-           else Ok ())
-         types)
+  let helpers =
+    List.concat_map
+      (fun def -> List.map (fun helper -> def_name def ^ " (Kotlin helper)", helper) (kotlin_helpers def))
+      defs
   in
+  let* () = distinct ~what:"type" (types @ helpers) in
+  let* _ = all (List.map not_taken types) in
   let* _ =
     all
       (List.map
@@ -315,7 +389,7 @@ let check_names defs =
              let what = "field of " ^ name in
              let pairs = List.map (fun (field : field) -> field.name, Naming.lower_camel field.name) fields in
              let* () = distinct ~what pairs in
-             let* _ = all (List.map (not_keyword ~what) pairs) in
+             let* _ = all (List.map (not_keyword ~what ~kotlin:true) pairs) in
              Ok ()
            | Enum { name; cases; openness } ->
              case_names ~owner:name ~openness (List.map (fun case -> case.case_name) cases)
@@ -325,18 +399,77 @@ let check_names defs =
   in
   Ok ()
 
+(* Names that appear after [inherit] in some record or sum. *)
+let inherited (type_defs : A.type_def list) =
+  let target (expr : A.type_expr) =
+    match expr with
+    | Name (_, (_, TN path, _), _) ->
+      (match path with
+       | [ name ] -> [ name ]
+       | [] | _ :: _ :: _ -> [])
+    | Sum _ | Record _ | Tuple _ | List _ | Option _ | Nullable _ | Shared _ | Wrap _ | Tvar _ -> []
+  in
+  let of_field (field : A.field) =
+    match field with
+    | Inherit (_, expr) -> target expr
+    | Field _ -> []
+  in
+  let of_variant (variant : A.variant) =
+    match variant with
+    | Inherit (_, expr) -> target expr
+    | Variant _ -> []
+  in
+  List.concat_map
+    (fun (def : A.type_def) ->
+      match def.value with
+      | Record (_, fields, _) -> List.concat_map of_field fields
+      | Sum (_, variants, _) -> List.concat_map of_variant variants
+      | Name _ | Tuple _ | List _ | Option _ | Nullable _ | Shared _ | Wrap _ | Tvar _ -> [])
+    type_defs
+
+(* Names a written definition refers to as a type. *)
+let referenced defs =
+  let rec refs = function
+    | Scalar _ -> []
+    | Ref name -> [ name ]
+    | List item -> refs item
+  in
+  List.concat_map
+    (function
+      | Record { fields; _ } -> List.concat_map (fun (field : field) -> refs field.ty) fields
+      | Enum _ -> []
+      | Tagged { cases; _ } -> List.map (fun case -> case.payload) cases)
+    defs
+
+(* [atd] is the file as loaded, before inherit is expanded. A definition
+   that other definitions only inherit, and that no field or kind refers
+   to, is not written: the wire never carries it alone (frame_base). *)
 let of_module (atd : A.module_) =
   let* () =
     match atd.imports with
     | [] -> Ok ()
     | import :: _ -> fail import.loc "imports are not written"
   in
-  let json_defs, other_defs = List.partition is_json_alias atd.type_defs in
+  let inherited = inherited atd.type_defs in
+  let type_defs =
+    Atd.Inherit.expand_module_body ~inherit_fields:true ~inherit_variants:true atd.imports
+      atd.type_defs
+  in
+  let json_defs, other_defs = List.partition is_json_alias type_defs in
   let* json_aliases =
     all (List.map (fun (d : A.type_def) -> local_name d.loc d.name) json_defs)
   in
   let* defs = all (List.map (def ~json_aliases) other_defs) in
   let* _ = check_payloads defs in
+  let* _ = check_fields defs in
+  let referenced = referenced defs in
+  let defs =
+    List.filter
+      (fun def ->
+        let name = def_name def in
+        (not (List.mem name inherited)) || List.mem name referenced)
+      defs
+  in
   let* () = check_names defs in
   Ok defs
 

@@ -122,7 +122,7 @@ let print_addon (installed : Addon_setup.installed) =
   (match installed.declaration with
    | Addon_setup.Created { path } ->
      Printf.printf "Declared the %s browser Add-on in %s\n" source path
-   | Addon_setup.Present { path; manifest_path = named; this_build; enabled } ->
+   | Addon_setup.Present { path; manifest_path = named; this_build; enabled; needs_operator_authority } ->
      Printf.printf "The %s browser Add-on is declared in %s\n" source path;
      if not this_build
      then
@@ -131,6 +131,8 @@ let print_addon (installed : Addon_setup.installed) =
           use this build's package, write %s there.\n"
          named
          (Toml_line_editor.scalar_line ~key:"manifest_path" ~value:installed.manifest_path);
+     if needs_operator_authority then
+       Printf.printf "The host process cannot attach until the operator adds operator_authority = true to %s. This file was left unchanged.\n" path;
      if not enabled then print_endline "Its enabled = false keeps it detached.");
   match installed.missing_programs with
   | [] -> ()

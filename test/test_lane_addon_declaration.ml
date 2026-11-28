@@ -645,7 +645,292 @@ max_reply_bytes=4096
         (Sys.file_exists (Filename.concat directory "host-worker.toml"));
       check (Alcotest.list Alcotest.string) "no worker started" [] !started))
 
+(* RFC lane-declaration-operator-authority. A file a declaration points at
+   changes after the save; reconcile reads it again on every pass. *)
+let host_manifest = {|id="host-worker-test"
+revision="1"
+title="Host process fixture"
+runtime="host_process"
+command=["/bin/echo","ok"]
+contributions=["observe"]
+[resources]
+max_reply_bytes=4096
+|}
+let host_process_denied = "host_process execution requires operator configuration"
+let issue_for json source_path = list "issues" json |> List.filter_map (fun issue ->
+  if text "source_path" issue = source_path then Some (text "message" issue) else None)
+let reads_as config = one_live config |> member "source_access" |> text "kind"
+(* The first pass stops the worker; the next one decides the attach. *)
+let reconcile_after_stop clock config directory =
+  ignore (reconcile config directory);
+  await clock (fun () -> live config = []);
+  reconcile config directory
+
+let test_keeper_declaration_cannot_reach_host_process_after_save () =
+  with_fixture (fun clock config directory root started ->
+    ignore (unwrap (Runtime.save_declaration ~caller:"keeper-a" ~config
+      (request ~mode:"create" ~file_name:"observer.toml" (declaration ()))));
+    ignore (reconcile config directory);
+    check string "a Keeper's Shared declaration reads with the least authority" "unauthenticated"
+      (reads_as config);
+    write (Filename.concat root ".masc/package.toml") host_manifest;
+    let after = reconcile_after_stop clock config directory in
+    check bool "the host_process manifest is an issue of the Keeper's declaration" true
+      (List.exists (String.starts_with ~prefix:host_process_denied)
+        (issue_for after (Filename.concat directory "observer.toml")));
+    check int "no host process started" 1 (List.length !started);
+    check int "nothing runs" 0 (List.length (live config)))
+
+let test_operator_edit_keeps_a_keeper_declaration_unprivileged () =
+  with_fixture (fun clock config directory root started ->
+    let snapshot_bytes =
+      {|{"source_id":"s","incarnation":"1","cursor":"1","complete":true,"detail":null,"observations":[]}|} in
+    let snapshot = Filename.concat root "snapshot.json" in
+    write snapshot snapshot_bytes;
+    let outside = Filename.temp_file "lane-outside-snap-" ".json" in
+    write outside snapshot_bytes;
+    Fun.protect ~finally:(fun () -> if Sys.file_exists outside then Sys.remove outside) (fun () ->
+      let bytes value = Printf.sprintf {|id="reader"
+run_id="editor-world"
+manifest_path="../../package.toml"
+[binding]
+sources=[{kind="snapshot_file",source_id="s",path=%S}]
+value=%S
+|} snapshot value in
+      ignore (unwrap (Runtime.save_declaration ~caller:"keeper-a" ~config
+        (request ~mode:"create" ~file_name:"reader.toml" (bytes "first"))));
+      ignore (reconcile config directory);
+      check string "a Keeper's snapshot declaration reads with the least authority" "unauthenticated"
+        (reads_as config);
+      Unix.unlink snapshot;
+      Unix.symlink outside snapshot;
+      (* The operator edits the Keeper's file without adding the operator line. *)
+      let path = Filename.concat directory "reader.toml" in
+      write path (bytes "second");
+      let after = reconcile_after_stop clock config directory in
+      check bool "the edited declaration still cannot read outside the workspace" true
+        (List.exists (String.starts_with ~prefix:"snapshot_file path must name a file inside the workspace")
+          (issue_for after path));
+      check int "no second worker started" 1 (List.length !started)))
+
+let test_operator_line_runs_host_process_and_its_removal_stops_it () =
+  with_fixture (fun clock config directory root started ->
+    write (Filename.concat root ".masc/package.toml") host_manifest;
+    let path = Filename.concat directory "host.toml" in
+    write path ("operator_authority = \"yes\"\n" ^ declaration ~id:"host" ());
+    check bool "operator_authority takes only a boolean" true
+      (List.mem "operator_authority requires a boolean" (issue_for (reconcile config directory) path));
+    write path ("operator_authority = true\n" ^ declaration ~id:"host" ());
+    ignore (reconcile config directory);
+    check string "a marked declaration reads as the operator" "operator_configuration" (reads_as config);
+    write path (declaration ~id:"host" ());
+    check bool "without the line the running host process is an issue" true
+      (List.exists (String.starts_with ~prefix:host_process_denied) (issue_for (reconcile config directory) path));
+    await clock (fun () -> live config = []);
+    check int "the host process started once" 1 (List.length !started))
+
+let test_only_the_operator_saves_operator_authority () =
+  with_fixture (fun _clock config directory _root _started ->
+    let marked id = "operator_authority = true\n" ^ declaration ~id () in
+    let refused = function
+      | Error {Editor.code = Editor.Invalid_request; message; _} ->
+          String.equal message "only the operator can save operator_authority = true"
+      | Ok _ | Error _ -> false in
+    check bool "a Keeper cannot save the operator's line" true
+      (refused (Runtime.save_declaration ~caller:"keeper-a" ~config
+        (request ~mode:"create" ~file_name:"keeper.toml" (marked "keeper-marked"))));
+    check bool "an unauthenticated caller cannot save it" true
+      (refused (Runtime.save_declaration ~access:Lane_addon_sources.Unauthenticated ~config
+        (request ~mode:"create" ~file_name:"anonymous.toml" (marked "anonymous-marked"))));
+    check bool "refused declarations are not written" false
+      (List.exists (fun name -> Sys.file_exists (Filename.concat directory name)) ["keeper.toml"; "anonymous.toml"]);
+    let operator_bytes = marked "operator-marked" in
+    ignore (save config (request ~mode:"create" ~file_name:"operator.toml" operator_bytes));
+    let current = read config directory "operator.toml" in
+    check bool "a Keeper edit that keeps the operator's line is refused" true
+      (Result.is_error (Runtime.save_declaration ~caller:"keeper-a" ~config
+        (request ~revision:(text "source_revision" current) ~mode:"save" ~file_name:"operator.toml"
+          ("# a Keeper's edit\n" ^ operator_bytes))));
+    let changes_operator_file = function
+      | Error {Editor.code = Editor.Invalid_request; message; _} ->
+          String.equal message
+            "only the operator can change or remove a declaration that carries operator_authority = true"
+      | Ok _ | Error _ -> false in
+    check bool "a Keeper edit that drops the operator's line is refused" true
+      (changes_operator_file (Runtime.save_declaration ~caller:"keeper-a" ~config
+        (request ~revision:(text "source_revision" current) ~mode:"save" ~file_name:"operator.toml"
+          (declaration ~id:"operator-marked" ~value:"a Keeper's" ()))));
+    check bool "so is an unauthenticated caller's" true
+      (changes_operator_file (Runtime.save_declaration ~access:Lane_addon_sources.Unauthenticated ~config
+        (request ~revision:(text "source_revision" current) ~mode:"save" ~file_name:"operator.toml"
+          (declaration ~id:"operator-marked" ~value:"anonymous" ()))));
+    check string "the operator's declaration is unchanged" operator_bytes
+      (text "source_text" (read config directory "operator.toml")))
+
+let test_unmarked_operator_only_binding_is_refused () =
+  with_fixture (fun _clock config directory _root started ->
+    let registry = Fusion_run_registry.global () in
+    List.iter (fun (run_id, keeper) ->
+      Fusion_run_registry.register_running registry ~run_id ~keeper ~preset:"default"
+        ~roster:Fusion_types.preset_roster ~topology:Fusion_types.Simple ~started_at:1.)
+      ["authority-run-a", "keeper-a"; "authority-run-b", "keeper-b"];
+    let bytes = {|id="two-owners"
+run_id="editor-world"
+manifest_path="../../package.toml"
+[binding]
+sources=[{kind="fusion_run",source_id="a",run_id="authority-run-a"},{kind="fusion_run",source_id="b",run_id="authority-run-b"}]
+|} in
+    let path = Filename.concat directory "two-owners.toml" in
+    write path bytes;
+    check bool "an unmarked binding of two Keepers' runs is refused" true
+      (List.mem "a binding that reads an operator-only source requires operator_authority = true"
+        (issue_for (reconcile config directory) path));
+    check int "nothing started" 0 (List.length !started);
+    write path ("operator_authority = true\n" ^ bytes);
+    ignore (reconcile config directory);
+    check string "the marked binding reads as the operator" "operator_configuration" (reads_as config))
+
+let test_inherited_visibility_does_not_grant_keeper_authority () =
+  with_fixture (fun _clock config directory _root _started ->
+    Fusion_run_registry.register_running (Fusion_run_registry.global ())
+      ~run_id:"direct-authority-run" ~keeper:"keeper-a" ~preset:"default"
+      ~roster:Fusion_types.preset_roster ~topology:Fusion_types.Simple ~started_at:1.;
+    write (Filename.concat directory "a-direct.toml") {|id="a-direct"
+run_id="editor-world"
+manifest_path="../../package.toml"
+[binding]
+sources=[{kind="fusion_run",source_id="a",run_id="direct-authority-run"}]
+|};
+    let inherited = Filename.concat directory "b-inherited.toml" in
+    write inherited {|id="b-inherited"
+run_id="editor-world"
+manifest_path="../../package.toml"
+[binding]
+sources=[{kind="lane_output",source_id="upstream",installation_id="a-direct",selection="latest_completed"}]
+|};
+    let result = reconcile config directory in
+    check bool "inheritance does not supply Keeper authority" true
+      (List.mem "a binding that only inherits Keeper visibility requires operator_authority = true"
+        (issue_for result inherited));
+    check bool "the direct Fusion source still reads as its owner" true
+      (member "source_access" (one_live config) =
+       Lane_addon_sources.access_to_json (Lane_addon_sources.Keeper "keeper-a"));
+    (* The save path refuses what reconcile would refuse, before writing. *)
+    let keeper_inherited = {|id="c-inherited"
+run_id="editor-world"
+manifest_path="../../package.toml"
+[binding]
+sources=[{kind="lane_output",source_id="upstream",installation_id="a-direct",selection="latest_completed"}]
+|} in
+    (match Runtime.save_declaration ~caller:"keeper-a" ~config
+        (request ~mode:"create" ~file_name:"c-inherited.toml" keeper_inherited) with
+     | Error {Editor.code = Editor.Invalid_request; message; _} ->
+         check string "the upstream's Keeper cannot save an inherited-only binding"
+           "a binding that only inherits Keeper visibility requires operator_authority = true" message
+     | Ok _ | Error _ -> fail "an inherited-only Keeper binding was saved");
+    check bool "the refused binding is not written" false
+      (Sys.file_exists (Filename.concat directory "c-inherited.toml")))
+
+(* RFC lane-declaration-operator-authority 3.3: the line is outside the
+   revision, so a pass that cannot apply the declaration still stops what
+   only the line allowed. An unreadable second record of the declaration keeps
+   this pass from applying it. *)
+let test_removed_line_stops_a_host_process_the_pass_cannot_apply () =
+  with_fixture (fun clock config directory root started ->
+    write (Filename.concat root ".masc/package.toml") host_manifest;
+    let path = Filename.concat directory "host.toml" in
+    write path ("operator_authority = true\n" ^ declaration ~id:"host" ());
+    ignore (reconcile config directory);
+    check string "the marked host process runs as the operator" "operator_configuration" (reads_as config);
+    let store = Lane_addon_store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
+    let unreadable_id = "unreadable-host-record" in
+    let unreadable = match Lane_addon_store.bindings store with
+      | Ok [`Assoc fields] ->
+          `Assoc (("instance_id", `String unreadable_id) :: ("visibility", `String "unreadable")
+            :: List.filter (fun (key, _) -> key <> "instance_id" && key <> "visibility") fields)
+      | Ok _ | Error _ -> fail "expected the host worker's one record" in
+    (match Lane_addon_store.save_binding store ~instance_id:unreadable_id unreadable with
+     | Ok () -> () | Error message -> fail message);
+    write path (declaration ~id:"host" ());
+    let messages = issue_for (reconcile config directory) path in
+    check bool "the pass cannot apply the declaration" true
+      (List.exists (String.starts_with ~prefix:"Not applied while") messages);
+    check bool "the removed line still stops the host process" true
+      (List.mem (host_process_denied ^ "; only the operator allows it, with operator_authority = true") messages);
+    await clock (fun () -> live config = []);
+    check int "the host process started once" 1 (List.length !started);
+    (match Lane_addon_store.remove_binding store ~instance_id:unreadable_id with
+     | Ok () -> () | Error message -> fail message))
+
+(* The operator's line is named only where it would lift the refusal. A marked
+   Keeper_only file still reads as its Keeper, so its record grant stays
+   refused. *)
+let test_operator_line_is_named_only_where_it_lifts_the_refusal () =
+  with_fixture (fun _clock config directory _root started ->
+    Fusion_run_registry.register_running (Fusion_run_registry.global ())
+      ~run_id:"hint-run" ~keeper:"keeper-a" ~preset:"default"
+      ~roster:Fusion_types.preset_roster ~topology:Fusion_types.Simple ~started_at:1.;
+    let records = {|[[binding.records]]
+source_id = "notes"
+kind = "board"
+visibilities = ["public"]
+|} in
+    let shared = Filename.concat directory "shared-records.toml" in
+    write shared (declaration ~id:"shared-records" () ^ records);
+    let private_ = Filename.concat directory "private-records.toml" in
+    write private_ ({|id="private-records"
+run_id="editor-world"
+manifest_path="../../package.toml"
+[binding]
+sources=[{kind="fusion_run",source_id="a",run_id="hint-run"}]
+|} ^ records);
+    let result = reconcile config directory in
+    let refused = "only an operator-owned declaration may hold record grants" in
+    check (Alcotest.list Alcotest.string) "a Shared grant names the line that lifts it"
+      [refused ^ "; only the operator allows it, with operator_authority = true"] (issue_for result shared);
+    check (Alcotest.list Alcotest.string) "a Keeper_only grant does not name a line that would not lift it"
+      [refused] (issue_for result private_);
+    check int "nothing started" 0 (List.length !started))
+
+(* RFC lane-declaration-operator-authority 3.5: a marked file is the
+   operator's, so only the operator's Detach removes it. *)
+let test_only_the_operator_removes_a_marked_declaration () =
+  with_fixture (fun _clock config directory _root _started ->
+    let path = Filename.concat directory "marked.toml" in
+    write path ("operator_authority = true\n" ^ declaration ~id:"marked" ());
+    ignore (reconcile config directory);
+    let instance_id = text "instance_id" (one_live config) in
+    let detach ?caller ?access () = Runtime.dispatch ?caller ?access ~config ~operation:Runtime.Detach
+      (`Assoc ["instance_id", `String instance_id]) in
+    let refused = function
+      | Error message -> String.equal message
+          "only the operator can change or remove a declaration that carries operator_authority = true"
+      | Ok _ -> false in
+    check bool "a Keeper cannot detach the operator's declaration" true (refused (detach ~caller:"keeper-a" ()));
+    check bool "nor can an unauthenticated caller" true
+      (refused (detach ~access:Lane_addon_sources.Unauthenticated ()));
+    check bool "the declaration stays" true (Sys.file_exists path);
+    check int "its worker keeps running" 1 (List.length (live config));
+    (match detach () with Ok _ -> () | Error message -> fail message);
+    check bool "the operator's Detach removes it" false (Sys.file_exists path))
+
 let () = run "Lane declaration editing" ["shared TOML owner",[
+  test_case "Keeper declaration cannot reach host_process after its save" `Quick
+      test_keeper_declaration_cannot_reach_host_process_after_save;
+  test_case "operator edit keeps a Keeper declaration unprivileged" `Quick
+      test_operator_edit_keeps_a_keeper_declaration_unprivileged;
+  test_case "operator line runs host_process and its removal stops it" `Quick
+      test_operator_line_runs_host_process_and_its_removal_stops_it;
+  test_case "only the operator saves operator_authority" `Quick test_only_the_operator_saves_operator_authority;
+  test_case "unmarked operator-only binding is refused" `Quick test_unmarked_operator_only_binding_is_refused;
+  test_case "inherited visibility does not grant Keeper authority" `Quick
+    test_inherited_visibility_does_not_grant_keeper_authority;
+  test_case "removed line stops a host process the pass cannot apply" `Quick
+    test_removed_line_stops_a_host_process_the_pass_cannot_apply;
+  test_case "operator line is named only where it lifts the refusal" `Quick
+    test_operator_line_is_named_only_where_it_lifts_the_refusal;
+  test_case "only the operator removes a marked declaration" `Quick
+    test_only_the_operator_removes_a_marked_declaration;
   test_case "non-operator cannot run host_process or read outside snapshot_file" `Quick
       test_non_operator_cannot_run_host_process_or_read_outside_snapshot;
   test_case "Keeper manifest outside the workspace is refused unopened" `Quick

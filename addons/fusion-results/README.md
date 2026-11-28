@@ -52,7 +52,10 @@ output means last captured, not a continuously synchronized copy of the Board.
    to each observation. A raw API response alone is not a snapshot_file envelope.
 4. Observe the installed worker. Consume named `result` or `status` outputs
    within the same run. The [statistics declaration](../../docs/examples/lane-addons/fusion-result-statistics.toml)
-   demonstrates the existing generic composition path.
+   demonstrates the existing generic composition path. When the statistics
+   consumer inherits Keeper-only visibility from a native Fusion producer, an
+   operator must save it with the example's `operator_authority = true` line.
+   The statistics remain scoped to that Keeper.
 
 ## Evidence and failure semantics
 

@@ -239,8 +239,9 @@ max_reply_bytes = 4096
     (match runtime with Types.Docker -> "pids = 16" | Apple_container -> ""));
   path
 
-let declaration ?enabled ?(setting = "initial") ~id ~manifest () =
+let declaration ?enabled ?(operator_authority = false) ?(setting = "initial") ~id ~manifest () =
   (Option.fold ~none:"" ~some:(fun value -> Printf.sprintf "enabled = %b\n" value) enabled) ^
+  (if operator_authority then "operator_authority = true\n" else "") ^
   Printf.sprintf {|id = %S
 run_id = "declared-world"
 manifest_path = %S
@@ -951,7 +952,7 @@ contributions = ["observe"]
 [resources]
 max_reply_bytes = 4096
 |};
-    write path (declaration ~id:"observer" ~manifest:native_manifest ());
+    write path (declaration ~operator_authority:true ~id:"observer" ~manifest:native_manifest ());
     let _, backend = make_backend () in
     let recoveries = ref 0 in
     let native : Runtime.For_testing.backend = {backend with

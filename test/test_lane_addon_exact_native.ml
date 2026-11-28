@@ -81,6 +81,7 @@ schema="plan.json"
         Fs_compat.mkdir_p directory;
         R.start_configuration_service ~config ~sw ~clock;
         let configure selected = write declaration (Printf.sprintf {|id="native"
+operator_authority=true
 run_id="native-world"
 manifest_path=%S
 exact_outputs=%s

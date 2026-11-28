@@ -2,6 +2,7 @@
 # macOS default: ~/Library/Application Support/masc/vst/snapshot.json.
 # Paths in declarations are literal; expand your home directory before saving.
 id = "vst-phrase"
+operator_authority = true
 run_id = "native-midi-phrases"
 manifest_path = "../../../addons/vst-phrase/lane.toml"
 

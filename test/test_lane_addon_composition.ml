@@ -126,15 +126,15 @@ memory_bytes=67108864
 pids=16
 max_reply_bytes=%d
 |} max_reply_bytes ^ outputs); path
-let declare ?(run="world") ?(value="initial") directory manifest id sources =
+let declare ?(run="world") ?(value="initial") ?(operator_authority=false) directory manifest id sources =
   let path = Filename.concat directory (id ^ ".toml") in
   write path (Printf.sprintf {|id=%S
-run_id=%S
+%srun_id=%S
 manifest_path=%S
 [binding]
 value=%S
 sources=%s
-|} id run manifest value sources); path
+|} id (if operator_authority then "operator_authority=true\n" else "") run manifest value sources); path
 let edge ?output_id id = Printf.sprintf {|[{source_id="upstream",kind="lane_output",installation_id=%S,selection="latest_completed"%s}]|}
   id (Option.fold ~none:"" ~some:(Printf.sprintf ",output_id=%S") output_id)
 let reconcile config directory = let _status = unwrap (Runtime.reconcile_configuration ~config ~directory) in ()
@@ -720,17 +720,21 @@ let test_native_fusion_report_is_readable_after_detach () =
         let addons = match Sys.getenv_opt "DUNE_SOURCEROOT" with
           | Some source_root -> Filename.concat source_root "addons"
           | None -> Filename.concat (Filename.dirname Sys.executable_name) "../addons" in
-        let declaration id sources =
+        let declaration ?(operator_authority=false) id sources =
           let path = Filename.concat directory (id ^ ".toml") in
-          write path (Printf.sprintf "id=%S\nrun_id=\"fusion-chain\"\nmanifest_path=%S\n[binding]\nsources=%s\n"
-            id (Filename.concat addons (id ^ "/lane.toml")) sources);
+          write path (Printf.sprintf "id=%S\n%srun_id=\"fusion-chain\"\nmanifest_path=%S\n[binding]\nsources=%s\n"
+            id (if operator_authority then "operator_authority=true\n" else "")
+            (Filename.concat addons (id ^ "/lane.toml")) sources);
           path in
         let producer_path = declaration "fusion-results" (Printf.sprintf
           {|[{source_id="fusion",kind="fusion_run",run_id=%S}]|} run_id) in
-        let report_path = declaration "fusion-report" (edge "fusion-results") in
+        (* The report and its reader see the producer's Keeper only through an
+           upstream output, so only the operator's line attaches them (RFC
+           lane-declaration-operator-authority 3.2). *)
+        let report_path = declaration ~operator_authority:true "fusion-report" (edge "fusion-results") in
         let reader_manifest = manifest ~name:"report-reader" root in
-        let reader_path = declare ~run:"fusion-chain" directory reader_manifest "report-reader"
-          (edge ~output_id:"report" "fusion-report") in
+        let reader_path = declare ~operator_authority:true ~run:"fusion-chain" directory reader_manifest
+          "report-reader" (edge ~output_id:"report" "fusion-report") in
         reconcile config directory;
         let producer = active config "fusion-results" |> text "instance_id" in
         let consumer = active config "fusion-report" |> text "instance_id" in
@@ -955,8 +959,11 @@ let test_private_visibility_crosses_declared_output_graph () = with_fixture (fun
   let run_id = register_private_run root owner in
   let package = manifest root in
   let source_path = declare directory package "z-private" (fusion_source run_id) in
-  ignore (declare directory package "a-consumer" (edge "z-private"));
-  ignore (declare directory package "b-consumer" (edge "a-consumer"));
+  (* The consumers inherit the owner's visibility through the graph, so only
+     the operator's line attaches them (RFC lane-declaration-operator-authority
+     3.2). They still read as the owner. *)
+  ignore (declare ~operator_authority:true directory package "a-consumer" (edge "z-private"));
+  ignore (declare ~operator_authority:true directory package "b-consumer" (edge "a-consumer"));
   reconcile config directory;
   let ids = List.map (fun name -> active config name |> text "instance_id")
     ["z-private";"a-consumer";"b-consumer"] in
@@ -1089,7 +1096,7 @@ let test_operator_attached_private_fusion_rechecks_owner () = with_fixture (fun 
     ~config ~operation:Runtime.Detach (`Assoc ["instance_id",`String id]) |> unwrap);
   await clock (fun () -> text "kind" (member "phase" (instance config id)) = "detached"))
 
-let test_recreated_private_worker_keeps_admitted_owner () =
+let test_restart_refuses_a_run_whose_owner_changed () =
   with_fixture (fun clock config root directory received _stopped ->
     let run_id = register_private_run root "admitted-owner" in
     let package = manifest root in
@@ -1105,17 +1112,19 @@ let test_recreated_private_worker_keeps_admitted_owner () =
       ~keeper:"replacement-owner" ~preset:"default" ~roster:Fusion_types.preset_roster
       ~topology:Fusion_types.Simple ~started_at:99.;
     Runtime.For_testing.reset ();
-    reconcile config directory;
-    let recreated = active config "restart-private" |> text "instance_id" in
-    await clock (fun () -> Option.is_some (source received recreated));
-    check bool "restart does not grant replacement registry ownership" true
-      (member "visibility" (instance config recreated) =
-        `Assoc ["kind",`String "keeper";"keeper",`String "admitted-owner"]);
-    let captured = require_some "recreated worker did not capture source status" (source received recreated) in
-    check int "replacement owner's transcript never reaches unchanged declaration" 0
-      (List.length (list "observations" captured));
-    check bool "owner mismatch remains explicitly unavailable" false
-      (member "complete" captured |> Yojson.Safe.Util.to_bool))
+    (* The kept visibility names the admitted owner and the registry now names
+       another. The unchanged bytes name neither as their saver, and a marked
+       file would still read as the admitted owner, so nothing attaches (RFC
+       lane-declaration-operator-authority 3.2). *)
+    let status = Runtime.reconcile_configuration ~config ~directory |> unwrap in
+    let messages = list "issues" status |> List.filter_map (fun issue ->
+      if text "source_path" issue = path then Some (text "message" issue) else None) in
+    check Alcotest.(list string) "restart names the owner mismatch, not the operator's line"
+      ["none of the binding's Fusion runs belongs to the Keeper its visibility names"] messages;
+    check bool "restart attaches no worker for either owner" false
+      (inspect config |> list "instances" |> List.exists (fun json ->
+        text "kind" (member "phase" json) <> "detached"
+        && text "id" (member "configuration" json) = "restart-private")))
 
 let test_saved_document_keeps_repair_authority_after_source_eviction () =
   with_fixture (fun clock config root directory _received _ ->
@@ -1275,7 +1284,8 @@ let test_document_reader_follows_its_named_browser () =
     let before = page_input () in
     check bool "without its browser the page is unavailable" true
       (member "complete" before = `Bool false && list "observations" before = []);
-    let browser_declaration = declare ~run:"browsers" directory (browser_manifest root) "browser" "[]" in
+    let browser_declaration =
+      declare ~operator_authority:true ~run:"browsers" directory (browser_manifest root) "browser" "[]" in
     reconcile config directory;
     let browser = active config "browser" |> text "instance_id" in
     await clock (fun () -> sequence reader = 2);
@@ -1299,7 +1309,7 @@ let () = run "TOML cross-Lane composition" ["world inputs",[
     test_native_fusion_report_is_readable_after_detach;
   test_case "namespaced output and oversized worker replies honor declared capacity" `Quick
     test_namespaced_output_fits_declared_capacity;
-  test_case "recreated private worker keeps its admitted owner" `Quick test_recreated_private_worker_keeps_admitted_owner;
+  test_case "restart refuses a Fusion run whose owner changed" `Quick test_restart_refuses_a_run_whose_owner_changed;
   test_case "admitted declarations survive source eviction without authorizing replacement bytes" `Quick
     test_saved_document_keeps_repair_authority_after_source_eviction;
   test_case "pending document owner cannot adopt replacement bytes" `Quick

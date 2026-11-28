@@ -1036,7 +1036,7 @@ let test_a_listing_with_an_unknown_kind_is_refused_whole () =
     | `Assoc _ as issue -> check string "the instance shows it" "listing_refused" (text "kind" issue)
     | _ -> fail "an unknown request kind must refuse the listing")
 
-let granted = declaration ^ {|[[binding.records]]
+let granted = "operator_authority=true\n" ^ declaration ^ {|[[binding.records]]
 source_id="board"
 kind="board"
 visibilities=["public"]
@@ -1061,7 +1061,7 @@ let test_a_manual_attach_with_grants_is_refused () =
     | Error _ -> ()
     | Ok _ -> fail "a manual Attach must not hold record grants")
 
-let board_granted = declaration ^ {|[[binding.records]]
+let board_granted = "operator_authority=true\n" ^ declaration ^ {|[[binding.records]]
 source_id="board"
 kind="board"
 visibilities=["public"]
@@ -1169,7 +1169,7 @@ let test_an_ungranted_source_or_a_foreign_cursor_is_not_allowed () =
     check string "an ungranted source" "not_allowed" (text "status" (result_of "n1" worker));
     check string "a cursor this host did not give" "not_allowed" (text "status" (result_of "n2" worker)))
 
-let repository_granted = declaration ^ {|[[binding.records]]
+let repository_granted = "operator_authority=true\n" ^ declaration ^ {|[[binding.records]]
 source_id="masc-repo"
 kind="repository"
 repository_id="masc"
@@ -1398,7 +1398,7 @@ let test_an_unregistered_repository_waits () =
     | `List [ waiting ] -> check string "it waits" "source_unavailable" (text "reason" (member "reason" waiting))
     | _ -> fail "a read of an unregistered repository must wait")
 
-let wiki_granted = declaration ^ {|[[binding.records]]
+let wiki_granted = "operator_authority=true\n" ^ declaration ^ {|[[binding.records]]
 source_id="wiki"
 kind="wiki"
 |}
@@ -1545,7 +1545,7 @@ let test_a_wiki_refuses_a_cursor_it_did_not_give_and_read_file () =
     check string "another spelling of a cursor" "not_allowed" (text "status" (result_of "y3" worker));
     check string "read_file on a wiki" "not_allowed" (text "status" (result_of "y4" worker)))
 
-let github_granted = declaration ^ {|[[binding.records]]
+let github_granted = "operator_authority=true\n" ^ declaration ^ {|[[binding.records]]
 source_id="masc-prs"
 kind="github_pulls"
 repository_id="masc"
